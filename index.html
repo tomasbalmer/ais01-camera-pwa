@@ -6,9 +6,18 @@
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="theme-color" content="#0f172a">
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+    <meta http-equiv="Pragma" content="no-cache">
+    <meta http-equiv="Expires" content="0">
     <title>AIS01 Camera</title>
+    <link rel="icon" type="image/svg+xml" href="icon.svg">
+    <link rel="apple-touch-icon" href="icon.svg">
     <link rel="manifest" href="manifest.json">
-    <link rel="stylesheet" href="style.css">
+    <script>
+    // Cache-bust: append timestamp to CSS/JS so browser always fetches fresh
+    var v = Date.now();
+    document.write('<link rel="stylesheet" href="style.css?v=' + v + '">');
+    </script>
 </head>
 <body>
     <!-- Top status bar -->
@@ -149,6 +158,6 @@
         </div>
     </aside>
 
-    <script src="app.js"></script>
+    <script>document.write('<script src="app.js?v=' + v + '"><\/script>');</script>
 </body>
 </html>

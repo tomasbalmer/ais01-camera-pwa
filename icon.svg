@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <rect width="512" height="512" rx="96" fill="#334155"/>
+  <!-- Octagon outline -->
+  <polygon points="176,80 336,80 432,176 432,336 336,432 176,432 80,336 80,176"
+    fill="none" stroke="#fff" stroke-width="22" stroke-linejoin="round"/>
+  <!-- Asterisk: 6 arms from center -->
+  <g stroke="#fff" stroke-width="26" stroke-linecap="round">
+    <!-- Vertical -->
+    <line x1="256" y1="160" x2="256" y2="352"/>
+    <!-- Top-right to bottom-left -->
+    <line x1="339" y1="208" x2="173" y2="304"/>
+    <!-- Top-left to bottom-right -->
+    <line x1="173" y1="208" x2="339" y2="304"/>
+  </g>
+  <!-- Center dot -->
+  <circle cx="256" cy="256" r="16" fill="#fff"/>
+  <!-- Small dot on the left arm (the water drop detail) -->
+  <circle cx="173" cy="208" r="12" fill="#fff"/>
+</svg>
