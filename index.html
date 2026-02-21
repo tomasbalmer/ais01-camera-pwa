@@ -19,6 +19,50 @@
             <button class="cmd-btn danger" onclick="toggleConnection()">Stop</button>
         </div>
     </div>
+    <!-- Sensor Config Panel -->
+    <div id="sensor-panel" class="panel">
+        <div class="panel-header" onclick="togglePanel('sensor-panel')">Sensor Config</div>
+        <div class="panel-body">
+            <div class="input-row">
+                <label>Addr</label>
+                <input type="text" id="regAddr" value="0x00" maxlength="4">
+                <button class="cmd-btn" onclick="onReadRegister()">Read</button>
+            </div>
+        </div>
+    </div>
+    <!-- ROI Setting Panel -->
+    <div id="roi-panel" class="panel">
+        <div class="panel-header" onclick="togglePanel('roi-panel')">ROI Setting (Digit Wheel)</div>
+        <div class="panel-body">
+            <div class="input-row">
+                <label>Digits</label>
+                <select id="roiNumDigits">
+                    <option value="4">4</option>
+                    <option value="5">5</option>
+                    <option value="6" selected>6</option>
+                    <option value="7">7</option>
+                    <option value="8">8</option>
+                </select>
+            </div>
+            <div class="roi-grid">
+                <div class="roi-header"><span>#</span><span>X</span><span>Y</span></div>
+                <div class="roi-row"><span>1</span><input type="number" id="roiX0" value="0"><input type="number" id="roiY0" value="0"></div>
+                <div class="roi-row"><span>2</span><input type="number" id="roiX1" value="0"><input type="number" id="roiY1" value="0"></div>
+                <div class="roi-row"><span>3</span><input type="number" id="roiX2" value="0"><input type="number" id="roiY2" value="0"></div>
+                <div class="roi-row"><span>4</span><input type="number" id="roiX3" value="0"><input type="number" id="roiY3" value="0"></div>
+                <div class="roi-row"><span>5</span><input type="number" id="roiX4" value="0"><input type="number" id="roiY4" value="0"></div>
+                <div class="roi-row"><span>6</span><input type="number" id="roiX5" value="0"><input type="number" id="roiY5" value="0"></div>
+                <div class="roi-row"><span>7</span><input type="number" id="roiX6" value="0"><input type="number" id="roiY6" value="0"></div>
+                <div class="roi-row"><span>8</span><input type="number" id="roiX7" value="0"><input type="number" id="roiY7" value="0"></div>
+            </div>
+            <div class="input-row">
+                <label>Boundary</label>
+                <input type="number" id="roiBoundX" value="70" placeholder="X">
+                <input type="number" id="roiBoundY" value="70" placeholder="Y">
+            </div>
+            <button class="cmd-btn" onclick="onSendROI()" style="width:100%;margin-top:8px;">Send ROI</button>
+        </div>
+    </div>
     <div id="viewer">
         <img id="cam" />
         <div id="connect-screen">

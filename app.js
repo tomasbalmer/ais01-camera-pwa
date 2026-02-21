@@ -15,8 +15,8 @@ const CMDS = {
     SEND:            [0xC0, 0x5A, 0x00, 0x00, 0x00, 0x00, 0x01],
     ENABLE_RAW:      [0xC0, 0x5A, 0x00, 0x00, 0x00, 0x00, 0x02],
     DISABLE_RAW:     [0xC0, 0x5A, 0x00, 0x00, 0x00, 0x00, 0x03],
-    SHOW_ROI:        [0xC0, 0x5A, 0x00, 0x00, 0x00, 0x00, 0x04],
-    SHOW_FULL_IMAGE: [0xC0, 0x5A, 0x00, 0x00, 0x00, 0x00, 0x05],
+    SHOW_ROI:        [0xC0, 0x5A, 0x00, 0x00, 0x00, 0x00, 0x05],
+    SHOW_FULL_IMAGE: [0xC0, 0x5A, 0x00, 0x00, 0x00, 0x00, 0x04],
 };
 
 // === State ===
@@ -28,6 +28,7 @@ let frameCount = 0;
 let fpsCount = 0;
 let lastFpsTime = 0;
 let currentFps = 0;
+let lastAiResult = null;
 
 const cam = document.getElementById('cam');
 const stats = document.getElementById('stats');
@@ -44,29 +45,117 @@ function log(msg) {
     console.log(msg);
 }
 
-// === Send command to sensor via FTDI UART TX ===
-async function sendCommand(name) {
-    const cmd = CMDS[name];
-    if (!cmd) { log(`Unknown command: ${name}`); return; }
+// === Send raw bytes to sensor via FTDI UART TX ===
+async function sendRawBytes(bytes) {
     if (!device || !epOutNum) { log('Not connected'); return; }
-
-    const hex = cmd.map(b => b.toString(16).padStart(2, '0')).join(' ');
-    log(`TX → ${name}: ${hex}`);
-
+    const hex = bytes.map(b => b.toString(16).padStart(2, '0')).join(' ');
+    log(`TX → ${hex}`);
     try {
-        const result = await device.transferOut(epOutNum, new Uint8Array(cmd));
+        const result = await device.transferOut(epOutNum, new Uint8Array(bytes));
         log(`TX OK: ${result.bytesWritten} bytes`);
-
-        if (name === 'SHOW_FULL_IMAGE') {
-            document.getElementById('btnFullImg').classList.add('active');
-            document.getElementById('btnROI').classList.remove('active');
-        } else if (name === 'SHOW_ROI') {
-            document.getElementById('btnROI').classList.add('active');
-            document.getElementById('btnFullImg').classList.remove('active');
-        }
     } catch (err) {
         log(`TX ERROR: ${err.message}`);
     }
+}
+
+// === Send named command to sensor ===
+async function sendCommand(name) {
+    const cmd = CMDS[name];
+    if (!cmd) { log(`Unknown command: ${name}`); return; }
+    log(`CMD: ${name}`);
+    await sendRawBytes(cmd);
+
+    if (name === 'SHOW_FULL_IMAGE') {
+        document.getElementById('btnFullImg').classList.add('active');
+        document.getElementById('btnROI').classList.remove('active');
+    } else if (name === 'SHOW_ROI') {
+        document.getElementById('btnROI').classList.add('active');
+        document.getElementById('btnFullImg').classList.remove('active');
+    }
+}
+
+// === Register Read ===
+async function readRegister(addr) {
+    const cmd = [0xC0, 0x5A, 0x04, 0x09, 0x00, addr & 0xFF, 0x00];
+    log(`READ REG 0x${addr.toString(16).padStart(2, '0')}`);
+    await sendRawBytes(cmd);
+}
+
+function onReadRegister() {
+    const addrStr = document.getElementById('regAddr').value.trim();
+    const addr = addrStr.startsWith('0x') ? parseInt(addrStr, 16) : parseInt(addrStr, 10);
+    if (isNaN(addr) || addr < 0 || addr > 0xFF) { log('Invalid address'); return; }
+    readRegister(addr);
+}
+
+// === AI Result Parser ===
+function parseAiResult(bytes) {
+    const buf = new ArrayBuffer(11);
+    const view = new DataView(buf);
+    for (let i = 0; i < 11; i++) view.setUint8(i, bytes[i]);
+    return {
+        integer: view.getUint32(0, true),
+        decimal: view.getUint32(4, true),
+        confidence: view.getUint16(8, true),
+        flags: view.getUint8(10),
+    };
+}
+
+// === ROI Configuration (Digit Wheel) ===
+function buildRoiPayload(config) {
+    const payload = new Uint8Array(80);
+    const view = new DataView(payload.buffer);
+    let offset = 0;
+    // (1) Digit ROI Points — 8 pares x,y (u16 LE)
+    for (let i = 0; i < 8; i++) {
+        const pt = config.digits[i] || { x: 0, y: 0 };
+        view.setUint16(offset, pt.x, true); offset += 2;
+        view.setUint16(offset, pt.y, true); offset += 2;
+    }
+    // (2) Common Settings
+    view.setUint16(offset, config.numDigits, true); offset += 2;
+    view.setUint16(offset, 0, true); offset += 2; // numDials = 0
+    offset += 8; // reserved zeros
+    // (3) Dial Settings — zeros for digit wheel
+    offset += 32;
+    // (4) Surface Boundary
+    view.setUint16(offset, config.boundaryX, true); offset += 2;
+    view.setUint16(offset, config.boundaryY, true); offset += 2;
+    return payload;
+}
+
+async function sendRoiConfig(config) {
+    // Frame A: SET MODE (Digit Wheel, payload=80 bytes)
+    await sendRawBytes([0xC0, 0x5A, 0x03, 0x05, 0x00, 0x00, 0x50]);
+    await new Promise(r => setTimeout(r, 50));
+    // Frame B: ROI DATA (header + 80 bytes)
+    const payload = buildRoiPayload(config);
+    const frame = new Uint8Array(4 + payload.length);
+    frame.set([0xC0, 0x5A, 0x03, 0x03]);
+    frame.set(payload, 4);
+    await sendRawBytes(Array.from(frame));
+    log(`ROI sent: ${config.numDigits} digits`);
+}
+
+function onSendROI() {
+    const numDigits = parseInt(document.getElementById('roiNumDigits').value) || 6;
+    const digits = [];
+    for (let i = 0; i < 8; i++) {
+        const xEl = document.getElementById(`roiX${i}`);
+        const yEl = document.getElementById(`roiY${i}`);
+        digits.push({
+            x: xEl ? parseInt(xEl.value) || 0 : 0,
+            y: yEl ? parseInt(yEl.value) || 0 : 0,
+        });
+    }
+    const boundaryX = parseInt(document.getElementById('roiBoundX').value) || 0;
+    const boundaryY = parseInt(document.getElementById('roiBoundY').value) || 0;
+    sendRoiConfig({ numDigits, digits, boundaryX, boundaryY });
+}
+
+// === Panel toggle ===
+function togglePanel(id) {
+    document.getElementById(id).classList.toggle('open');
 }
 
 async function toggleRAW() {
@@ -201,7 +290,12 @@ async function readStream(epIn) {
                 currentFps = fpsCount / ((now - lastFpsTime) / 1000);
                 fpsCount = 0;
                 lastFpsTime = now;
-                stats.textContent = `#${frameCount} | ${currentFps.toFixed(1)} FPS | ${(totalBytes / 1024).toFixed(0)} KB`;
+                let aiText = '';
+                if (lastAiResult) {
+                    const reading = lastAiResult.integer + lastAiResult.decimal / 1000000;
+                    aiText = ` | ${reading.toFixed(2)} (${lastAiResult.confidence})`;
+                }
+                stats.textContent = `#${frameCount} | ${currentFps.toFixed(1)} FPS | ${(totalBytes / 1024).toFixed(0)} KB${aiText}`;
             }
         } catch (err) {
             if (running) {
@@ -238,7 +332,14 @@ function extractAndDisplayFrames(acc) {
         if (eoi === -1) return;
 
         const jpeg = new Uint8Array(acc.slice(0, eoi + 2));
-        acc.splice(0, eoi + 2);
+        // Extract AI Result (11 bytes after EOI)
+        if (acc.length >= eoi + 2 + 11) {
+            const aiBytes = acc.slice(eoi + 2, eoi + 2 + 11);
+            lastAiResult = parseAiResult(aiBytes);
+            acc.splice(0, eoi + 2 + 11);
+        } else {
+            acc.splice(0, eoi + 2);
+        }
 
         const blob = new Blob([jpeg], { type: 'image/jpeg' });
         const url = URL.createObjectURL(blob);

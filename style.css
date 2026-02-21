@@ -8,7 +8,8 @@ body {
     display: flex;
     flex-direction: column;
     align-items: center;
-    overflow: hidden;
+    overflow-x: hidden;
+    overflow-y: auto;
 }
 
 #toolbar {
@@ -103,6 +104,93 @@ body {
     line-height: 1.6;
 }
 #message.error { color: #f66; }
+
+/* === Collapsible Panels === */
+.panel {
+    width: 100%;
+    background: #1a1a2e;
+    border-bottom: 1px solid #333;
+}
+.panel-header {
+    padding: 8px 12px;
+    font-size: 13px;
+    font-weight: 600;
+    color: #888;
+    cursor: pointer;
+    user-select: none;
+}
+.panel-header::before {
+    content: '\25B6 ';
+    font-size: 10px;
+}
+.panel.open .panel-header::before {
+    content: '\25BC ';
+}
+.panel-body {
+    display: none;
+    padding: 0 12px 10px;
+}
+.panel.open .panel-body {
+    display: block;
+}
+
+/* === Input rows === */
+.input-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 6px;
+}
+.input-row label {
+    font-size: 12px;
+    color: #888;
+    min-width: 50px;
+}
+.input-row input, .input-row select {
+    background: #222;
+    color: #eee;
+    border: 1px solid #444;
+    border-radius: 4px;
+    padding: 4px 8px;
+    font-size: 13px;
+    font-family: monospace;
+    width: 70px;
+}
+.input-row select {
+    width: auto;
+}
+
+/* === ROI Grid === */
+.roi-grid {
+    margin: 6px 0;
+}
+.roi-header, .roi-row {
+    display: grid;
+    grid-template-columns: 24px 1fr 1fr;
+    gap: 4px;
+    margin-bottom: 3px;
+    align-items: center;
+}
+.roi-header span {
+    font-size: 11px;
+    color: #666;
+    text-align: center;
+}
+.roi-row span {
+    font-size: 12px;
+    color: #888;
+    text-align: center;
+}
+.roi-row input {
+    background: #222;
+    color: #eee;
+    border: 1px solid #444;
+    border-radius: 4px;
+    padding: 3px 6px;
+    font-size: 12px;
+    font-family: monospace;
+    width: 100%;
+}
 
 #log {
     width: 100%;
