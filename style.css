@@ -93,7 +93,8 @@ body {
 
 #cam {
     display: none;
-    max-width: 100%;
+    width: 100%;
+    height: auto;
     max-height: 100%;
     object-fit: contain;
 }
@@ -303,6 +304,70 @@ body {
     width: 100%;
 }
 .roi-row input:focus { outline: none; border-color: var(--accent); }
+
+/* ─── Canvas overlay ─── */
+#overlay-canvas {
+    display: none;
+    position: absolute;
+    top: 0;
+    left: 0;
+    pointer-events: none;
+}
+#overlay-canvas.active {
+    display: block;
+    pointer-events: auto;
+}
+
+/* ─── Drawer actions ─── */
+.drawer-action {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    padding: 14px;
+    background: none;
+    border: none;
+    color: var(--text);
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+    text-align: left;
+}
+.drawer-action:active { background: rgba(255,255,255,0.05); }
+
+/* ─── Calibration toolbar ─── */
+#calib-toolbar {
+    display: none;
+    position: absolute;
+    bottom: 8px;
+    left: 8px;
+    right: 8px;
+    gap: 6px;
+    align-items: center;
+    z-index: 20;
+}
+#calib-toolbar select {
+    background: var(--bg);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 8px;
+    font-size: 13px;
+}
+.calib-btn {
+    flex: 1;
+    padding: 10px;
+    border: none;
+    border-radius: 8px;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    touch-action: manipulation;
+}
+.calib-btn.send { background: var(--accent); color: #000; }
+.calib-btn.cancel { background: var(--elevated); color: var(--text2); }
 
 /* ─── Log ─── */
 #log {

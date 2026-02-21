@@ -23,6 +23,19 @@
     <!-- Camera viewer (fills screen) -->
     <main id="viewer">
         <img id="cam" />
+        <canvas id="overlay-canvas"></canvas>
+        <!-- Calibration toolbar (visible in calib mode) -->
+        <div id="calib-toolbar">
+            <select id="calibDigitSelect" onchange="calibDigits = +this.value; drawCalibOverlay()">
+                <option value="4">4 digits</option>
+                <option value="5">5 digits</option>
+                <option value="6" selected>6 digits</option>
+                <option value="7">7 digits</option>
+                <option value="8">8 digits</option>
+            </select>
+            <button class="calib-btn send" onclick="computeAndSendRoi()">Send ROI</button>
+            <button class="calib-btn cancel" onclick="exitCalibMode()">Cancel</button>
+        </div>
         <div id="connect-screen">
             <div class="connect-icon">
                 <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="#4af" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/><circle cx="12" cy="10" r="3"/></svg>
@@ -62,6 +75,17 @@
             </button>
         </div>
         <div class="drawer-content">
+            <!-- Quick Actions -->
+            <div class="drawer-section">
+                <button class="drawer-action" onclick="onValidatePosition()">
+                    <span>Validate Position</span>
+                </button>
+            </div>
+            <div class="drawer-section">
+                <button class="drawer-action" onclick="enterCalibMode()">
+                    <span>Calibrate ROI (Touch)</span>
+                </button>
+            </div>
             <!-- Sensor Config Section -->
             <div class="drawer-section">
                 <div class="section-header" onclick="togglePanel('section-sensor')">
