@@ -279,7 +279,7 @@ async function connectDevice() {
         await new Promise(r => setTimeout(r, 200));
         await sendCommand('SEND');
         await new Promise(r => setTimeout(r, 100));
-        await sendRawBytes(CMDS.SHOW_FULL_IMAGE);
+        await sendCommand('SHOW_FULL_IMAGE');
         log('Sensor initialized — streaming full image');
 
         return epIn;
