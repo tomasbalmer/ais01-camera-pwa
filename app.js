@@ -242,9 +242,11 @@ async function connectDevice() {
 
         if (!epOutNum) log('WARNING: No OUT endpoint');
 
-        // Initialize sensor: Start + Show Full Image (stream immediately, no button highlight)
-        await sendRawBytes(CMDS.START);
+        // Initialize sensor: Start + request full image stream
+        await sendCommand('START');
         await new Promise(r => setTimeout(r, 200));
+        await sendCommand('SEND');
+        await new Promise(r => setTimeout(r, 100));
         await sendRawBytes(CMDS.SHOW_FULL_IMAGE);
         log('Sensor initialized — streaming full image');
 
