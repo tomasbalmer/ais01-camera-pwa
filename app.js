@@ -29,13 +29,18 @@ let fpsCount = 0;
 let lastFpsTime = 0;
 let currentFps = 0;
 let lastAiResult = null;
+let drawerOpen = false;
 
+// === DOM refs ===
 const cam = document.getElementById('cam');
 const stats = document.getElementById('stats');
+const statusDot = document.getElementById('status-dot');
 const message = document.getElementById('message');
 const logEl = document.getElementById('log');
-const camControls = document.getElementById('cam-controls');
+const actionBar = document.getElementById('action-bar');
 const connectScreen = document.getElementById('connect-screen');
+const drawer = document.getElementById('drawer');
+const drawerOverlay = document.getElementById('drawer-overlay');
 
 function log(msg) {
     const line = document.createElement('div');
@@ -43,6 +48,19 @@ function log(msg) {
     logEl.appendChild(line);
     logEl.scrollTop = logEl.scrollHeight;
     console.log(msg);
+}
+
+// === Drawer toggle ===
+function toggleDrawer() {
+    drawerOpen = !drawerOpen;
+    drawer.classList.toggle('open', drawerOpen);
+    drawerOverlay.classList.toggle('visible', drawerOpen);
+}
+
+// === Panel toggle (drawer sections) ===
+function togglePanel(id) {
+    const body = document.getElementById(id);
+    if (body) body.parentElement.classList.toggle('open');
 }
 
 // === Send raw bytes to sensor via FTDI UART TX ===
@@ -106,29 +124,23 @@ function buildRoiPayload(config) {
     const payload = new Uint8Array(80);
     const view = new DataView(payload.buffer);
     let offset = 0;
-    // (1) Digit ROI Points — 8 pares x,y (u16 LE)
     for (let i = 0; i < 8; i++) {
         const pt = config.digits[i] || { x: 0, y: 0 };
         view.setUint16(offset, pt.x, true); offset += 2;
         view.setUint16(offset, pt.y, true); offset += 2;
     }
-    // (2) Common Settings
     view.setUint16(offset, config.numDigits, true); offset += 2;
-    view.setUint16(offset, 0, true); offset += 2; // numDials = 0
-    offset += 8; // reserved zeros
-    // (3) Dial Settings — zeros for digit wheel
+    view.setUint16(offset, 0, true); offset += 2;
+    offset += 8;
     offset += 32;
-    // (4) Surface Boundary
     view.setUint16(offset, config.boundaryX, true); offset += 2;
     view.setUint16(offset, config.boundaryY, true); offset += 2;
     return payload;
 }
 
 async function sendRoiConfig(config) {
-    // Frame A: SET MODE (Digit Wheel, payload=80 bytes)
     await sendRawBytes([0xC0, 0x5A, 0x03, 0x05, 0x00, 0x00, 0x50]);
     await new Promise(r => setTimeout(r, 50));
-    // Frame B: ROI DATA (header + 80 bytes)
     const payload = buildRoiPayload(config);
     const frame = new Uint8Array(4 + payload.length);
     frame.set([0xC0, 0x5A, 0x03, 0x03]);
@@ -153,16 +165,11 @@ function onSendROI() {
     sendRoiConfig({ numDigits, digits, boundaryX, boundaryY });
 }
 
-// === Panel toggle ===
-function togglePanel(id) {
-    document.getElementById(id).classList.toggle('open');
-}
-
 async function toggleRAW() {
     rawEnabled = !rawEnabled;
     await sendCommand(rawEnabled ? 'ENABLE_RAW' : 'DISABLE_RAW');
-    document.getElementById('btnRAW').textContent = `RAW: ${rawEnabled ? 'on' : 'off'}`;
-    document.getElementById('btnRAW').classList.toggle('active', rawEnabled);
+    const btn = document.getElementById('btnRAW');
+    btn.classList.toggle('active', rawEnabled);
 }
 
 // === FTDI baud rate divisor ===
@@ -180,8 +187,6 @@ function ftdiBaudDivisor(baudRate) {
 }
 
 // === Connect to FTDI + initialize sensor ===
-// Matches exact D2XX sequence: FT_ResetDevice → FT_SetBaudRate → FT_SetDataCharacteristics
-// → FT_SetFlowControl → FT_Purge → FT_SetLatencyTimer → FT_SetDtr → FT_SetRts
 async function connectDevice() {
     try {
         log('Requesting USB device...');
@@ -237,11 +242,11 @@ async function connectDevice() {
 
         if (!epOutNum) log('WARNING: No OUT endpoint');
 
-        // Initialize sensor: Start + Show Full Image
-        await sendCommand('START');
+        // Initialize sensor: Start + Show Full Image (stream immediately, no button highlight)
+        await sendRawBytes(CMDS.START);
         await new Promise(r => setTimeout(r, 200));
-        await sendCommand('SHOW_FULL_IMAGE');
-        log('Sensor initialized');
+        await sendRawBytes(CMDS.SHOW_FULL_IMAGE);
+        log('Sensor initialized — streaming full image');
 
         return epIn;
 
@@ -265,9 +270,10 @@ async function readStream(epIn) {
 
     running = true;
     connectScreen.style.display = 'none';
-    camControls.classList.add('visible');
+    actionBar.classList.add('visible');
     cam.style.display = 'block';
     stats.className = 'active';
+    statusDot.classList.add('connected');
     lastFpsTime = performance.now();
     fpsCount = 0;
 
@@ -293,9 +299,9 @@ async function readStream(epIn) {
                 let aiText = '';
                 if (lastAiResult) {
                     const reading = lastAiResult.integer + lastAiResult.decimal / 1000000;
-                    aiText = ` | ${reading.toFixed(2)} (${lastAiResult.confidence})`;
+                    aiText = ` | AI: ${reading.toFixed(2)} (${lastAiResult.confidence}%)`;
                 }
-                stats.textContent = `#${frameCount} | ${currentFps.toFixed(1)} FPS | ${(totalBytes / 1024).toFixed(0)} KB${aiText}`;
+                stats.textContent = `#${frameCount} | ${currentFps.toFixed(1)} fps | ${(totalBytes / 1024).toFixed(0)} KB${aiText}`;
             }
         } catch (err) {
             if (running) {
@@ -332,7 +338,6 @@ function extractAndDisplayFrames(acc) {
         if (eoi === -1) return;
 
         const jpeg = new Uint8Array(acc.slice(0, eoi + 2));
-        // Extract AI Result (11 bytes after EOI)
         if (acc.length >= eoi + 2 + 11) {
             const aiBytes = acc.slice(eoi + 2, eoi + 2 + 11);
             lastAiResult = parseAiResult(aiBytes);
@@ -361,11 +366,17 @@ async function toggleConnection() {
     try {
         if (running) {
             running = false;
-            camControls.classList.remove('visible');
+            actionBar.classList.remove('visible');
             connectScreen.style.display = 'flex';
             cam.style.display = 'none';
             stats.className = '';
             stats.textContent = 'Disconnected';
+            statusDot.classList.remove('connected');
+            // Reset button states
+            document.getElementById('btnFullImg').classList.remove('active');
+            document.getElementById('btnROI').classList.remove('active');
+            document.getElementById('btnRAW').classList.remove('active');
+            rawEnabled = false;
             try { await device.close(); } catch (e) {}
             device = null;
             epOutNum = null;
@@ -375,7 +386,7 @@ async function toggleConnection() {
             document.getElementById('big-btn').textContent = 'Connecting...';
             const epIn = await connectDevice();
             document.getElementById('big-btn').disabled = false;
-            document.getElementById('big-btn').textContent = 'CONNECT CAMERA';
+            document.getElementById('big-btn').textContent = 'Connect Camera';
             if (epIn) {
                 readStream(epIn);
             }
@@ -383,7 +394,7 @@ async function toggleConnection() {
     } catch (err) {
         log('Error: ' + err.message);
         document.getElementById('big-btn').disabled = false;
-        document.getElementById('big-btn').textContent = 'CONNECT CAMERA';
+        document.getElementById('big-btn').textContent = 'Connect Camera';
     }
 }
 
@@ -393,8 +404,8 @@ const hasWebUSB = !!navigator.usb;
 log(`Secure: ${isSecure} | WebUSB: ${hasWebUSB}`);
 if (!isSecure || !hasWebUSB) {
     message.innerHTML = !isSecure
-        ? 'Requires HTTPS or localhost. Current: ' + location.origin
-        : 'WebUSB not available. Use Chrome.';
+        ? 'Requires HTTPS or localhost.'
+        : 'WebUSB not available. Use Chrome on Android.';
     message.className = 'error';
     document.getElementById('big-btn').disabled = true;
 }

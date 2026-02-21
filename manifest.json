@@ -1,10 +1,10 @@
 {
-    "name": "AIS01 Camera Viewer",
+    "name": "AIS01 Camera",
     "short_name": "AIS01 Cam",
     "start_url": ".",
     "display": "standalone",
-    "background_color": "#111111",
-    "theme_color": "#1a1a2e",
+    "background_color": "#0f172a",
+    "theme_color": "#0f172a",
     "orientation": "any",
     "icons": []
 }
