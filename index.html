@@ -50,6 +50,7 @@
             <span id="calib-ai-value">--</span>
             <span id="calib-ai-conf"></span>
         </div>
+        <div id="calib-coords"></div>
         <div id="calib-controls">
             <select id="calibDigitSelect" onchange="calibDigits = +this.value; drawCalibOverlay()">
                 <option value="4">4 digits</option>
@@ -58,7 +59,9 @@
                 <option value="7">7 digits</option>
                 <option value="8">8 digits</option>
             </select>
-            <button class="calib-btn send" onclick="computeAndSendRoi()">Send ROI</button>
+            <label class="calib-toggle"><input type="checkbox" id="calibFlipY"><span>FlipY</span></label>
+            <button class="calib-btn preview" onclick="previewRoi()">Preview</button>
+            <button class="calib-btn send" onclick="computeAndSendRoi()">Send</button>
             <button class="calib-btn cancel" onclick="exitCalibMode()">Back</button>
         </div>
     </nav>

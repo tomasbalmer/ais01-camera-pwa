@@ -380,6 +380,18 @@ body {
     color: var(--text2);
 }
 
+#calib-coords {
+    font-family: 'SF Mono', 'Menlo', 'Consolas', monospace;
+    font-size: 11px;
+    color: var(--text2);
+    text-align: left;
+    padding: 2px 8px 6px;
+    line-height: 1.5;
+    min-height: 16px;
+    white-space: pre-wrap;
+    word-break: break-all;
+}
+
 #calib-controls {
     display: flex;
     gap: 6px;
@@ -403,8 +415,21 @@ body {
     cursor: pointer;
     touch-action: manipulation;
 }
+.calib-btn.preview { background: var(--accent-bg); color: var(--accent); border: 1px solid rgba(56,189,248,0.3); }
 .calib-btn.send { background: var(--accent); color: #000; }
 .calib-btn.cancel { background: var(--elevated); color: var(--text2); }
+
+.calib-toggle {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 11px;
+    color: var(--text2);
+    cursor: pointer;
+    white-space: nowrap;
+    padding: 0 2px;
+}
+.calib-toggle input { margin: 0; accent-color: var(--accent); }
 
 /* ─── Log ─── */
 #log {

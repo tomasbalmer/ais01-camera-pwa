@@ -9,6 +9,13 @@ const SIO_SET_BAUD_RATE = 0x03;
 const SIO_SET_DATA = 0x04;
 const SIO_SET_LATENCY_TIMER = 0x09;
 
+// === Sensor resolution (ROI coords always in this space) ===
+const SENSOR_W = 640, SENSOR_H = 480;
+
+// Always 8 ROI points = 4 reference positions × 2 corners (top-left + bottom-left).
+// The 4 references are evenly spaced from center of first digit to center of last digit.
+// The firmware interpolates all digit locations from these 4 references + boundary.
+
 // === Himax / AIS01-LB sensor commands (C0 5A protocol) ===
 const CMDS = {
     START:           [0xC0, 0x5A, 0x03, 0x04, 0x00, 0x00, 0x00],
@@ -73,6 +80,8 @@ function getImageRect() {
     const oy = (boxH - h) / 2;
     return { ox, oy, w, h, scale };
 }
+
+function clamp16(v) { return Math.max(0, Math.min(65535, Math.round(v))); }
 
 function syncOverlay() {
     const r = getImageRect();
@@ -185,6 +194,24 @@ async function sendRoiConfig(config) {
     const frame = new Uint8Array(4 + payload.length);
     frame.set([0xC0, 0x5A, 0x03, 0x03]);
     frame.set(payload, 4);
+
+    // Log decoded payload (boundary at offset 76/78 per buildRoiPayload layout)
+    const pv = new DataView(payload.buffer);
+    log('--- ROI PAYLOAD ---');
+    for (let d = 0; d < 8; d++) {
+        const px = pv.getUint16(d * 4, true);
+        const py = pv.getUint16(d * 4 + 2, true);
+        log('  P' + (d + 1) + ': x=' + px + ' y=' + py);
+    }
+    log(`  Boundary: ${pv.getUint16(76, true)} x ${pv.getUint16(78, true)}`);
+    const hexRows = [];
+    for (let i = 0; i < payload.length; i += 16) {
+        const slice = Array.from(payload.slice(i, Math.min(i + 16, payload.length)));
+        hexRows.push(`  Hex[${String(i).padStart(2,'0')}-${String(Math.min(i+15, payload.length-1)).padStart(2,'0')}]: ${slice.map(b => b.toString(16).padStart(2,'0')).join(' ')}`);
+    }
+    hexRows.forEach(r => log(r));
+    log('--- END ---');
+
     await sendRawBytes(Array.from(frame));
     log(`ROI sent: ${config.numDigits} digits`);
 }
@@ -282,13 +309,11 @@ async function connectDevice() {
 
         if (!epOutNum) log('WARNING: No OUT endpoint');
 
-        // Initialize sensor: Start + request full image stream
+        // Initialize sensor: Start + Send only (no SHOW_FULL_IMAGE to preserve AI result)
         await sendCommand('START');
         await new Promise(r => setTimeout(r, 200));
         await sendCommand('SEND');
-        await new Promise(r => setTimeout(r, 100));
-        await sendCommand('SHOW_FULL_IMAGE');
-        log('Sensor initialized — streaming full image');
+        log('Sensor initialized — streaming (AI mode)');
 
         return epIn;
 
@@ -366,28 +391,57 @@ function stripFtdiHeaders(data, pktSz) {
 
 function extractAndDisplayFrames(acc) {
     while (true) {
+        // 1. Find JPEG SOI (FF D8)
         let soi = -1;
         for (let i = 0; i < acc.length - 1; i++) {
             if (acc[i] === 0xFF && acc[i + 1] === 0xD8) { soi = i; break; }
         }
-        if (soi === -1) { if (acc.length > 1) acc.splice(0, acc.length - 1); return; }
+        if (soi === -1) {
+            // Keep up to 4KB — inter-frame gap is ~2.8KB and contains the AI result header
+            if (acc.length > 4096) acc.splice(0, acc.length - 4096);
+            return;
+        }
+
+        // 2. Extract AI result from C0 5A 63 A4 header BEFORE the JPEG
+        //    Frame structure: ... C0 5A 63 A4 00 00 00 [int u32 LE] [dec u32 LE] ... C0 5A 01 XX ... FF D8 JPEG FF D9 ...
+        if (soi >= 23) {
+            // Search backwards from SOI for C0 5A 63 A4 header
+            for (let p = soi - 1; p >= 3; p--) {
+                if (acc[p] === 0xC0 && acc[p + 1] === 0x5A && acc[p + 2] === 0x63 && acc[p + 3] === 0xA4) {
+                    if (p + 14 < acc.length) {
+                        const hdr = acc.slice(p + 7, p + 15); // 8 bytes: integer(4) + decimal(4)
+                        lastAiResult = {
+                            integer: hdr[0] | (hdr[1] << 8) | (hdr[2] << 16) | (hdr[3] << 24),
+                            decimal: hdr[4] | (hdr[5] << 8) | (hdr[6] << 16) | (hdr[7] << 24),
+                            confidence: 0,
+                            flags: 0,
+                        };
+                        if (frameCount < 5) {
+                            const hex = hdr.map(b => b.toString(16).padStart(2, '0')).join(' ');
+                            const reading = lastAiResult.integer + lastAiResult.decimal / 1000000;
+                            log(`AI[${frameCount}] C05A_63A4@${p}: ${hex} → int=${lastAiResult.integer} dec=${lastAiResult.decimal} reading=${reading.toFixed(6)}`);
+                        }
+                    }
+                    break;
+                }
+            }
+        }
+
+        // 3. Discard bytes before SOI
         if (soi > 0) acc.splice(0, soi);
 
+        // 4. Find JPEG EOI (FF D9)
         let eoi = -1;
         for (let i = 2; i < acc.length - 1; i++) {
             if (acc[i] === 0xFF && acc[i + 1] === 0xD9) { eoi = i; break; }
         }
         if (eoi === -1) return;
 
+        // 5. Extract JPEG and advance past EOI
         const jpeg = new Uint8Array(acc.slice(0, eoi + 2));
-        if (acc.length >= eoi + 2 + 11) {
-            const aiBytes = acc.slice(eoi + 2, eoi + 2 + 11);
-            lastAiResult = parseAiResult(aiBytes);
-            acc.splice(0, eoi + 2 + 11);
-        } else {
-            acc.splice(0, eoi + 2);
-        }
+        acc.splice(0, eoi + 2);
 
+        // 6. Display frame
         const blob = new Blob([jpeg], { type: 'image/jpeg' });
         const url = URL.createObjectURL(blob);
         const prev = cam.src;
@@ -543,9 +597,9 @@ function initKonvaCalib() {
         y: (h - rectH) / 2,
         width: rectW,
         height: rectH,
-        fill: 'transparent',
+        fill: 'rgba(56, 189, 248, 0.06)',
         stroke: '#38bdf8',
-        strokeWidth: 2,
+        strokeWidth: 1.5,
         draggable: true,
     });
     konvaLayer.add(konvaRect);
@@ -557,13 +611,14 @@ function initKonvaCalib() {
         nodes: [konvaRect],
         rotateEnabled: true,
         rotationSnaps: [0, 90, 180, 270],
-        rotateAnchorOffset: 30,
-        anchorSize: 20,
-        anchorCornerRadius: 4,
+        rotateAnchorOffset: 20,
+        anchorSize: 16,
+        anchorCornerRadius: 8,
         anchorStroke: '#38bdf8',
-        anchorFill: '#1e293b',
+        anchorStrokeWidth: 2,
+        anchorFill: 'rgba(15, 23, 42, 0.8)',
         borderStroke: '#38bdf8',
-        borderStrokeWidth: 2,
+        borderStrokeWidth: 1.5,
         boundBoxFunc: (oldBox, newBox) => {
             if (newBox.width < 30 || newBox.height < 20) return oldBox;
             return newBox;
@@ -600,23 +655,36 @@ function updateDividers() {
     const rot = konvaRect.rotation();
     const dw = rw / n;
 
-    for (let i = 0; i < n; i++) {
-        // Divider line (skip first left edge, draw inner dividers)
-        if (i > 0) {
-            const localX = -rw / 2 + dw * i;
-            konvaDividers.add(new Konva.Line({
-                points: [localX, -rh / 2, localX, rh / 2],
-                stroke: 'rgba(56, 189, 248, 0.5)',
-                strokeWidth: 1,
-            }));
-        }
-        // Center dot for each digit cell
-        const dotX = -rw / 2 + dw * i + dw / 2;
+    // Thin divider lines between all digit cells
+    for (let i = 1; i < n; i++) {
+        const localX = -rw / 2 + dw * i;
+        konvaDividers.add(new Konva.Line({
+            points: [localX, -rh / 2, localX, rh / 2],
+            stroke: 'rgba(56, 189, 248, 0.25)',
+            strokeWidth: 1,
+        }));
+    }
+
+    // 4 evenly-spaced reference markers (center of first → center of last digit)
+    for (let ref = 0; ref < 4; ref++) {
+        const t = ref / 3;
+        const centerX = dw / 2 + t * (rw - dw);
+        const localX = -rw / 2 + centerX;
+        // Bold vertical line
+        konvaDividers.add(new Konva.Line({
+            points: [localX, -rh / 2, localX, rh / 2],
+            stroke: '#38bdf8',
+            strokeWidth: 2,
+        }));
+        // Top corner dot
         konvaDividers.add(new Konva.Circle({
-            x: dotX,
-            y: 0,
-            radius: 3,
-            fill: '#38bdf8',
+            x: localX, y: -rh / 2,
+            radius: 4, fill: '#38bdf8',
+        }));
+        // Bottom corner dot
+        konvaDividers.add(new Konva.Circle({
+            x: localX, y: rh / 2,
+            radius: 4, fill: '#38bdf8',
         }));
     }
 
@@ -664,6 +732,7 @@ function startCalibAnimLoop() {
         syncKonvaSize();
         drawDimOverlay();
         updateCalibReading();
+        updateCalibCoords();
         updateDividers();
         calibAnimFrame = requestAnimationFrame(tick);
     }
@@ -688,8 +757,61 @@ function updateCalibReading() {
     }
 }
 
-function enterCalibMode() {
+function updateCalibCoords() {
+    const el = document.getElementById('calib-coords');
+    if (!el || !konvaRect) { if (el) el.textContent = ''; return; }
+    const coords = computeRoiCoords();
+    if (!coords) { el.textContent = ''; return; }
+    const parts = [];
+    for (let i = 0; i < 4; i++) {
+        const p1 = coords.digits[i * 2];
+        const p2 = coords.digits[i * 2 + 1];
+        parts.push(`${i*2+1}:(${p1.x},${p1.y}) ${i*2+2}:(${p2.x},${p2.y})`);
+    }
+    el.textContent = parts.join(' ') + `\nB:${coords.boundaryX}x${coords.boundaryY}`;
+}
+
+function previewRoi() {
+    const coords = computeRoiCoords();
+    if (!coords) { log('No rectangle'); return; }
+    const r = getImageRect();
+    const rect = konvaRect;
+    const rw = rect.width() * rect.scaleX();
+    const rh = rect.height() * rect.scaleY();
+    log('=== PREVIEW (not sent) ===');
+    log('  Image: ' + cam.naturalWidth + 'x' + cam.naturalHeight + ' | display: ' + Math.round(r.w) + 'x' + Math.round(r.h) + ' | pxScale: ' + (r.w / (cam.naturalWidth || SENSOR_W)).toFixed(4));
+    log('  Rect: x=' + Math.round(rect.x()) + ' y=' + Math.round(rect.y()) + ' w=' + Math.round(rw) + ' h=' + Math.round(rh) + ' rot=' + rect.rotation().toFixed(1));
+    for (let i = 0; i < 4; i++) {
+        const p1 = coords.digits[i * 2];
+        const p2 = coords.digits[i * 2 + 1];
+        log('  P' + (i*2+1) + ': (' + p1.x + ',' + p1.y + ')  P' + (i*2+2) + ': (' + p2.x + ',' + p2.y + ')');
+    }
+    log('  Boundary: ' + coords.boundaryX + ' x ' + coords.boundaryY);
+    log('  numDigits: ' + coords.numDigits + ' | FlipY: ' + (document.getElementById('calibFlipY')?.checked));
+    log('=== END PREVIEW ===');
+}
+
+async function enterCalibMode() {
     if (!cam.src || cam.style.display === 'none') { log('No frame'); return; }
+    if (drawerOpen) toggleDrawer();
+
+    // Force full image mode — calibration needs 640×480 for correct coordinate mapping
+    const wasNarrow = cam.naturalWidth && cam.naturalWidth < 320;
+    if (wasNarrow || !cam.naturalWidth) {
+        log('Switching to FULL IMAGE for calibration...');
+        await sendCommand('SHOW_FULL_IMAGE');
+        // Wait for the stream to switch (poll naturalWidth, max 3s)
+        const t0 = performance.now();
+        while (cam.naturalWidth < 320 && performance.now() - t0 < 3000) {
+            await new Promise(r => setTimeout(r, 200));
+        }
+        if (cam.naturalWidth < 320) {
+            log('WARNING: image may not have switched to full mode');
+        } else {
+            log(`Full image active: ${cam.naturalWidth}×${cam.naturalHeight}`);
+        }
+    }
+
     calibMode = true;
     syncOverlay();
 
@@ -704,9 +826,8 @@ function enterCalibMode() {
     konvaContainer.classList.add('active');
     actionBar.classList.remove('visible');
     calibBar.classList.add('visible');
-    if (drawerOpen) toggleDrawer();
     startCalibAnimLoop();
-    log('Calibration mode ON');
+    log('Calibration mode ON — image: ' + cam.naturalWidth + 'x' + cam.naturalHeight + ' — position rect over digits');
 }
 
 function exitCalibMode() {
@@ -726,9 +847,14 @@ function drawCalibOverlay() {
     if (konvaLayer) konvaLayer.draw();
 }
 
-function computeAndSendRoi() {
-    if (!konvaRect) { log('No rectangle'); return; }
-    const { scale } = getImageRect();
+function computeRoiCoords() {
+    if (!konvaRect) return null;
+    const r = getImageRect();
+    // Map to transmitted image resolution (e.g. 320x240), NOT hardcoded 640x480
+    const imgW = cam.naturalWidth || SENSOR_W;
+    const imgH = cam.naturalHeight || SENSOR_H;
+    const pxScale = r.w / imgW; // display pixels per image pixel
+    const flipY = document.getElementById('calibFlipY')?.checked ?? false;
     const rect = konvaRect;
     const rw = rect.width() * rect.scaleX();
     const rh = rect.height() * rect.scaleY();
@@ -736,28 +862,63 @@ function computeAndSendRoi() {
     const cy = rect.y() + rh / 2;
     const rot = rect.rotation() * Math.PI / 180;
     const n = calibDigits;
-    const dw = rw / n;
+    const digitW = rw / n;
 
+    // 4 evenly-spaced references: center of first digit → center of last digit
     const digits = [];
-    for (let i = 0; i < 8; i++) {
-        if (i < n) {
-            const localX = -rw / 2 + dw * i + dw / 2;
-            const localY = 0;
-            const rx = cx + localX * Math.cos(rot) - localY * Math.sin(rot);
-            const ry = cy + localX * Math.sin(rot) + localY * Math.cos(rot);
-            digits.push({ x: Math.round(rx / scale), y: Math.round(ry / scale) });
+    for (let ref = 0; ref < 4; ref++) {
+        const t = ref / 3; // 0, 1/3, 2/3, 1
+        const centerX = digitW / 2 + t * (rw - digitW);
+        const localX = -rw / 2 + centerX;
+
+        // Top corner (display: top edge = -rh/2)
+        const topDispX = cx + localX * Math.cos(rot) - (-rh / 2) * Math.sin(rot);
+        const topDispY = cy + localX * Math.sin(rot) + (-rh / 2) * Math.cos(rot);
+
+        // Bottom corner (display: bottom edge = +rh/2)
+        const botDispX = cx + localX * Math.cos(rot) - (rh / 2) * Math.sin(rot);
+        const botDispY = cy + localX * Math.sin(rot) + (rh / 2) * Math.cos(rot);
+
+        // Convert display coords → image pixel coords
+        const topSx = Math.round(topDispX / pxScale);
+        const botSx = Math.round(botDispX / pxScale);
+
+        let topSy, botSy;
+        if (flipY) {
+            topSy = imgH - Math.round(topDispY / pxScale);
+            botSy = imgH - Math.round(botDispY / pxScale);
         } else {
-            digits.push({ x: 0, y: 0 });
+            topSy = Math.round(topDispY / pxScale);
+            botSy = Math.round(botDispY / pxScale);
         }
+
+        // Odd point (P1,P3,P5,P7): lower Y value
+        // Even point (P2,P4,P6,P8): higher Y value
+        const lowY = Math.min(topSy, botSy);
+        const highY = Math.max(topSy, botSy);
+        const lowX = (lowY === topSy) ? topSx : botSx;
+        const highX = (highY === topSy) ? topSx : botSx;
+
+        digits.push({ x: clamp16(lowX), y: clamp16(lowY) });
+        digits.push({ x: clamp16(highX), y: clamp16(highY) });
     }
 
-    const boundaryX = Math.round(dw / scale);
-    const boundaryY = Math.round(rh / scale);
+    const boundaryX = Math.round(digitW / pxScale);
+    const boundaryY = Math.round(rh / pxScale);
 
-    log(`ROI from touch: ${n} digits, rot=${rect.rotation().toFixed(1)}°, boundary=${boundaryX}x${boundaryY}`);
-    digits.slice(0, n).forEach((d, i) => log(`  D${i+1}: (${d.x}, ${d.y})`));
+    return { numDigits: n, digits, boundaryX, boundaryY, rotation: rect.rotation() };
+}
 
-    sendRoiConfig({ numDigits: n, digits, boundaryX, boundaryY });
+async function computeAndSendRoi() {
+    const coords = computeRoiCoords();
+    if (!coords) { log('No rectangle'); return; }
+
+    const { numDigits: n, digits, boundaryX, boundaryY, rotation } = coords;
+
+    log(`ROI from touch: ${n} digits, rot=${rotation.toFixed(1)}°, boundary=${boundaryX}x${boundaryY}`);
+    digits.forEach((d, i) => log(`  P${i+1}: (${d.x}, ${d.y})`));
+
+    await sendRoiConfig({ numDigits: n, digits, boundaryX, boundaryY });
 
     // Update manual ROI inputs in the drawer
     document.getElementById('roiNumDigits').value = n;
