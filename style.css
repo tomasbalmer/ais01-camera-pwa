@@ -336,18 +336,43 @@ body {
 }
 .drawer-action:active { background: rgba(255,255,255,0.05); }
 
-/* ─── Calibration toolbar ─── */
-#calib-toolbar {
+/* ─── Calibration bar ─── */
+#calib-bar {
     display: none;
-    position: absolute;
-    bottom: 8px;
-    left: 8px;
-    right: 8px;
+    flex-direction: column;
+    flex-shrink: 0;
+    background: var(--bg);
+    border-top: 1px solid var(--border);
+    padding: 8px 12px;
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+    z-index: 10;
+}
+#calib-bar.visible { display: flex; }
+
+#calib-reading {
+    display: flex;
+    align-items: baseline;
+    justify-content: center;
+    gap: 8px;
+    padding: 4px 0 8px;
+}
+#calib-ai-value {
+    font-family: 'SF Mono', 'Menlo', 'Consolas', monospace;
+    font-size: 28px;
+    font-weight: 700;
+    color: var(--accent);
+}
+#calib-ai-conf {
+    font-size: 13px;
+    color: var(--text2);
+}
+
+#calib-controls {
+    display: flex;
     gap: 6px;
     align-items: center;
-    z-index: 20;
 }
-#calib-toolbar select {
+#calib-controls select {
     background: var(--bg);
     color: var(--text);
     border: 1px solid var(--border);

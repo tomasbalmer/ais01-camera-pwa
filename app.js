@@ -30,14 +30,14 @@ let lastFpsTime = 0;
 let currentFps = 0;
 let lastAiResult = null;
 let drawerOpen = false;
-let freezeStream = false;
 
 // Calibration state
 let calibMode = false;
-let calibRect = null;      // {x1, y1, x2, y2} in canvas coords
+let calibRect = null;      // {x, y, w, h} in canvas coords
 let calibDigits = 6;
-let calibDragging = false;
-let calibStartPt = null;
+let calibInteraction = null;  // null | 'move' | 'resize-tl' | 'resize-tr' | 'resize-bl' | 'resize-br' | 'resize-t' | 'resize-b' | 'resize-l' | 'resize-r'
+let calibTouchOffset = null;  // {dx, dy} offset from touch to rect origin
+let calibAnimFrame = null;    // rAF handle
 
 // === DOM refs ===
 const cam = document.getElementById('cam');
@@ -51,6 +51,9 @@ const drawer = document.getElementById('drawer');
 const drawerOverlay = document.getElementById('drawer-overlay');
 const overlayCanvas = document.getElementById('overlay-canvas');
 const overlayCtx = overlayCanvas.getContext('2d');
+const calibBar = document.getElementById('calib-bar');
+const calibAiValue = document.getElementById('calib-ai-value');
+const calibAiConf = document.getElementById('calib-ai-conf');
 
 // === Image rect helper (accounts for object-fit:contain letterbox) ===
 function getImageRect() {
@@ -380,13 +383,11 @@ function extractAndDisplayFrames(acc) {
             acc.splice(0, eoi + 2);
         }
 
-        if (!freezeStream) {
-            const blob = new Blob([jpeg], { type: 'image/jpeg' });
-            const url = URL.createObjectURL(blob);
-            const prev = cam.src;
-            cam.onload = () => { if (prev && prev.startsWith('blob:')) URL.revokeObjectURL(prev); };
-            cam.src = url;
-        }
+        const blob = new Blob([jpeg], { type: 'image/jpeg' });
+        const url = URL.createObjectURL(blob);
+        const prev = cam.src;
+        cam.onload = () => { if (prev && prev.startsWith('blob:')) URL.revokeObjectURL(prev); };
+        cam.src = url;
         frameCount++;
         fpsCount++;
 
@@ -514,27 +515,107 @@ function onValidatePosition() {
 }
 
 // === Touch Calibration ===
+const HANDLE_SIZE = 28;
+const MIN_RECT_SIZE = 30;
+
+function getDefaultCalibRect() {
+    const W = overlayCanvas.width, H = overlayCanvas.height;
+    const rw = W * 0.6;
+    const rh = H * 0.15;
+    return { x: (W - rw) / 2, y: (H - rh) / 2, w: rw, h: rh };
+}
+
+function hitTestCalibRect(tx, ty) {
+    if (!calibRect) return null;
+    const { x, y, w, h } = calibRect;
+    const hs = HANDLE_SIZE;
+
+    // Corners (priority)
+    if (tx >= x - hs && tx <= x + hs && ty >= y - hs && ty <= y + hs) return 'resize-tl';
+    if (tx >= x + w - hs && tx <= x + w + hs && ty >= y - hs && ty <= y + hs) return 'resize-tr';
+    if (tx >= x - hs && tx <= x + hs && ty >= y + h - hs && ty <= y + h + hs) return 'resize-bl';
+    if (tx >= x + w - hs && tx <= x + w + hs && ty >= y + h - hs && ty <= y + h + hs) return 'resize-br';
+
+    // Edges
+    if (tx >= x + hs && tx <= x + w - hs && ty >= y - hs && ty <= y + hs) return 'resize-t';
+    if (tx >= x + hs && tx <= x + w - hs && ty >= y + h - hs && ty <= y + h + hs) return 'resize-b';
+    if (tx >= x - hs && tx <= x + hs && ty >= y + hs && ty <= y + h - hs) return 'resize-l';
+    if (tx >= x + w - hs && tx <= x + w + hs && ty >= y + hs && ty <= y + h - hs) return 'resize-r';
+
+    // Interior (move)
+    if (tx >= x && tx <= x + w && ty >= y && ty <= y + h) return 'move';
+
+    return null;
+}
+
+function startCalibAnimLoop() {
+    function tick() {
+        if (!calibMode) return;
+        syncOverlay();
+        drawCalibOverlay();
+        updateCalibReading();
+        calibAnimFrame = requestAnimationFrame(tick);
+    }
+    calibAnimFrame = requestAnimationFrame(tick);
+}
+
+function stopCalibAnimLoop() {
+    if (calibAnimFrame) {
+        cancelAnimationFrame(calibAnimFrame);
+        calibAnimFrame = null;
+    }
+}
+
+function updateCalibReading() {
+    if (lastAiResult) {
+        const reading = lastAiResult.integer + lastAiResult.decimal / 1000000;
+        calibAiValue.textContent = reading.toFixed(2);
+        calibAiConf.textContent = lastAiResult.confidence + '%';
+    } else {
+        calibAiValue.textContent = '--';
+        calibAiConf.textContent = '';
+    }
+}
+
 function enterCalibMode() {
     if (!cam.src || cam.style.display === 'none') { log('No frame'); return; }
     calibMode = true;
-    calibRect = null;
-    freezeStream = true;
     syncOverlay();
+    calibRect = getDefaultCalibRect();
     overlayCanvas.classList.add('active');
-    document.getElementById('calib-toolbar').style.display = 'flex';
+    actionBar.classList.remove('visible');
+    calibBar.classList.add('visible');
     if (drawerOpen) toggleDrawer();
-    drawCalibOverlay();
+    startCalibAnimLoop();
     log('Calibration mode ON');
 }
 
 function exitCalibMode() {
     calibMode = false;
-    calibRect = null;
-    freezeStream = false;
+    calibInteraction = null;
+    stopCalibAnimLoop();
     overlayCanvas.classList.remove('active');
     overlayCtx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
-    document.getElementById('calib-toolbar').style.display = 'none';
+    calibBar.classList.remove('visible');
+    actionBar.classList.add('visible');
     log('Calibration mode OFF');
+}
+
+function drawCornerHandle(ctx, cx, cy) {
+    const L = 10;
+    ctx.strokeStyle = '#fff';
+    ctx.lineWidth = 2.5;
+    ctx.lineCap = 'round';
+    // Draw L-bracket
+    ctx.beginPath();
+    // Determine which direction the L extends
+    const { x, y, w, h } = calibRect;
+    const dx = cx <= x + w / 2 ? 1 : -1;
+    const dy = cy <= y + h / 2 ? 1 : -1;
+    ctx.moveTo(cx, cy + dy * L);
+    ctx.lineTo(cx, cy);
+    ctx.lineTo(cx + dx * L, cy);
+    ctx.stroke();
 }
 
 function drawCalibOverlay() {
@@ -542,69 +623,67 @@ function drawCalibOverlay() {
     const ctx = overlayCtx;
     ctx.clearRect(0, 0, W, H);
 
-    if (!calibRect) {
-        ctx.fillStyle = 'rgba(0,0,0,0.4)';
-        ctx.fillRect(0, 0, W, H);
-        ctx.fillStyle = '#fff';
-        ctx.font = '14px -apple-system, sans-serif';
-        ctx.textAlign = 'center';
-        ctx.fillText('Draw a rectangle over the digits', W / 2, H / 2);
-        return;
-    }
+    if (!calibRect) return;
 
-    const { x1, y1, x2, y2 } = calibRect;
+    const { x, y, w, h } = calibRect;
     const n = calibDigits;
-    const dw = (x2 - x1) / n;
+    const dw = w / n;
 
     // Dim outside selection
     ctx.fillStyle = 'rgba(0,0,0,0.5)';
-    ctx.fillRect(0, 0, W, y1);
-    ctx.fillRect(0, y2, W, H - y2);
-    ctx.fillRect(0, y1, x1, y2 - y1);
-    ctx.fillRect(x2, y1, W - x2, y2 - y1);
+    ctx.fillRect(0, 0, W, y);
+    ctx.fillRect(0, y + h, W, H - (y + h));
+    ctx.fillRect(0, y, x, h);
+    ctx.fillRect(x + w, y, W - (x + w), h);
 
     // Sub-rectangles
     for (let i = 0; i < n; i++) {
-        const sx = x1 + dw * i;
+        const sx = x + dw * i;
         ctx.strokeStyle = 'rgba(56, 189, 248, 0.8)';
         ctx.lineWidth = 1.5;
-        ctx.strokeRect(sx, y1, dw, y2 - y1);
+        ctx.strokeRect(sx, y, dw, h);
         // Center dot
         ctx.fillStyle = '#38bdf8';
         ctx.beginPath();
-        ctx.arc(sx + dw / 2, (y1 + y2) / 2, 3, 0, Math.PI * 2);
+        ctx.arc(sx + dw / 2, y + h / 2, 3, 0, Math.PI * 2);
         ctx.fill();
     }
 
     // Outer rectangle
     ctx.strokeStyle = '#38bdf8';
     ctx.lineWidth = 2;
-    ctx.strokeRect(x1, y1, x2 - x1, y2 - y1);
+    ctx.strokeRect(x, y, w, h);
+
+    // Corner handles (L-brackets)
+    drawCornerHandle(ctx, x, y);
+    drawCornerHandle(ctx, x + w, y);
+    drawCornerHandle(ctx, x, y + h);
+    drawCornerHandle(ctx, x + w, y + h);
 }
 
 function computeAndSendRoi() {
-    if (!calibRect) { log('No rectangle drawn'); return; }
-    const { w, h, scale } = getImageRect();
-    const sx1 = Math.round(calibRect.x1 / scale);
-    const sy1 = Math.round(calibRect.y1 / scale);
-    const sx2 = Math.round(calibRect.x2 / scale);
-    const sy2 = Math.round(calibRect.y2 / scale);
+    if (!calibRect) { log('No rectangle'); return; }
+    const { scale } = getImageRect();
+    const sx = Math.round(calibRect.x / scale);
+    const sy = Math.round(calibRect.y / scale);
+    const sw = Math.round(calibRect.w / scale);
+    const sh = Math.round(calibRect.h / scale);
 
     const n = calibDigits;
-    const dw = (sx2 - sx1) / n;
-    const cy = Math.round((sy1 + sy2) / 2);
+    const dw = sw / n;
+    const cy = Math.round(sy + sh / 2);
 
     const digits = [];
     for (let i = 0; i < 8; i++) {
         if (i < n) {
-            digits.push({ x: Math.round(sx1 + dw * i + dw / 2), y: cy });
+            digits.push({ x: Math.round(sx + dw * i + dw / 2), y: cy });
         } else {
             digits.push({ x: 0, y: 0 });
         }
     }
 
     const boundaryX = Math.round(dw);
-    const boundaryY = Math.round(sy2 - sy1);
+    const boundaryY = sh;
 
     log(`ROI from touch: ${n} digits, boundary=${boundaryX}x${boundaryY}`);
     digits.slice(0, n).forEach((d, i) => log(`  D${i+1}: (${d.x}, ${d.y})`));
@@ -631,28 +710,63 @@ overlayCanvas.addEventListener('touchstart', (e) => {
     e.preventDefault();
     const t = e.touches[0];
     const rect = overlayCanvas.getBoundingClientRect();
-    calibStartPt = { x: t.clientX - rect.left, y: t.clientY - rect.top };
-    calibDragging = true;
-    calibRect = null;
+    const tx = t.clientX - rect.left;
+    const ty = t.clientY - rect.top;
+
+    const hit = hitTestCalibRect(tx, ty);
+    if (!hit) return; // Touch outside rect — ignore
+    calibInteraction = hit;
+
+    if (hit === 'move') {
+        calibTouchOffset = { dx: tx - calibRect.x, dy: ty - calibRect.y };
+    } else {
+        calibTouchOffset = { dx: tx, dy: ty };
+    }
 }, { passive: false });
 
 overlayCanvas.addEventListener('touchmove', (e) => {
-    if (!calibDragging) return;
+    if (!calibInteraction || !calibRect) return;
     e.preventDefault();
     const t = e.touches[0];
-    const rect = overlayCanvas.getBoundingClientRect();
-    const x = t.clientX - rect.left;
-    const y = t.clientY - rect.top;
-    calibRect = {
-        x1: Math.min(calibStartPt.x, x), y1: Math.min(calibStartPt.y, y),
-        x2: Math.max(calibStartPt.x, x), y2: Math.max(calibStartPt.y, y),
-    };
-    drawCalibOverlay();
+    const br = overlayCanvas.getBoundingClientRect();
+    const tx = t.clientX - br.left;
+    const ty = t.clientY - br.top;
+    const W = overlayCanvas.width, H = overlayCanvas.height;
+
+    if (calibInteraction === 'move') {
+        let nx = tx - calibTouchOffset.dx;
+        let ny = ty - calibTouchOffset.dy;
+        nx = Math.max(0, Math.min(W - calibRect.w, nx));
+        ny = Math.max(0, Math.min(H - calibRect.h, ny));
+        calibRect.x = nx;
+        calibRect.y = ny;
+    } else {
+        // Resize: compute new edges
+        let { x, y, w, h } = calibRect;
+        let x2 = x + w, y2 = y + h;
+        const kind = calibInteraction;
+
+        if (kind.includes('l')) x = Math.min(tx, x2 - MIN_RECT_SIZE);
+        if (kind.includes('r')) x2 = Math.max(tx, x + MIN_RECT_SIZE);
+        if (kind.includes('t')) y = Math.min(ty, y2 - MIN_RECT_SIZE);
+        if (kind.includes('b')) y2 = Math.max(ty, y + MIN_RECT_SIZE);
+
+        // Clamp to canvas bounds
+        x = Math.max(0, x);
+        y = Math.max(0, y);
+        x2 = Math.min(W, x2);
+        y2 = Math.min(H, y2);
+
+        calibRect.x = x;
+        calibRect.y = y;
+        calibRect.w = x2 - x;
+        calibRect.h = y2 - y;
+    }
 }, { passive: false });
 
 overlayCanvas.addEventListener('touchend', () => {
-    calibDragging = false;
-    if (calibRect) drawCalibOverlay();
+    calibInteraction = null;
+    calibTouchOffset = null;
 });
 
 // === Init check ===
