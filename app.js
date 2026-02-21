@@ -44,7 +44,7 @@ let drawerOpen = false;
 // Calibration state
 let calibMode = false;
 let calibDigits = 6;
-let calibAnimFrame = null;    // rAF handle
+let calibInterval = null;     // slow interval handle (replaces rAF)
 
 // Konva calibration objects
 let konvaStage = null;
@@ -88,10 +88,17 @@ function clamp16(v) { return Math.max(0, Math.min(65535, Math.round(v))); }
 
 function syncOverlay() {
     const r = getImageRect();
-    overlayCanvas.style.left = (cam.offsetLeft + r.ox) + 'px';
-    overlayCanvas.style.top = (cam.offsetTop + r.oy) + 'px';
-    overlayCanvas.width = r.w;
-    overlayCanvas.height = r.h;
+    const newL = (cam.offsetLeft + r.ox) + 'px';
+    const newT = (cam.offsetTop + r.oy) + 'px';
+    const newW = Math.round(r.w);
+    const newH = Math.round(r.h);
+    if (overlayCanvas.width === newW && overlayCanvas.height === newH
+        && overlayCanvas.style.left === newL && overlayCanvas.style.top === newT) return false;
+    overlayCanvas.style.left = newL;
+    overlayCanvas.style.top = newT;
+    overlayCanvas.width = newW;
+    overlayCanvas.height = newH;
+    return true;
 }
 
 function log(msg) {
@@ -631,7 +638,7 @@ function initKonvaCalib() {
     konvaLayer.add(konvaTransformer);
 
     konvaRect.on('transform dragmove', () => {
-        updateDividers();
+        onCalibRectChange();
     });
 
     updateDividers();
@@ -647,9 +654,10 @@ function syncKonvaSize() {
     konvaStage.height(r.h);
 }
 
+let _dividerLineCount = 0; // cached line count for shape reuse
+
 function updateDividers() {
     if (!konvaDividers || !konvaRect) return;
-    konvaDividers.destroyChildren();
 
     const n = calibDigits;
     const rw = konvaRect.width() * konvaRect.scaleX();
@@ -658,15 +666,25 @@ function updateDividers() {
     const ry = konvaRect.y();
     const rot = konvaRect.rotation();
     const dw = rw / n;
+    const neededLines = n - 1;
 
-    // Divider lines between digit cells
-    for (let i = 1; i < n; i++) {
-        const localX = -rw / 2 + dw * i;
-        konvaDividers.add(new Konva.Line({
-            points: [localX, -rh / 2, localX, rh / 2],
-            stroke: 'rgba(56, 189, 248, 0.4)',
-            strokeWidth: 1,
-        }));
+    // Rebuild lines only when digit count changed
+    if (_dividerLineCount !== neededLines) {
+        konvaDividers.destroyChildren();
+        for (let i = 0; i < neededLines; i++) {
+            konvaDividers.add(new Konva.Line({
+                stroke: 'rgba(56, 189, 248, 0.4)',
+                strokeWidth: 1,
+            }));
+        }
+        _dividerLineCount = neededLines;
+    }
+
+    // Update positions on existing lines
+    const lines = konvaDividers.children;
+    for (let i = 0; i < neededLines; i++) {
+        const localX = -rw / 2 + dw * (i + 1);
+        lines[i].points([localX, -rh / 2, localX, rh / 2]);
     }
 
     // Position the group at rect center with same rotation
@@ -709,24 +727,29 @@ function drawDimOverlay() {
     ctx.restore();
 }
 
-function startCalibAnimLoop() {
-    function tick() {
-        if (!calibMode) return;
-        syncOverlay();
-        syncKonvaSize();
-        drawDimOverlay();
-        updateCalibReading();
-        updateCalibCoords();
-        updateDividers();
-        calibAnimFrame = requestAnimationFrame(tick);
-    }
-    calibAnimFrame = requestAnimationFrame(tick);
+// Event-driven update: called on rect drag/transform
+function onCalibRectChange() {
+    updateDividers();
+    drawDimOverlay();
+    updateCalibCoords();
 }
 
-function stopCalibAnimLoop() {
-    if (calibAnimFrame) {
-        cancelAnimationFrame(calibAnimFrame);
-        calibAnimFrame = null;
+// Slow interval (2s) for ambient updates: window resize + AI reading
+function startCalibInterval() {
+    stopCalibInterval();
+    calibInterval = setInterval(() => {
+        if (!calibMode) return;
+        const changed = syncOverlay();
+        syncKonvaSize();
+        if (changed) drawDimOverlay();
+        updateCalibReading();
+    }, 2000);
+}
+
+function stopCalibInterval() {
+    if (calibInterval) {
+        clearInterval(calibInterval);
+        calibInterval = null;
     }
 }
 
@@ -812,13 +835,20 @@ async function enterCalibMode() {
     konvaContainer.classList.add('active');
     actionBar.classList.remove('visible');
     calibBar.classList.add('visible');
-    startCalibAnimLoop();
+
+    // Draw once on enter
+    drawDimOverlay();
+    updateCalibCoords();
+    updateCalibReading();
+
+    // Start slow interval for ambient updates (resize, AI reading)
+    startCalibInterval();
     log('Calibration mode ON — image: ' + cam.naturalWidth + 'x' + cam.naturalHeight + ' — position rect over digits');
 }
 
 function exitCalibMode() {
     calibMode = false;
-    stopCalibAnimLoop();
+    stopCalibInterval();
     overlayCanvas.classList.remove('active');
     overlayCtx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
     konvaContainer.classList.remove('active');
@@ -828,8 +858,8 @@ function exitCalibMode() {
 }
 
 function drawCalibOverlay() {
-    // Called when digit selector changes — just update dividers
-    updateDividers();
+    // Called when digit selector changes
+    onCalibRectChange();
     if (konvaLayer) konvaLayer.draw();
 }
 
