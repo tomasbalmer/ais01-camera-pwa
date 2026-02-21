@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="mobile-web-app-capable" content="yes">
+    <title>AIS01 Camera Viewer</title>
+    <link rel="manifest" href="manifest.json">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div id="toolbar">
+        <div id="stats">Disconnected</div>
+        <div id="cam-controls" class="controls">
+            <button class="cmd-btn active" id="btnFullImg" onclick="sendCommand('SHOW_FULL_IMAGE')">Full</button>
+            <button class="cmd-btn" id="btnROI" onclick="sendCommand('SHOW_ROI')">ROI</button>
+            <button class="cmd-btn" id="btnRAW" onclick="toggleRAW()">RAW: off</button>
+            <button class="cmd-btn danger" onclick="toggleConnection()">Stop</button>
+        </div>
+    </div>
+    <div id="viewer">
+        <img id="cam" />
+        <div id="connect-screen">
+            <button id="big-btn" onclick="toggleConnection()">CONNECT CAMERA</button>
+            <p id="message">Plug in the FTDI camera via USB OTG and tap the button.</p>
+        </div>
+    </div>
+    <div id="log"></div>
+    <script src="app.js"></script>
+</body>
+</html>

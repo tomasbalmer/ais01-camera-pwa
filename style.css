@@ -1,0 +1,116 @@
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+    background: #111;
+    color: #eee;
+    font-family: -apple-system, system-ui, sans-serif;
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    overflow: hidden;
+}
+
+#toolbar {
+    width: 100%;
+    padding: 8px 12px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background: #1a1a2e;
+    z-index: 10;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+#stats {
+    font-size: 12px;
+    color: #888;
+    flex: 1;
+}
+#stats.active { color: #4af; }
+
+.controls {
+    display: none;
+    gap: 6px;
+    flex-wrap: wrap;
+}
+.controls.visible { display: flex; }
+
+.cmd-btn {
+    background: #2a2a4e;
+    color: #ccc;
+    border: 1px solid #444;
+    border-radius: 6px;
+    padding: 6px 12px;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    touch-action: manipulation;
+}
+.cmd-btn:active { background: #3a3a6e; }
+.cmd-btn.active { background: #4af; color: #111; border-color: #4af; }
+.cmd-btn.danger { border-color: #f44; color: #f88; }
+.cmd-btn.danger:active { background: #f44; color: #fff; }
+
+#connect-screen {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 20px;
+}
+#connect-screen p {
+    color: #888;
+    font-size: 14px;
+}
+
+#big-btn {
+    background: #4af;
+    color: #111;
+    border: none;
+    border-radius: 16px;
+    padding: 30px 60px;
+    font-size: 28px;
+    font-weight: 700;
+    cursor: pointer;
+    -webkit-tap-highlight-color: rgba(68,170,255,0.3);
+    touch-action: manipulation;
+}
+#big-btn:active { background: #38d; transform: scale(0.97); }
+#big-btn:disabled { background: #444; color: #888; }
+
+#viewer {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    overflow: hidden;
+}
+
+#cam {
+    max-width: 100%;
+    max-height: 100%;
+    image-rendering: auto;
+    display: none;
+}
+
+#message {
+    text-align: center;
+    padding: 40px 20px;
+    color: #666;
+    font-size: 18px;
+    line-height: 1.6;
+}
+#message.error { color: #f66; }
+
+#log {
+    width: 100%;
+    padding: 6px 12px;
+    background: #0a0a15;
+    font-family: monospace;
+    font-size: 11px;
+    color: #8f8;
+    max-height: 120px;
+    overflow-y: auto;
+}
