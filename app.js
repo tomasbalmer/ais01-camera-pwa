@@ -33,11 +33,15 @@ let drawerOpen = false;
 
 // Calibration state
 let calibMode = false;
-let calibRect = null;      // {x, y, w, h} in canvas coords
 let calibDigits = 6;
-let calibInteraction = null;  // null | 'move' | 'resize-tl' | 'resize-tr' | 'resize-bl' | 'resize-br' | 'resize-t' | 'resize-b' | 'resize-l' | 'resize-r'
-let calibTouchOffset = null;  // {dx, dy} offset from touch to rect origin
 let calibAnimFrame = null;    // rAF handle
+
+// Konva calibration objects
+let konvaStage = null;
+let konvaLayer = null;
+let konvaRect = null;
+let konvaTransformer = null;
+let konvaDividers = null;     // Konva.Group for digit divider lines + dots
 
 // === DOM refs ===
 const cam = document.getElementById('cam');
@@ -54,6 +58,7 @@ const overlayCtx = overlayCanvas.getContext('2d');
 const calibBar = document.getElementById('calib-bar');
 const calibAiValue = document.getElementById('calib-ai-value');
 const calibAiConf = document.getElementById('calib-ai-conf');
+const konvaContainer = document.getElementById('konva-container');
 
 // === Image rect helper (accounts for object-fit:contain letterbox) ===
 function getImageRect() {
@@ -514,46 +519,152 @@ function onValidatePosition() {
     if (drawerOpen) toggleDrawer();
 }
 
-// === Touch Calibration ===
-const HANDLE_SIZE = 28;
-const MIN_RECT_SIZE = 30;
+// === Konva Calibration ===
 
-function getDefaultCalibRect() {
-    const W = overlayCanvas.width, H = overlayCanvas.height;
-    const rw = W * 0.6;
-    const rh = H * 0.15;
-    return { x: (W - rw) / 2, y: (H - rh) / 2, w: rw, h: rh };
+function initKonvaCalib() {
+    const r = getImageRect();
+    const w = r.w;
+    const h = r.h;
+
+    konvaStage = new Konva.Stage({
+        container: 'konva-container',
+        width: w,
+        height: h,
+    });
+
+    konvaLayer = new Konva.Layer();
+    konvaStage.add(konvaLayer);
+
+    const rectW = w * 0.6;
+    const rectH = h * 0.15;
+
+    konvaRect = new Konva.Rect({
+        x: (w - rectW) / 2,
+        y: (h - rectH) / 2,
+        width: rectW,
+        height: rectH,
+        fill: 'transparent',
+        stroke: '#38bdf8',
+        strokeWidth: 2,
+        draggable: true,
+    });
+    konvaLayer.add(konvaRect);
+
+    konvaDividers = new Konva.Group();
+    konvaLayer.add(konvaDividers);
+
+    konvaTransformer = new Konva.Transformer({
+        nodes: [konvaRect],
+        rotateEnabled: true,
+        rotationSnaps: [0, 90, 180, 270],
+        rotateAnchorOffset: 30,
+        anchorSize: 20,
+        anchorCornerRadius: 4,
+        anchorStroke: '#38bdf8',
+        anchorFill: '#1e293b',
+        borderStroke: '#38bdf8',
+        borderStrokeWidth: 2,
+        boundBoxFunc: (oldBox, newBox) => {
+            if (newBox.width < 30 || newBox.height < 20) return oldBox;
+            return newBox;
+        },
+    });
+    konvaLayer.add(konvaTransformer);
+
+    konvaRect.on('transform dragmove', () => {
+        updateDividers();
+    });
+
+    updateDividers();
+    konvaLayer.draw();
 }
 
-function hitTestCalibRect(tx, ty) {
-    if (!calibRect) return null;
-    const { x, y, w, h } = calibRect;
-    const hs = HANDLE_SIZE;
+function syncKonvaSize() {
+    if (!konvaStage) return;
+    const r = getImageRect();
+    konvaContainer.style.left = (cam.offsetLeft + r.ox) + 'px';
+    konvaContainer.style.top = (cam.offsetTop + r.oy) + 'px';
+    konvaStage.width(r.w);
+    konvaStage.height(r.h);
+}
 
-    // Corners (priority)
-    if (tx >= x - hs && tx <= x + hs && ty >= y - hs && ty <= y + hs) return 'resize-tl';
-    if (tx >= x + w - hs && tx <= x + w + hs && ty >= y - hs && ty <= y + hs) return 'resize-tr';
-    if (tx >= x - hs && tx <= x + hs && ty >= y + h - hs && ty <= y + h + hs) return 'resize-bl';
-    if (tx >= x + w - hs && tx <= x + w + hs && ty >= y + h - hs && ty <= y + h + hs) return 'resize-br';
+function updateDividers() {
+    if (!konvaDividers || !konvaRect) return;
+    konvaDividers.destroyChildren();
 
-    // Edges
-    if (tx >= x + hs && tx <= x + w - hs && ty >= y - hs && ty <= y + hs) return 'resize-t';
-    if (tx >= x + hs && tx <= x + w - hs && ty >= y + h - hs && ty <= y + h + hs) return 'resize-b';
-    if (tx >= x - hs && tx <= x + hs && ty >= y + hs && ty <= y + h - hs) return 'resize-l';
-    if (tx >= x + w - hs && tx <= x + w + hs && ty >= y + hs && ty <= y + h - hs) return 'resize-r';
+    const n = calibDigits;
+    const rw = konvaRect.width() * konvaRect.scaleX();
+    const rh = konvaRect.height() * konvaRect.scaleY();
+    const rx = konvaRect.x();
+    const ry = konvaRect.y();
+    const rot = konvaRect.rotation();
+    const dw = rw / n;
 
-    // Interior (move)
-    if (tx >= x && tx <= x + w && ty >= y && ty <= y + h) return 'move';
+    for (let i = 0; i < n; i++) {
+        // Divider line (skip first left edge, draw inner dividers)
+        if (i > 0) {
+            const localX = -rw / 2 + dw * i;
+            konvaDividers.add(new Konva.Line({
+                points: [localX, -rh / 2, localX, rh / 2],
+                stroke: 'rgba(56, 189, 248, 0.5)',
+                strokeWidth: 1,
+            }));
+        }
+        // Center dot for each digit cell
+        const dotX = -rw / 2 + dw * i + dw / 2;
+        konvaDividers.add(new Konva.Circle({
+            x: dotX,
+            y: 0,
+            radius: 3,
+            fill: '#38bdf8',
+        }));
+    }
 
-    return null;
+    // Position the group at rect center with same rotation
+    konvaDividers.x(rx + rw / 2);
+    konvaDividers.y(ry + rh / 2);
+    konvaDividers.rotation(rot);
+}
+
+function drawDimOverlay() {
+    const W = overlayCanvas.width, H = overlayCanvas.height;
+    const ctx = overlayCtx;
+    ctx.clearRect(0, 0, W, H);
+
+    if (!konvaRect) return;
+
+    const rw = konvaRect.width() * konvaRect.scaleX();
+    const rh = konvaRect.height() * konvaRect.scaleY();
+    const cx = konvaRect.x() + rw / 2;
+    const cy = konvaRect.y() + rh / 2;
+    const rot = konvaRect.rotation() * Math.PI / 180;
+
+    // Dim overlay with evenodd cutout for the rotated rect
+    ctx.save();
+    ctx.fillStyle = 'rgba(0,0,0,0.5)';
+    ctx.beginPath();
+    // Outer path (full canvas, clockwise)
+    ctx.rect(0, 0, W, H);
+    // Inner cutout (counter-clockwise for evenodd)
+    ctx.translate(cx, cy);
+    ctx.rotate(rot);
+    ctx.moveTo(-rw / 2, -rh / 2);
+    ctx.lineTo(-rw / 2, rh / 2);
+    ctx.lineTo(rw / 2, rh / 2);
+    ctx.lineTo(rw / 2, -rh / 2);
+    ctx.closePath();
+    ctx.fill('evenodd');
+    ctx.restore();
 }
 
 function startCalibAnimLoop() {
     function tick() {
         if (!calibMode) return;
         syncOverlay();
-        drawCalibOverlay();
+        syncKonvaSize();
+        drawDimOverlay();
         updateCalibReading();
+        updateDividers();
         calibAnimFrame = requestAnimationFrame(tick);
     }
     calibAnimFrame = requestAnimationFrame(tick);
@@ -581,8 +692,16 @@ function enterCalibMode() {
     if (!cam.src || cam.style.display === 'none') { log('No frame'); return; }
     calibMode = true;
     syncOverlay();
-    calibRect = getDefaultCalibRect();
+
+    if (!konvaStage) {
+        initKonvaCalib();
+    } else {
+        syncKonvaSize();
+        updateDividers();
+    }
+
     overlayCanvas.classList.add('active');
+    konvaContainer.classList.add('active');
     actionBar.classList.remove('visible');
     calibBar.classList.add('visible');
     if (drawerOpen) toggleDrawer();
@@ -592,100 +711,50 @@ function enterCalibMode() {
 
 function exitCalibMode() {
     calibMode = false;
-    calibInteraction = null;
     stopCalibAnimLoop();
     overlayCanvas.classList.remove('active');
     overlayCtx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
+    konvaContainer.classList.remove('active');
     calibBar.classList.remove('visible');
     actionBar.classList.add('visible');
     log('Calibration mode OFF');
 }
 
-function drawCornerHandle(ctx, cx, cy) {
-    const L = 10;
-    ctx.strokeStyle = '#fff';
-    ctx.lineWidth = 2.5;
-    ctx.lineCap = 'round';
-    // Draw L-bracket
-    ctx.beginPath();
-    // Determine which direction the L extends
-    const { x, y, w, h } = calibRect;
-    const dx = cx <= x + w / 2 ? 1 : -1;
-    const dy = cy <= y + h / 2 ? 1 : -1;
-    ctx.moveTo(cx, cy + dy * L);
-    ctx.lineTo(cx, cy);
-    ctx.lineTo(cx + dx * L, cy);
-    ctx.stroke();
-}
-
 function drawCalibOverlay() {
-    const W = overlayCanvas.width, H = overlayCanvas.height;
-    const ctx = overlayCtx;
-    ctx.clearRect(0, 0, W, H);
-
-    if (!calibRect) return;
-
-    const { x, y, w, h } = calibRect;
-    const n = calibDigits;
-    const dw = w / n;
-
-    // Dim outside selection
-    ctx.fillStyle = 'rgba(0,0,0,0.5)';
-    ctx.fillRect(0, 0, W, y);
-    ctx.fillRect(0, y + h, W, H - (y + h));
-    ctx.fillRect(0, y, x, h);
-    ctx.fillRect(x + w, y, W - (x + w), h);
-
-    // Sub-rectangles
-    for (let i = 0; i < n; i++) {
-        const sx = x + dw * i;
-        ctx.strokeStyle = 'rgba(56, 189, 248, 0.8)';
-        ctx.lineWidth = 1.5;
-        ctx.strokeRect(sx, y, dw, h);
-        // Center dot
-        ctx.fillStyle = '#38bdf8';
-        ctx.beginPath();
-        ctx.arc(sx + dw / 2, y + h / 2, 3, 0, Math.PI * 2);
-        ctx.fill();
-    }
-
-    // Outer rectangle
-    ctx.strokeStyle = '#38bdf8';
-    ctx.lineWidth = 2;
-    ctx.strokeRect(x, y, w, h);
-
-    // Corner handles (L-brackets)
-    drawCornerHandle(ctx, x, y);
-    drawCornerHandle(ctx, x + w, y);
-    drawCornerHandle(ctx, x, y + h);
-    drawCornerHandle(ctx, x + w, y + h);
+    // Called when digit selector changes — just update dividers
+    updateDividers();
+    if (konvaLayer) konvaLayer.draw();
 }
 
 function computeAndSendRoi() {
-    if (!calibRect) { log('No rectangle'); return; }
+    if (!konvaRect) { log('No rectangle'); return; }
     const { scale } = getImageRect();
-    const sx = Math.round(calibRect.x / scale);
-    const sy = Math.round(calibRect.y / scale);
-    const sw = Math.round(calibRect.w / scale);
-    const sh = Math.round(calibRect.h / scale);
-
+    const rect = konvaRect;
+    const rw = rect.width() * rect.scaleX();
+    const rh = rect.height() * rect.scaleY();
+    const cx = rect.x() + rw / 2;
+    const cy = rect.y() + rh / 2;
+    const rot = rect.rotation() * Math.PI / 180;
     const n = calibDigits;
-    const dw = sw / n;
-    const cy = Math.round(sy + sh / 2);
+    const dw = rw / n;
 
     const digits = [];
     for (let i = 0; i < 8; i++) {
         if (i < n) {
-            digits.push({ x: Math.round(sx + dw * i + dw / 2), y: cy });
+            const localX = -rw / 2 + dw * i + dw / 2;
+            const localY = 0;
+            const rx = cx + localX * Math.cos(rot) - localY * Math.sin(rot);
+            const ry = cy + localX * Math.sin(rot) + localY * Math.cos(rot);
+            digits.push({ x: Math.round(rx / scale), y: Math.round(ry / scale) });
         } else {
             digits.push({ x: 0, y: 0 });
         }
     }
 
-    const boundaryX = Math.round(dw);
-    const boundaryY = sh;
+    const boundaryX = Math.round(dw / scale);
+    const boundaryY = Math.round(rh / scale);
 
-    log(`ROI from touch: ${n} digits, boundary=${boundaryX}x${boundaryY}`);
+    log(`ROI from touch: ${n} digits, rot=${rect.rotation().toFixed(1)}°, boundary=${boundaryX}x${boundaryY}`);
     digits.slice(0, n).forEach((d, i) => log(`  D${i+1}: (${d.x}, ${d.y})`));
 
     sendRoiConfig({ numDigits: n, digits, boundaryX, boundaryY });
@@ -703,71 +772,6 @@ function computeAndSendRoi() {
 
     exitCalibMode();
 }
-
-// Touch event handlers for calibration
-overlayCanvas.addEventListener('touchstart', (e) => {
-    if (!calibMode) return;
-    e.preventDefault();
-    const t = e.touches[0];
-    const rect = overlayCanvas.getBoundingClientRect();
-    const tx = t.clientX - rect.left;
-    const ty = t.clientY - rect.top;
-
-    const hit = hitTestCalibRect(tx, ty);
-    if (!hit) return; // Touch outside rect — ignore
-    calibInteraction = hit;
-
-    if (hit === 'move') {
-        calibTouchOffset = { dx: tx - calibRect.x, dy: ty - calibRect.y };
-    } else {
-        calibTouchOffset = { dx: tx, dy: ty };
-    }
-}, { passive: false });
-
-overlayCanvas.addEventListener('touchmove', (e) => {
-    if (!calibInteraction || !calibRect) return;
-    e.preventDefault();
-    const t = e.touches[0];
-    const br = overlayCanvas.getBoundingClientRect();
-    const tx = t.clientX - br.left;
-    const ty = t.clientY - br.top;
-    const W = overlayCanvas.width, H = overlayCanvas.height;
-
-    if (calibInteraction === 'move') {
-        let nx = tx - calibTouchOffset.dx;
-        let ny = ty - calibTouchOffset.dy;
-        nx = Math.max(0, Math.min(W - calibRect.w, nx));
-        ny = Math.max(0, Math.min(H - calibRect.h, ny));
-        calibRect.x = nx;
-        calibRect.y = ny;
-    } else {
-        // Resize: compute new edges
-        let { x, y, w, h } = calibRect;
-        let x2 = x + w, y2 = y + h;
-        const kind = calibInteraction;
-
-        if (kind.includes('l')) x = Math.min(tx, x2 - MIN_RECT_SIZE);
-        if (kind.includes('r')) x2 = Math.max(tx, x + MIN_RECT_SIZE);
-        if (kind.includes('t')) y = Math.min(ty, y2 - MIN_RECT_SIZE);
-        if (kind.includes('b')) y2 = Math.max(ty, y + MIN_RECT_SIZE);
-
-        // Clamp to canvas bounds
-        x = Math.max(0, x);
-        y = Math.max(0, y);
-        x2 = Math.min(W, x2);
-        y2 = Math.min(H, y2);
-
-        calibRect.x = x;
-        calibRect.y = y;
-        calibRect.w = x2 - x;
-        calibRect.h = y2 - y;
-    }
-}, { passive: false });
-
-overlayCanvas.addEventListener('touchend', () => {
-    calibInteraction = null;
-    calibTouchOffset = null;
-});
 
 // === Init check ===
 const isSecure = window.isSecureContext;

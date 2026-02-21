@@ -13,6 +13,7 @@
     <link rel="icon" type="image/svg+xml" href="waterplan-icon.svg">
     <link rel="apple-touch-icon" href="waterplan-icon.svg">
     <link rel="manifest" href="manifest.json">
+    <script src="https://unpkg.com/konva@9/konva.min.js"></script>
     <script>
     // Cache-bust: append timestamp to CSS/JS so browser always fetches fresh
     var v = Date.now();
@@ -33,6 +34,7 @@
     <main id="viewer">
         <img id="cam" />
         <canvas id="overlay-canvas"></canvas>
+        <div id="konva-container"></div>
         <div id="connect-screen">
             <div class="connect-icon">
                 <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="#4af" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/><circle cx="12" cy="10" r="3"/></svg>
