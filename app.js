@@ -9,8 +9,11 @@ const SIO_SET_BAUD_RATE = 0x03;
 const SIO_SET_DATA = 0x04;
 const SIO_SET_LATENCY_TIMER = 0x09;
 
-// === Sensor resolution (ROI coords always in this space) ===
+// === Sensor resolution (JPEG stream is 640×480) ===
 const SENSOR_W = 640, SENSOR_H = 480;
+
+// === Calibration coordinate space (ROI engine expects 320×240, bottom-left origin) ===
+const CAL_W = 320, CAL_H = 240;
 
 // Always 8 ROI points = 4 reference positions × 2 corners (top-left + bottom-left).
 // The 4 references are evenly spaced from center of first digit to center of last digit.
@@ -189,7 +192,7 @@ function buildRoiPayload(config) {
 
 async function sendRoiConfig(config) {
     await sendRawBytes([0xC0, 0x5A, 0x03, 0x05, 0x00, 0x00, 0x50]);
-    await new Promise(r => setTimeout(r, 50));
+    await new Promise(r => setTimeout(r, 1000));
     const payload = buildRoiPayload(config);
     const frame = new Uint8Array(4 + payload.length);
     frame.set([0xC0, 0x5A, 0x03, 0x03]);
@@ -597,9 +600,9 @@ function initKonvaCalib() {
         y: (h - rectH) / 2,
         width: rectW,
         height: rectH,
-        fill: 'rgba(56, 189, 248, 0.06)',
-        stroke: '#38bdf8',
-        strokeWidth: 1.5,
+        fill: 'rgba(56, 189, 248, 0.04)',
+        stroke: 'rgba(56, 189, 248, 0.7)',
+        strokeWidth: 1,
         draggable: true,
     });
     konvaLayer.add(konvaRect);
@@ -609,16 +612,17 @@ function initKonvaCalib() {
 
     konvaTransformer = new Konva.Transformer({
         nodes: [konvaRect],
+        enabledAnchors: ['top-left', 'top-right', 'bottom-left', 'bottom-right', 'middle-left', 'middle-right', 'top-center', 'bottom-center'],
         rotateEnabled: true,
         rotationSnaps: [0, 90, 180, 270],
-        rotateAnchorOffset: 20,
-        anchorSize: 16,
-        anchorCornerRadius: 8,
+        rotateAnchorOffset: 16,
+        anchorSize: 10,
+        anchorCornerRadius: 5,
         anchorStroke: '#38bdf8',
-        anchorStrokeWidth: 2,
-        anchorFill: 'rgba(15, 23, 42, 0.8)',
-        borderStroke: '#38bdf8',
-        borderStrokeWidth: 1.5,
+        anchorStrokeWidth: 1.5,
+        anchorFill: 'rgba(15, 23, 42, 0.9)',
+        borderStroke: 'rgba(56, 189, 248, 0.6)',
+        borderStrokeWidth: 1,
         boundBoxFunc: (oldBox, newBox) => {
             if (newBox.width < 30 || newBox.height < 20) return oldBox;
             return newBox;
@@ -655,36 +659,13 @@ function updateDividers() {
     const rot = konvaRect.rotation();
     const dw = rw / n;
 
-    // Thin divider lines between all digit cells
+    // Divider lines between digit cells
     for (let i = 1; i < n; i++) {
         const localX = -rw / 2 + dw * i;
         konvaDividers.add(new Konva.Line({
             points: [localX, -rh / 2, localX, rh / 2],
-            stroke: 'rgba(56, 189, 248, 0.25)',
+            stroke: 'rgba(56, 189, 248, 0.4)',
             strokeWidth: 1,
-        }));
-    }
-
-    // 4 evenly-spaced reference markers (center of first → center of last digit)
-    for (let ref = 0; ref < 4; ref++) {
-        const t = ref / 3;
-        const centerX = dw / 2 + t * (rw - dw);
-        const localX = -rw / 2 + centerX;
-        // Bold vertical line
-        konvaDividers.add(new Konva.Line({
-            points: [localX, -rh / 2, localX, rh / 2],
-            stroke: '#38bdf8',
-            strokeWidth: 2,
-        }));
-        // Top corner dot
-        konvaDividers.add(new Konva.Circle({
-            x: localX, y: -rh / 2,
-            radius: 4, fill: '#38bdf8',
-        }));
-        // Bottom corner dot
-        konvaDividers.add(new Konva.Circle({
-            x: localX, y: rh / 2,
-            radius: 4, fill: '#38bdf8',
         }));
     }
 
@@ -703,17 +684,20 @@ function drawDimOverlay() {
 
     const rw = konvaRect.width() * konvaRect.scaleX();
     const rh = konvaRect.height() * konvaRect.scaleY();
-    const cx = konvaRect.x() + rw / 2;
-    const cy = konvaRect.y() + rh / 2;
+    const rx = konvaRect.x();
+    const ry = konvaRect.y();
     const rot = konvaRect.rotation() * Math.PI / 180;
+
+    // Rect rotates around its (x,y) = top-left corner.
+    // Compute visual center accounting for rotation.
+    const cx = rx + (rw / 2) * Math.cos(rot) - (rh / 2) * Math.sin(rot);
+    const cy = ry + (rw / 2) * Math.sin(rot) + (rh / 2) * Math.cos(rot);
 
     // Dim overlay with evenodd cutout for the rotated rect
     ctx.save();
     ctx.fillStyle = 'rgba(0,0,0,0.5)';
     ctx.beginPath();
-    // Outer path (full canvas, clockwise)
     ctx.rect(0, 0, W, H);
-    // Inner cutout (counter-clockwise for evenodd)
     ctx.translate(cx, cy);
     ctx.rotate(rot);
     ctx.moveTo(-rw / 2, -rh / 2);
@@ -779,7 +763,9 @@ function previewRoi() {
     const rw = rect.width() * rect.scaleX();
     const rh = rect.height() * rect.scaleY();
     log('=== PREVIEW (not sent) ===');
-    log('  Image: ' + cam.naturalWidth + 'x' + cam.naturalHeight + ' | display: ' + Math.round(r.w) + 'x' + Math.round(r.h) + ' | pxScale: ' + (r.w / (cam.naturalWidth || SENSOR_W)).toFixed(4));
+    const _imgW = cam.naturalWidth || CAL_W;
+    const _dispW = konvaStage ? konvaStage.width() : 0;
+    log('  Image: ' + _imgW + 'x' + (cam.naturalHeight || CAL_H) + ' | stage: ' + Math.round(_dispW) + 'x' + Math.round(konvaStage ? konvaStage.height() : 0) + ' | pxScale: ' + (_dispW / _imgW).toFixed(2) + ' | FlipY: ' + (document.getElementById('calibFlipY')?.checked));
     log('  Rect: x=' + Math.round(rect.x()) + ' y=' + Math.round(rect.y()) + ' w=' + Math.round(rw) + ' h=' + Math.round(rh) + ' rot=' + rect.rotation().toFixed(1));
     for (let i = 0; i < 4; i++) {
         const p1 = coords.digits[i * 2];
@@ -848,12 +834,15 @@ function drawCalibOverlay() {
 }
 
 function computeRoiCoords() {
-    if (!konvaRect) return null;
-    const r = getImageRect();
-    // Map to transmitted image resolution (e.g. 320x240), NOT hardcoded 640x480
-    const imgW = cam.naturalWidth || SENSOR_W;
-    const imgH = cam.naturalHeight || SENSOR_H;
-    const pxScale = r.w / imgW; // display pixels per image pixel
+    if (!konvaRect || !konvaStage) return null;
+    // Use Konva stage dimensions (stable — set when calib mode was entered)
+    const dispW = konvaStage.width();
+    const dispH = konvaStage.height();
+    const imgW = cam.naturalWidth || CAL_W;
+    const imgH = cam.naturalHeight || CAL_H;
+    const pxScale = dispW / imgW; // display pixels per image pixel
+    const calScaleX = CAL_W / imgW;
+    const calScaleY = CAL_H / imgH;
     const flipY = document.getElementById('calibFlipY')?.checked ?? false;
     const rect = konvaRect;
     const rw = rect.width() * rect.scaleX();
@@ -879,17 +868,19 @@ function computeRoiCoords() {
         const botDispX = cx + localX * Math.cos(rot) - (rh / 2) * Math.sin(rot);
         const botDispY = cy + localX * Math.sin(rot) + (rh / 2) * Math.cos(rot);
 
-        // Convert display coords → image pixel coords
-        const topSx = Math.round(topDispX / pxScale);
-        const botSx = Math.round(botDispX / pxScale);
+        // Convert display coords → calibration coords (320×240)
+        const topSx = Math.round(topDispX / pxScale * calScaleX);
+        const botSx = Math.round(botDispX / pxScale * calScaleX);
 
         let topSy, botSy;
         if (flipY) {
-            topSy = imgH - Math.round(topDispY / pxScale);
-            botSy = imgH - Math.round(botDispY / pxScale);
+            // Bottom-left origin (sensor convention): Y increases upward
+            topSy = Math.round(CAL_H - topDispY / pxScale * calScaleY);
+            botSy = Math.round(CAL_H - botDispY / pxScale * calScaleY);
         } else {
-            topSy = Math.round(topDispY / pxScale);
-            botSy = Math.round(botDispY / pxScale);
+            // Top-left origin (screen convention)
+            topSy = Math.round(topDispY / pxScale * calScaleY);
+            botSy = Math.round(botDispY / pxScale * calScaleY);
         }
 
         // Odd point (P1,P3,P5,P7): lower Y value
@@ -903,8 +894,8 @@ function computeRoiCoords() {
         digits.push({ x: clamp16(highX), y: clamp16(highY) });
     }
 
-    const boundaryX = Math.round(digitW / pxScale);
-    const boundaryY = Math.round(rh / pxScale);
+    const boundaryX = Math.round(digitW / pxScale * calScaleX);
+    const boundaryY = Math.round(rh / pxScale * calScaleY);
 
     return { numDigits: n, digits, boundaryX, boundaryY, rotation: rect.rotation() };
 }
@@ -913,7 +904,11 @@ async function computeAndSendRoi() {
     const coords = computeRoiCoords();
     if (!coords) { log('No rectangle'); return; }
 
-    const { numDigits: n, digits, boundaryX, boundaryY, rotation } = coords;
+    const { numDigits: n, digits, rotation } = coords;
+
+    // Use drawer boundary values (default 70x70), not computed from rect dimensions
+    const boundaryX = parseInt(document.getElementById('roiBoundX').value) || 70;
+    const boundaryY = parseInt(document.getElementById('roiBoundY').value) || 70;
 
     log(`ROI from touch: ${n} digits, rot=${rotation.toFixed(1)}°, boundary=${boundaryX}x${boundaryY}`);
     digits.forEach((d, i) => log(`  P${i+1}: (${d.x}, ${d.y})`));
