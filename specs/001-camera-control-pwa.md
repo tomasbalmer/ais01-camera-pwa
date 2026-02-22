@@ -1,7 +1,9 @@
 # PWA de Control y Calibración de Cámara AIS01-LB
 
 Stage: `Completed`
-Last Updated: 2026-02-21
+Last Updated: 2026-02-22
+
+> **CORRECTION (2026-02-22)**: Command code values in Grupo 0x00 were swapped. Field testing confirmed: SHOW FULL IMAGE = 0x04, SHOW ROI = 0x05. Canonical protocol reference: `ais01-lorawan-endnode-v2/specs/2026/02/main/001-camera-protocol-standardization.md`
 
 ## High-Level Objective
 
@@ -59,8 +61,8 @@ Todos los comandos tienen formato: `C0 5A [Cmd Group] [Cmd ID] [Payload 2 bytes]
 | **SEND** | `C0 5A 00 00 00 00 01` | 0x01 | Trigger general — ejecuta operación seleccionada |
 | **ENABLE RAW** | `C0 5A 00 00 00 00 02` | 0x02 | Habilita datos RAW + JPEG (datos adicionales por fila) |
 | **DISABLE RAW** | `C0 5A 00 00 00 00 03` | 0x03 | Vuelve a JPEG-only |
-| **SHOW ROI** | `C0 5A 00 00 00 00 04` | 0x04 | Muestra imagen con ROI (160×64) |
-| **SHOW FULL IMAGE** | `C0 5A 00 00 00 00 05` | 0x05 | Muestra imagen completa (640×480) |
+| **SHOW FULL IMAGE** | `C0 5A 00 00 00 00 04` | 0x04 | Muestra imagen completa (640×480) |
+| **SHOW ROI** | `C0 5A 00 00 00 00 05` | 0x05 | Muestra imagen con ROI (160×64) |
 
 #### Grupo 0x03 — Sistema/Control/Calibración
 
@@ -201,7 +203,7 @@ boundary_x (u16) | boundary_y (u16) | padding (3 bytes zeros)
 | **UART Setting** | Start | `C0 5A 03 04 00 00 00` | Implementado |
 | | Send | `C0 5A 00 00 00 00 01` | Implementado |
 | | Enable/Disable RAW | `...02` / `...03` | Implementado |
-| | Show ROI / Full Image | `...04` / `...05` | Implementado |
+| | Show Full Image / ROI | `...04` / `...05` | Implementado |
 | **Sensor Config** | Read Register | `C0 5A 04 09 00 AA 00` | Falta |
 | | Write Register | `C0 5A 04 0A 00 AA VV` | Falta |
 | **ROI Setting** | Digit Wheel | SET MODE + ROI DATA | Falta |

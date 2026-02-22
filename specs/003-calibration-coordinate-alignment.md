@@ -32,27 +32,14 @@ La PWA (`ais01-camera-pwa`) ya tiene implementado:
 
 ### Bugs Identificados en la Investigación
 
-#### Bug 1: Command Codes INVERTIDOS (SHOW_ROI / SHOW_FULL_IMAGE)
+#### ~~Bug 1: Command Codes INVERTIDOS~~ — **NOT A BUG** (resolved 2026-02-22)
 
-En `app.js` (PWA actual):
-```javascript
-SHOW_ROI:        [0xC0, 0x5A, 0x00, 0x00, 0x00, 0x00, 0x05],  // ← INCORRECTO
-SHOW_FULL_IMAGE: [0xC0, 0x5A, 0x00, 0x00, 0x00, 0x00, 0x04],  // ← INCORRECTO
-```
-
-En la spec original y el firmware (`SPEC-camera-command-channel.md`):
-```
-SHOW ROI:        C0 5A 00 00 00 00 04   ← 0x04
-SHOW FULL IMAGE: C0 5A 00 00 00 00 05   ← 0x05
-```
-
-En la PWA antigua (`camera-usb/pwa/index.html`):
-```javascript
-SHOW_ROI:        [0xC0, 0x5A, 0x00, 0x00, 0x00, 0x00, 0x04],  // ← CORRECTO
-SHOW_FULL_IMAGE: [0xC0, 0x5A, 0x00, 0x00, 0x00, 0x00, 0x05],  // ← CORRECTO
-```
-
-**Los valores están invertidos** en la nueva PWA. Esto significa que cuando el usuario pide Full Image, está enviando SHOW ROI, y viceversa.
+> **Field testing confirmed** (2026-02-22) that the PWA code values are CORRECT:
+> - `SHOW_FULL_IMAGE = 0x04` — switches to 640x480 ✓
+> - `SHOW_ROI = 0x05` — switches to 160x64 ✓
+>
+> The original documentation (SPEC-camera-command-channel.md, old PWA) had the values swapped. The NEW PWA is correct.
+> Canonical reference: `ais01-lorawan-endnode-v2/specs/2026/02/main/001-camera-protocol-standardization.md`
 
 #### Bug 2: Espacio de Coordenadas — 320x240 vs 640x480
 
@@ -167,7 +154,7 @@ Este spec cubre exclusivamente la alineación de coordenadas de calibración ent
 - Cambios en el firmware del MCU
 - La funcionalidad de la PWA que ya funciona correctamente (stream, UI, validación de posición)
 
-**Nota importante**: El blocker del canal de comandos USB (no se pueden enviar comandos via el hub FTDI) sigue vigente. Para las pruebas de este spec, se puede usar conexión directa con CH340 o el software Windows.
+**Nota (actualizado 2026-02-22)**: El canal de comandos USB ya fue resuelto — la PWA envía comandos via WebUSB al FT230X usando D2XX vendor control transfers. Ver protocolo canónico: `ais01-lorawan-endnode-v2/specs/2026/02/main/001-camera-protocol-standardization.md`
 
 ## Implementation Notes
 
@@ -175,7 +162,7 @@ _Pendiente — se completará en `/pair:plan` después de la prueba comparativa.
 
 ## Success Criteria
 
-- [ ] **SC-1**: Los command codes SHOW_ROI/SHOW_FULL_IMAGE están corregidos y matchean la spec
+- [x] **SC-1**: ~~Los command codes SHOW_ROI/SHOW_FULL_IMAGE están corregidos~~ — NOT A BUG: field testing (2026-02-22) confirmed PWA code is correct
 - [ ] **SC-2**: Las coordenadas calculadas por la PWA coinciden (±5 pixels) con las del software original para la misma posición de cámara
 - [ ] **SC-3**: El payload de 80 bytes generado por la PWA tiene la misma estructura que los archivos ROI del software original
 - [ ] **SC-4**: La calibración enviada desde la PWA produce el mismo resultado que la del software original (el sensor reconoce los dígitos correctamente)
