@@ -52,7 +52,7 @@
         </div>
         <div id="calib-coords"></div>
         <div id="calib-controls">
-            <select id="calibDigitSelect" onchange="calibDigits = +this.value; drawCalibOverlay()">
+            <select id="calibDigitSelect" onchange="onCalibDigitChange(+this.value)">
                 <option value="4">4 digits</option>
                 <option value="5">5 digits</option>
                 <option value="6" selected>6 digits</option>
@@ -170,6 +170,6 @@
         </div>
     </aside>
 
-    <script>document.write('<script src="app.js?v=' + v + '"><\/script>');</script>
+    <script type="module" src="app.js"></script>
 </body>
 </html>
