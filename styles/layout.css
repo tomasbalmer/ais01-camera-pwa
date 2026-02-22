@@ -1,0 +1,209 @@
+/* ─── Top bar ─── */
+#topbar {
+    flex-shrink: 0;
+    height: 44px;
+    padding: 0 12px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: var(--bg);
+    border-bottom: 1px solid var(--border);
+    z-index: 10;
+}
+
+/* ─── Stop button in topbar (hidden when disconnected) ─── */
+#btn-stop {
+    display: none;
+    width: 28px;
+    height: 28px;
+    color: var(--danger);
+}
+#btn-stop.visible { display: flex; }
+
+/* ─── Viewer (fills all space between bars) ─── */
+#viewer {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    position: relative;
+    min-height: 0;
+}
+
+/* ─── Segmented Full/ROI toggle (floating over viewer) ─── */
+#mode-toggle {
+    display: none;
+    position: absolute;
+    top: 12px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 5;
+    border-radius: 16px;
+    overflow: hidden;
+    background: rgba(15, 23, 42, 0.7);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    border: 1px solid rgba(56, 189, 248, 0.15);
+}
+#mode-toggle.visible { display: flex; }
+
+#mode-hint {
+    display: none;
+    position: absolute;
+    top: 52px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 5;
+    background: rgba(15, 23, 42, 0.75);
+    color: var(--text2);
+    font-size: 11px;
+    padding: 4px 10px;
+    border-radius: 6px;
+    white-space: nowrap;
+    pointer-events: none;
+}
+
+#cam {
+    display: none;
+    max-width: 100%;
+    max-height: 100%;
+    object-fit: contain;
+}
+
+#connect-screen {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 20px;
+    padding: 32px 24px;
+}
+.connect-icon { opacity: 0.5; }
+
+/* ─── Mode-specific content area ─── */
+#mode-area {
+    display: none;
+    flex-shrink: 0;
+    background: var(--bg);
+    z-index: 10;
+}
+#mode-area.visible { display: block; }
+
+.mode-panel {
+    display: none;
+}
+.mode-panel.active {
+    display: flex;
+    flex-direction: column;
+}
+
+/* ─── Mode selector strip ─── */
+#mode-selector {
+    display: none;
+    flex-shrink: 0;
+    justify-content: center;
+    align-items: baseline;
+    gap: 24px;
+    border-top: 1px solid var(--border);
+    padding: 10px 0;
+    padding-bottom: calc(10px + env(safe-area-inset-bottom, 0px));
+    background: var(--bg);
+    z-index: 10;
+}
+#mode-selector.visible { display: flex; }
+
+/* ─── Drawer ─── */
+#drawer-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.6);
+    z-index: 50;
+}
+#drawer-overlay.visible { display: block; }
+
+#drawer {
+    position: fixed;
+    top: 0;
+    right: 0;
+    width: 280px;
+    max-width: 80vw;
+    height: 100%;
+    background: var(--surface);
+    z-index: 60;
+    display: flex;
+    flex-direction: column;
+    transform: translateX(100%);
+    transition: transform 0.2s ease-out;
+    will-change: transform;
+}
+#drawer.open { transform: translateX(0); }
+
+.drawer-header {
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 14px;
+    border-bottom: 1px solid var(--border);
+}
+.drawer-header h2 {
+    font-size: 15px;
+    font-weight: 700;
+}
+
+.drawer-content {
+    flex: 1;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+}
+
+/* ─── Drawer sections ─── */
+.drawer-section { border-bottom: 1px solid var(--border); }
+
+.section-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 11px 14px;
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text2);
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+}
+.section-header .chevron { transition: transform 0.15s; }
+
+.section-body {
+    display: none;
+    padding: 0 14px 12px;
+}
+.drawer-section.open .section-body { display: block; }
+.drawer-section.open .chevron { transform: rotate(180deg); }
+
+/* ─── Canvas overlay ─── */
+#overlay-canvas {
+    display: none;
+    position: absolute;
+    top: 0;
+    left: 0;
+    pointer-events: none;
+}
+#overlay-canvas.active {
+    display: block;
+    pointer-events: none;
+}
+
+/* ─── Konva container ─── */
+#konva-container {
+    display: none;
+    position: absolute;
+    top: 0;
+    left: 0;
+    pointer-events: none;
+}
+#konva-container.active {
+    display: block;
+    pointer-events: auto;
+}

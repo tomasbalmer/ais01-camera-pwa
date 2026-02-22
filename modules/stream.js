@@ -5,7 +5,7 @@ import {
     FPS_INTERVAL_MS,
 } from './constants.js';
 import { state } from './state.js';
-import { dom, log } from './ui.js';
+import { dom, log, syncImageModeFromFrame } from './ui.js';
 import { findMarker, readU32LE, aiReading } from './helpers.js';
 
 // === FTDI header stripping ===
@@ -75,7 +75,10 @@ function displayFrame(jpegBytes) {
     const blob = new Blob([jpegBytes], { type: 'image/jpeg' });
     const url = URL.createObjectURL(blob);
     const prev = dom.cam.src;
-    dom.cam.onload = () => { if (prev && prev.startsWith('blob:')) URL.revokeObjectURL(prev); };
+    dom.cam.onload = () => {
+        if (prev && prev.startsWith('blob:')) URL.revokeObjectURL(prev);
+        syncImageModeFromFrame();
+    };
     dom.cam.src = url;
     state.frameCount++;
     state.fpsCount++;
@@ -109,10 +112,16 @@ export async function readStream(epIn) {
 
     state.running = true;
     dom.connectScreen.style.display = 'none';
-    dom.actionBar.classList.add('visible');
     dom.cam.style.display = 'block';
     dom.stats.className = 'active';
     dom.statusDot.classList.add('connected');
+    // Show connected-state UI
+    dom.modeToggle.classList.add('visible');
+    dom.modeArea.classList.add('visible');
+    dom.modeSelector.classList.add('visible');
+    dom.btnStop.classList.add('visible');
+    // Image mode detected automatically from first frame via syncImageModeFromFrame()
+    dom.modeHint.style.display = 'none';
     state.lastFpsTime = performance.now();
     state.fpsCount = 0;
 

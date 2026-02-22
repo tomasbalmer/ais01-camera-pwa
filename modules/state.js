@@ -10,11 +10,14 @@ export const state = {
     currentFps: 0,
     lastAiResult: null,
     drawerOpen: false,
+    activeMode: 'validate', // 'validate' | 'calibrate' | 'settings'
+    imageMode: null,         // null (unknown) | 'full' | 'roi' — detected from frame dims
 
     // Calibration state
     calibMode: false,
     calibDigits: 6,
     calibInterval: null,
+    calibRectTouched: false,
 
     // Konva calibration objects
     konvaStage: null,

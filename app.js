@@ -1,13 +1,12 @@
 import { state } from './modules/state.js';
-import { dom, log, toggleDrawer, togglePanel } from './modules/ui.js';
-import { sendCommand, onReadRegister, toggleRAW } from './modules/protocol.js';
+import { dom, log, toggleDrawer, togglePanel, switchMode, switchImageMode } from './modules/ui.js';
+import { adjustSensor, onAdvancedReadRegister, onWriteRegister } from './modules/protocol.js';
 import { connectDevice } from './modules/ftdi.js';
 import { readStream } from './modules/stream.js';
-import { onSendROI } from './modules/roi.js';
 import { onValidatePosition } from './modules/validation.js';
 import {
-    enterCalibMode, exitCalibMode, previewRoi,
-    computeAndSendRoi, onCalibDigitChange,
+    enterCalibMode, exitCalibMode,
+    computeAndSendRoi, onCalibDigitChange, toggleCalibCoords,
 } from './modules/calibration.js';
 
 // === Main connect/disconnect toggle ===
@@ -16,18 +15,31 @@ async function toggleConnection() {
     try {
         if (state.running) {
             state.running = false;
-            dom.actionBar.classList.remove('visible');
+            // Hide connected UI elements
+            dom.modeToggle.classList.remove('visible');
+            dom.modeArea.classList.remove('visible');
+            dom.modeSelector.classList.remove('visible');
+            dom.btnStop.classList.remove('visible');
+            dom.modeHint.style.display = 'none';
             dom.connectScreen.style.display = 'flex';
             dom.cam.style.display = 'none';
             dom.stats.className = '';
             dom.stats.textContent = 'Disconnected';
             dom.statusDot.classList.remove('connected');
-            // Reset button states
-            document.getElementById('btnFullImg').classList.remove('active');
-            document.getElementById('btnROI').classList.remove('active');
-            document.getElementById('btnRAW').classList.remove('active');
-            state.rawEnabled = false;
             if (state.calibMode) exitCalibMode();
+            // Reset to validate mode
+            state.activeMode = 'validate';
+            dom.panelValidate.classList.add('active');
+            dom.panelCalibrate.classList.remove('active');
+            dom.panelSettings.classList.remove('active');
+            const tabs = dom.modeSelector.querySelectorAll('.mode-tab');
+            tabs.forEach(tab => {
+                tab.classList.toggle('active', tab.dataset.mode === 'validate');
+            });
+            // Reset image mode state (will be re-detected from first frame)
+            state.imageMode = null;
+            dom.btnFull.classList.remove('active');
+            dom.btnROI.classList.remove('active');
             try { await state.device.close(); } catch (e) {}
             state.device = null;
             state.epOutNum = null;
@@ -53,16 +65,17 @@ async function toggleConnection() {
 window.toggleConnection = toggleConnection;
 window.toggleDrawer = toggleDrawer;
 window.togglePanel = togglePanel;
-window.sendCommand = sendCommand;
-window.toggleRAW = toggleRAW;
-window.onReadRegister = onReadRegister;
-window.onSendROI = onSendROI;
+window.switchMode = switchMode;
+window.switchImageMode = switchImageMode;
+window.adjustSensor = adjustSensor;
+window.onAdvancedReadRegister = onAdvancedReadRegister;
+window.onWriteRegister = onWriteRegister;
 window.onValidatePosition = onValidatePosition;
 window.enterCalibMode = enterCalibMode;
 window.exitCalibMode = exitCalibMode;
-window.previewRoi = previewRoi;
 window.computeAndSendRoi = computeAndSendRoi;
 window.onCalibDigitChange = onCalibDigitChange;
+window.toggleCalibCoords = toggleCalibCoords;
 
 // === Init check ===
 const isSecure = window.isSecureContext;

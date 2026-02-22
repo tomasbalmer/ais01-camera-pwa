@@ -119,6 +119,13 @@ export const FRAME_BUFFER_MAX = 4096;
 export const FPS_INTERVAL_MS = 1000;
 export const AI_LOG_FRAME_LIMIT = 5;
 
+// === HM0360 Sensor Controls (friendly camera settings) ===
+export const SENSOR_CTRL = {
+    AE_TARGET:  { addr: 0x2034, default: 100, min: 0,  max: 255, step: 10, label: 'Brightness' },
+    MAX_AGAIN:  { addr: 0x202B, default: 4,   min: 1,  max: 16,  step: 1,  label: 'Max Gain' },
+    T_DAMPING:  { addr: 0x2031, default: 32,  min: 0,  max: 255, step: 8,  label: 'AE Speed' },
+};
+
 // === Validation thresholds ===
 export const VALIDATION = {
     SATURATION_THRESHOLD: 240,

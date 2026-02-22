@@ -1,6 +1,6 @@
 import { CAL_W, CAL_H } from './constants.js';
 import { state } from './state.js';
-import { dom, getImageRect, clamp16, syncOverlay, log, toggleDrawer } from './ui.js';
+import { dom, getImageRect, clamp16, syncOverlay, log, toggleDrawer, registerCalibCallbacks } from './ui.js';
 import { sendCommand } from './protocol.js';
 import { sendRoiConfig } from './roi.js';
 import { aiReading } from './helpers.js';
@@ -8,6 +8,17 @@ import { aiReading } from './helpers.js';
 // === Konva Calibration ===
 
 let _dividerLineCount = 0; // cached line count for shape reuse
+
+// Compute visual bounding box of a rotated rect (rotation around top-left)
+function rotatedBounds(x, y, w, h, rotRad) {
+    const cos = Math.cos(rotRad), sin = Math.sin(rotRad);
+    const cx = [0, w * cos, w * cos - h * sin, -h * sin];
+    const cy = [0, w * sin, w * sin + h * cos, h * cos];
+    return {
+        minX: x + Math.min(...cx), maxX: x + Math.max(...cx),
+        minY: y + Math.min(...cy), maxY: y + Math.max(...cy),
+    };
+}
 
 function initKonvaCalib() {
     const r = getImageRect();
@@ -35,6 +46,18 @@ function initKonvaCalib() {
         stroke: 'rgba(56, 189, 248, 0.7)',
         strokeWidth: 1,
         draggable: true,
+        dragBoundFunc: (pos) => {
+            const rw = state.konvaRect.width() * state.konvaRect.scaleX();
+            const rh = state.konvaRect.height() * state.konvaRect.scaleY();
+            const rot = state.konvaRect.rotation() * Math.PI / 180;
+            const sw = state.konvaStage.width();
+            const sh = state.konvaStage.height();
+            const b = rotatedBounds(0, 0, rw, rh, rot);
+            return {
+                x: Math.min(Math.max(pos.x, -b.minX), sw - b.maxX),
+                y: Math.min(Math.max(pos.y, -b.minY), sh - b.maxY),
+            };
+        },
     });
     state.konvaLayer.add(state.konvaRect);
 
@@ -47,15 +70,19 @@ function initKonvaCalib() {
         rotateEnabled: true,
         rotationSnaps: [0, 90, 180, 270],
         rotateAnchorOffset: 16,
-        anchorSize: 10,
-        anchorCornerRadius: 5,
+        anchorSize: 5,
+        anchorCornerRadius: 2.5,
         anchorStroke: '#38bdf8',
         anchorStrokeWidth: 1.5,
         anchorFill: 'rgba(15, 23, 42, 0.9)',
         borderStroke: 'rgba(56, 189, 248, 0.6)',
         borderStrokeWidth: 1,
         boundBoxFunc: (oldBox, newBox) => {
-            if (newBox.width < 30 || newBox.height < 20) return oldBox;
+            if (Math.abs(newBox.width) < 30 || Math.abs(newBox.height) < 20) return oldBox;
+            const sw = state.konvaStage.width();
+            const sh = state.konvaStage.height();
+            const b = rotatedBounds(newBox.x, newBox.y, newBox.width, newBox.height, newBox.rotation);
+            if (b.minX < 0 || b.maxX > sw || b.minY < 0 || b.maxY > sh) return oldBox;
             return newBox;
         },
     });
@@ -63,6 +90,7 @@ function initKonvaCalib() {
 
     state.konvaRect.on('transform dragmove', () => {
         onCalibRectChange();
+        unlockCalibrate();
     });
 
     updateDividers();
@@ -135,7 +163,7 @@ function drawDimOverlay() {
 
     // Dim overlay with evenodd cutout for the rotated rect
     ctx.save();
-    ctx.fillStyle = 'rgba(0,0,0,0.5)';
+    ctx.fillStyle = 'rgba(0,0,0,0.3)';
     ctx.beginPath();
     ctx.rect(0, 0, W, H);
     ctx.translate(cx, cy);
@@ -154,6 +182,14 @@ function onCalibRectChange() {
     updateDividers();
     drawDimOverlay();
     updateCalibCoords();
+}
+
+// Enable the Calibrate button after user positions the rect
+function unlockCalibrate() {
+    if (state.calibRectTouched) return;
+    state.calibRectTouched = true;
+    const btn = document.getElementById('btn-calibrate');
+    if (btn) btn.disabled = false;
 }
 
 // Slow interval (2s) for ambient updates: window resize + AI reading
@@ -179,10 +215,8 @@ function updateCalibReading() {
     const reading = aiReading(state.lastAiResult);
     if (reading !== null) {
         dom.calibAiValue.textContent = reading.toFixed(2);
-        dom.calibAiConf.textContent = state.lastAiResult.confidence + '%';
     } else {
         dom.calibAiValue.textContent = '--';
-        dom.calibAiConf.textContent = '';
     }
 }
 
@@ -200,30 +234,14 @@ function updateCalibCoords() {
     el.textContent = parts.join(' ') + `\nB:${coords.boundaryX}x${coords.boundaryY}`;
 }
 
-export function previewRoi() {
-    const coords = computeRoiCoords();
-    if (!coords) { log('No rectangle'); return; }
-    const rect = state.konvaRect;
-    const rw = rect.width() * rect.scaleX();
-    const rh = rect.height() * rect.scaleY();
-    log('=== PREVIEW (not sent) ===');
-    const _imgW = dom.cam.naturalWidth || CAL_W;
-    const _dispW = state.konvaStage ? state.konvaStage.width() : 0;
-    log('  Image: ' + _imgW + 'x' + (dom.cam.naturalHeight || CAL_H) + ' | stage: ' + Math.round(_dispW) + 'x' + Math.round(state.konvaStage ? state.konvaStage.height() : 0) + ' | pxScale: ' + (_dispW / _imgW).toFixed(2) + ' | FlipY: ' + (document.getElementById('calibFlipY')?.checked));
-    log('  Rect: x=' + Math.round(rect.x()) + ' y=' + Math.round(rect.y()) + ' w=' + Math.round(rw) + ' h=' + Math.round(rh) + ' rot=' + rect.rotation().toFixed(1));
-    for (let i = 0; i < 4; i++) {
-        const p1 = coords.digits[i * 2];
-        const p2 = coords.digits[i * 2 + 1];
-        log('  P' + (i*2+1) + ': (' + p1.x + ',' + p1.y + ')  P' + (i*2+2) + ': (' + p2.x + ',' + p2.y + ')');
-    }
-    log('  Boundary: ' + coords.boundaryX + ' x ' + coords.boundaryY);
-    log('  numDigits: ' + coords.numDigits + ' | FlipY: ' + (document.getElementById('calibFlipY')?.checked));
-    log('=== END PREVIEW ===');
-}
-
 export async function enterCalibMode() {
     if (!dom.cam.src || dom.cam.style.display === 'none') { log('No frame'); return; }
     if (state.drawerOpen) toggleDrawer();
+
+    // Show loading state — hide Konva until image is stable
+    dom.calibAiValue.textContent = '...';
+    dom.overlayCanvas.classList.remove('active');
+    dom.konvaContainer.classList.remove('active');
 
     // Force full image mode — calibration needs 640x480 for correct coordinate mapping
     const wasNarrow = dom.cam.naturalWidth && dom.cam.naturalWidth < 320;
@@ -238,24 +256,51 @@ export async function enterCalibMode() {
         if (dom.cam.naturalWidth < 320) {
             log('WARNING: image may not have switched to full mode');
         } else {
-            log(`Full image active: ${dom.cam.naturalWidth}×${dom.cam.naturalHeight}`);
+            log(`Full image active: ${dom.cam.naturalWidth}x${dom.cam.naturalHeight}`);
         }
+        // Toggle updates automatically via syncImageModeFromFrame()
     }
+
+    // Wait for browser layout to settle with new image dimensions
+    await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
 
     state.calibMode = true;
     syncOverlay();
 
     if (!state.konvaStage) {
         initKonvaCalib();
+        syncKonvaSize(); // Position container to match image (left/top)
     } else {
         syncKonvaSize();
+        // Reset rect to center of current stage dimensions
+        const r = getImageRect();
+        const rectW = r.w * 0.6;
+        const rectH = r.h * 0.15;
+        state.konvaRect.setAttrs({
+            x: (r.w - rectW) / 2, y: (r.h - rectH) / 2,
+            width: rectW, height: rectH,
+            scaleX: 1, scaleY: 1, rotation: 0,
+        });
         updateDividers();
     }
 
+    // Flush Konva render — required on re-entry (initKonvaCalib does its own draw)
+    state.konvaLayer.batchDraw();
+
+    // Now reveal the overlay — properly positioned
     dom.overlayCanvas.classList.add('active');
     dom.konvaContainer.classList.add('active');
-    dom.actionBar.classList.remove('visible');
-    dom.calibBar.classList.add('visible');
+
+    // Reset coords visibility (hidden by default)
+    const coordsCheckbox = document.getElementById('calibShowCoords');
+    if (coordsCheckbox) coordsCheckbox.checked = false;
+    const coordsEl = document.getElementById('calib-coords');
+    if (coordsEl) coordsEl.style.display = 'none';
+
+    // Lock calibrate button until user positions the rect
+    state.calibRectTouched = false;
+    const calibBtn = document.getElementById('btn-calibrate');
+    if (calibBtn) { calibBtn.disabled = true; calibBtn.textContent = 'Calibrate'; }
 
     // Draw once on enter
     drawDimOverlay();
@@ -273,8 +318,6 @@ export function exitCalibMode() {
     dom.overlayCanvas.classList.remove('active');
     dom.overlayCtx.clearRect(0, 0, dom.overlayCanvas.width, dom.overlayCanvas.height);
     dom.konvaContainer.classList.remove('active');
-    dom.calibBar.classList.remove('visible');
-    dom.actionBar.classList.add('visible');
     log('Calibration mode OFF');
 }
 
@@ -289,6 +332,12 @@ export function onCalibDigitChange(value) {
     drawCalibOverlay();
 }
 
+export function toggleCalibCoords() {
+    const show = document.getElementById('calibShowCoords')?.checked;
+    const el = document.getElementById('calib-coords');
+    if (el) el.style.display = show ? 'block' : 'none';
+}
+
 export function computeRoiCoords() {
     if (!state.konvaRect || !state.konvaStage) return null;
     // Use Konva stage dimensions (stable — set when calib mode was entered)
@@ -299,7 +348,6 @@ export function computeRoiCoords() {
     const pxScale = dispW / imgW; // display pixels per image pixel
     const calScaleX = CAL_W / imgW;
     const calScaleY = CAL_H / imgH;
-    const flipY = document.getElementById('calibFlipY')?.checked ?? false;
     const rect = state.konvaRect;
     const rw = rect.width() * rect.scaleX();
     const rh = rect.height() * rect.scaleY();
@@ -309,7 +357,7 @@ export function computeRoiCoords() {
     const n = state.calibDigits;
     const digitW = rw / n;
 
-    // 4 evenly-spaced references: center of first digit → center of last digit
+    // 4 evenly-spaced references: center of first digit -> center of last digit
     const digits = [];
     for (let ref = 0; ref < 4; ref++) {
         const t = ref / 3; // 0, 1/3, 2/3, 1
@@ -324,20 +372,13 @@ export function computeRoiCoords() {
         const botDispX = cx + localX * Math.cos(rot) - (rh / 2) * Math.sin(rot);
         const botDispY = cy + localX * Math.sin(rot) + (rh / 2) * Math.cos(rot);
 
-        // Convert display coords → calibration coords (320x240)
+        // Convert display coords -> calibration coords (320x240)
         const topSx = Math.round(topDispX / pxScale * calScaleX);
         const botSx = Math.round(botDispX / pxScale * calScaleX);
 
-        let topSy, botSy;
-        if (flipY) {
-            // Bottom-left origin (sensor convention): Y increases upward
-            topSy = Math.round(CAL_H - topDispY / pxScale * calScaleY);
-            botSy = Math.round(CAL_H - botDispY / pxScale * calScaleY);
-        } else {
-            // Top-left origin (screen convention)
-            topSy = Math.round(topDispY / pxScale * calScaleY);
-            botSy = Math.round(botDispY / pxScale * calScaleY);
-        }
+        // Top-left origin (screen convention)
+        const topSy = Math.round(topDispY / pxScale * calScaleY);
+        const botSy = Math.round(botDispY / pxScale * calScaleY);
 
         // Odd point (P1,P3,P5,P7): lower Y value
         // Even point (P2,P4,P6,P8): higher Y value
@@ -360,27 +401,21 @@ export async function computeAndSendRoi() {
     const coords = computeRoiCoords();
     if (!coords) { log('No rectangle'); return; }
 
-    const { numDigits: n, digits, rotation } = coords;
+    const { numDigits: n, digits, boundaryX, boundaryY, rotation } = coords;
 
-    // Use drawer boundary values (default 70x70), not computed from rect dimensions
-    const boundaryX = parseInt(document.getElementById('roiBoundX').value) || 70;
-    const boundaryY = parseInt(document.getElementById('roiBoundY').value) || 70;
+    const btn = document.getElementById('btn-calibrate');
+    if (btn) { btn.textContent = 'Sending...'; btn.disabled = true; }
 
-    log(`ROI from touch: ${n} digits, rot=${rotation.toFixed(1)}°, boundary=${boundaryX}x${boundaryY}`);
+    log(`ROI from touch: ${n} digits, rot=${rotation.toFixed(1)}deg, boundary=${boundaryX}x${boundaryY}`);
     digits.forEach((d, i) => log(`  P${i+1}: (${d.x}, ${d.y})`));
 
     await sendRoiConfig({ numDigits: n, digits, boundaryX, boundaryY });
 
-    // Update manual ROI inputs in the drawer
-    document.getElementById('roiNumDigits').value = n;
-    for (let i = 0; i < 8; i++) {
-        const xEl = document.getElementById(`roiX${i}`);
-        const yEl = document.getElementById(`roiY${i}`);
-        if (xEl) xEl.value = digits[i].x;
-        if (yEl) yEl.value = digits[i].y;
+    if (btn) {
+        btn.textContent = 'Sent!';
+        setTimeout(() => { btn.textContent = 'Calibrate'; btn.disabled = false; }, 1500);
     }
-    document.getElementById('roiBoundX').value = boundaryX;
-    document.getElementById('roiBoundY').value = boundaryY;
-
-    exitCalibMode();
 }
+
+// Register callbacks with ui.js so switchMode can call enter/exit without circular imports
+registerCalibCallbacks(enterCalibMode, exitCalibMode);

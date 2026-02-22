@@ -17,7 +17,9 @@
     <script>
     // Cache-bust: append timestamp to CSS/JS so browser always fetches fresh
     var v = Date.now();
-    document.write('<link rel="stylesheet" href="style.css?v=' + v + '">');
+    document.write('<link rel="stylesheet" href="styles/base.css?v=' + v + '">');
+    document.write('<link rel="stylesheet" href="styles/layout.css?v=' + v + '">');
+    document.write('<link rel="stylesheet" href="styles/components.css?v=' + v + '">');
     </script>
 </head>
 <body>
@@ -25,6 +27,9 @@
     <header id="topbar">
         <div id="status-dot"></div>
         <div id="stats">Disconnected</div>
+        <button id="btn-stop" class="icon-btn" onclick="toggleConnection()" aria-label="Stop">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><rect x="6" y="6" width="12" height="12" rx="1"/></svg>
+        </button>
         <button id="btn-menu" class="icon-btn" onclick="toggleDrawer()" aria-label="Menu">
             <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
         </button>
@@ -32,6 +37,12 @@
 
     <!-- Camera viewer (fills screen) -->
     <main id="viewer">
+        <!-- Segmented Full/ROI toggle (floating over viewer) -->
+        <div id="mode-toggle">
+            <button id="btnFull" class="seg-btn" onclick="switchImageMode('FULL')">Full</button>
+            <button id="btnROI" class="seg-btn" onclick="switchImageMode('ROI')">ROI</button>
+        </div>
+        <div id="mode-hint"></div>
         <img id="cam" />
         <canvas id="overlay-canvas"></canvas>
         <div id="konva-container"></div>
@@ -39,124 +50,103 @@
             <div class="connect-icon">
                 <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="#4af" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/><circle cx="12" cy="10" r="3"/></svg>
             </div>
-            <button id="big-btn" onclick="toggleConnection()">Connect Camera</button>
+            <button id="big-btn" onclick="toggleConnection()">Start Camera</button>
             <p id="message">Plug in the FTDI camera via USB OTG</p>
         </div>
     </main>
 
-    <!-- Calibration bar (visible in calib mode) -->
-    <nav id="calib-bar">
-        <div id="calib-reading">
-            <span id="calib-ai-value">--</span>
-            <span id="calib-ai-conf"></span>
+    <!-- Mode-specific content area (visible when connected) -->
+    <div id="mode-area">
+        <!-- Validate panel (default — live view, no controls) -->
+        <div id="panel-validate" class="mode-panel active"></div>
+        <!-- Calibrate panel -->
+        <div id="panel-calibrate" class="mode-panel">
+            <div id="calib-reading">
+                <span id="calib-reading-label">AI Reading</span>
+                <span id="calib-ai-value">--</span>
+            </div>
+            <div id="calib-coords"></div>
+            <div id="calib-controls">
+                <select id="calibDigitSelect" onchange="onCalibDigitChange(+this.value)">
+                    <option value="4">4 digits</option>
+                    <option value="5">5 digits</option>
+                    <option value="6" selected>6 digits</option>
+                    <option value="7">7 digits</option>
+                    <option value="8">8 digits</option>
+                </select>
+                <label class="calib-toggle"><input type="checkbox" id="calibShowCoords" onchange="toggleCalibCoords()"><span>Coords</span></label>
+            </div>
+            <button id="btn-calibrate" class="calib-commit" disabled onclick="computeAndSendRoi()">Calibrate</button>
         </div>
-        <div id="calib-coords"></div>
-        <div id="calib-controls">
-            <select id="calibDigitSelect" onchange="onCalibDigitChange(+this.value)">
-                <option value="4">4 digits</option>
-                <option value="5">5 digits</option>
-                <option value="6" selected>6 digits</option>
-                <option value="7">7 digits</option>
-                <option value="8">8 digits</option>
-            </select>
-            <label class="calib-toggle"><input type="checkbox" id="calibFlipY"><span>FlipY</span></label>
-            <button class="calib-btn preview" onclick="previewRoi()">Preview</button>
-            <button class="calib-btn send" onclick="computeAndSendRoi()">Send</button>
-            <button class="calib-btn cancel" onclick="exitCalibMode()">Back</button>
+        <!-- Settings panel -->
+        <div id="panel-settings" class="mode-panel">
+            <div class="settings-body">
+                <div class="sensor-ctrl">
+                    <span class="ctrl-label">Brightness</span>
+                    <div class="ctrl-row">
+                        <button class="ctrl-btn" disabled>&minus;</button>
+                        <span class="ctrl-val" id="ctrl-val-AE_TARGET">100</span>
+                        <button class="ctrl-btn" disabled>+</button>
+                    </div>
+                </div>
+                <div class="sensor-ctrl">
+                    <span class="ctrl-label">Max Gain</span>
+                    <div class="ctrl-row">
+                        <button class="ctrl-btn" disabled>&minus;</button>
+                        <span class="ctrl-val" id="ctrl-val-MAX_AGAIN">4</span>
+                        <button class="ctrl-btn" disabled>+</button>
+                    </div>
+                </div>
+                <div class="sensor-ctrl">
+                    <span class="ctrl-label">AE Speed</span>
+                    <div class="ctrl-row">
+                        <button class="ctrl-btn" disabled>&minus;</button>
+                        <span class="ctrl-val" id="ctrl-val-T_DAMPING">32</span>
+                        <button class="ctrl-btn" disabled>+</button>
+                    </div>
+                </div>
+                <!-- Advanced register access -->
+                <details class="adv-section">
+                    <summary>Advanced</summary>
+                    <div class="field-row">
+                        <label>Addr</label>
+                        <input type="text" id="advRegAddr" value="0x0000" maxlength="6" placeholder="0x0000">
+                    </div>
+                    <div class="field-row">
+                        <label>Value</label>
+                        <input type="text" id="advRegVal" value="0x00" maxlength="4" placeholder="0x00">
+                    </div>
+                    <div class="adv-btns">
+                        <button class="drawer-btn" onclick="onAdvancedReadRegister()">Read</button>
+                        <button class="drawer-btn" onclick="onWriteRegister()">Write</button>
+                    </div>
+                </details>
+                <div class="wip-notice">
+                    <small class="wip-badge">WIP</small> Stepper controls pending hardware verification
+                </div>
+            </div>
         </div>
+    </div>
+
+    <!-- Mode selector strip (visible when connected) -->
+    <nav id="mode-selector">
+        <button class="mode-tab active" data-mode="validate" onclick="switchMode('validate')">Installation</button>
+        <button class="mode-tab" data-mode="calibrate" onclick="switchMode('calibrate')">Calibration</button>
+        <button class="mode-tab mode-tab-icon" data-mode="settings" onclick="switchMode('settings')" aria-label="Settings">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+        </button>
     </nav>
 
-    <!-- Bottom action bar (visible when connected) -->
-    <nav id="action-bar">
-        <button class="action-btn" id="btnFullImg" onclick="sendCommand('SHOW_FULL_IMAGE')">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>
-            <span>Full</span>
-        </button>
-        <button class="action-btn" id="btnROI" onclick="sendCommand('SHOW_ROI')">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M2 7V2h5"/><path d="M22 7V2h-5"/><path d="M2 17v5h5"/><path d="M22 17v5h-5"/></svg>
-            <span>ROI</span>
-        </button>
-        <button class="action-btn" id="btnRAW" onclick="toggleRAW()">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18"/><path d="M9 3v18"/></svg>
-            <span>RAW</span>
-        </button>
-        <button class="action-btn danger" id="btnStop" onclick="toggleConnection()">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><rect x="6" y="6" width="12" height="12" rx="1"/></svg>
-            <span>Stop</span>
-        </button>
-    </nav>
-
-    <!-- Slide-out drawer for calibration -->
+    <!-- Slide-out drawer -->
     <div id="drawer-overlay" onclick="toggleDrawer()"></div>
     <aside id="drawer">
         <div class="drawer-header">
-            <h2>Calibration</h2>
+            <h2>Settings</h2>
             <button class="icon-btn" onclick="toggleDrawer()" aria-label="Close">
                 <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
             </button>
         </div>
         <div class="drawer-content">
-            <!-- Quick Actions -->
-            <div class="drawer-section">
-                <button class="drawer-action" onclick="onValidatePosition()">
-                    <span>Validate Position</span>
-                </button>
-            </div>
-            <div class="drawer-section">
-                <button class="drawer-action" onclick="enterCalibMode()">
-                    <span>Calibrate ROI (Touch)</span>
-                </button>
-            </div>
-            <!-- Sensor Config Section -->
-            <div class="drawer-section">
-                <div class="section-header" onclick="togglePanel('section-sensor')">
-                    <span>Sensor Config</span>
-                    <svg class="chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="6 9 12 15 18 9"/></svg>
-                </div>
-                <div id="section-sensor" class="section-body">
-                    <div class="field-row">
-                        <label>Register</label>
-                        <input type="text" id="regAddr" value="0x00" maxlength="4" placeholder="0x00">
-                    </div>
-                    <button class="drawer-btn" onclick="onReadRegister()">Read Register</button>
-                </div>
-            </div>
-            <!-- ROI Setting Section -->
-            <div class="drawer-section">
-                <div class="section-header" onclick="togglePanel('section-roi')">
-                    <span>ROI Setting (Digit Wheel)</span>
-                    <svg class="chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="6 9 12 15 18 9"/></svg>
-                </div>
-                <div id="section-roi" class="section-body">
-                    <div class="field-row">
-                        <label>Digits</label>
-                        <select id="roiNumDigits">
-                            <option value="4">4</option>
-                            <option value="5">5</option>
-                            <option value="6" selected>6</option>
-                            <option value="7">7</option>
-                            <option value="8">8</option>
-                        </select>
-                    </div>
-                    <div class="roi-grid">
-                        <div class="roi-header"><span>#</span><span>X</span><span>Y</span></div>
-                        <div class="roi-row"><span>1</span><input type="number" id="roiX0" value="0"><input type="number" id="roiY0" value="0"></div>
-                        <div class="roi-row"><span>2</span><input type="number" id="roiX1" value="0"><input type="number" id="roiY1" value="0"></div>
-                        <div class="roi-row"><span>3</span><input type="number" id="roiX2" value="0"><input type="number" id="roiY2" value="0"></div>
-                        <div class="roi-row"><span>4</span><input type="number" id="roiX3" value="0"><input type="number" id="roiY3" value="0"></div>
-                        <div class="roi-row"><span>5</span><input type="number" id="roiX4" value="0"><input type="number" id="roiY4" value="0"></div>
-                        <div class="roi-row"><span>6</span><input type="number" id="roiX5" value="0"><input type="number" id="roiY5" value="0"></div>
-                        <div class="roi-row"><span>7</span><input type="number" id="roiX6" value="0"><input type="number" id="roiY6" value="0"></div>
-                        <div class="roi-row"><span>8</span><input type="number" id="roiX7" value="0"><input type="number" id="roiY7" value="0"></div>
-                    </div>
-                    <div class="field-row">
-                        <label>Boundary</label>
-                        <input type="number" id="roiBoundX" value="70" placeholder="X">
-                        <input type="number" id="roiBoundY" value="70" placeholder="Y">
-                    </div>
-                    <button class="drawer-btn" onclick="onSendROI()">Send ROI</button>
-                </div>
-            </div>
             <!-- Log Section -->
             <div class="drawer-section">
                 <div class="section-header" onclick="togglePanel('section-log')">
