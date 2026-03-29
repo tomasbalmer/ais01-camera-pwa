@@ -8,6 +8,7 @@ import {
     enterCalibMode, exitCalibMode,
     computeAndSendRoi, onCalibDigitChange, toggleCalibCoords,
 } from './modules/calibration.js';
+import { connectBLE, startInstallMode, stopInstallMode, hasBluetooth } from './modules/ble.js';
 
 // === Main connect/disconnect toggle ===
 async function toggleConnection() {
@@ -61,8 +62,34 @@ async function toggleConnection() {
     }
 }
 
+// === BLE Installation Mode connect/disconnect ===
+async function toggleBLE() {
+    try {
+        if (state.bleMode) {
+            await stopInstallMode();
+            document.getElementById('ble-btn').textContent = 'BLE Install Mode';
+        } else {
+            document.getElementById('ble-btn').disabled = true;
+            document.getElementById('ble-btn').textContent = 'Connecting BLE...';
+            const ok = await connectBLE();
+            document.getElementById('ble-btn').disabled = false;
+            if (ok) {
+                document.getElementById('ble-btn').textContent = 'Stop BLE';
+                await startInstallMode();
+            } else {
+                document.getElementById('ble-btn').textContent = 'BLE Install Mode';
+            }
+        }
+    } catch (err) {
+        log('BLE Error: ' + err.message);
+        document.getElementById('ble-btn').disabled = false;
+        document.getElementById('ble-btn').textContent = 'BLE Install Mode';
+    }
+}
+
 // === Expose functions to inline onclick handlers ===
 window.toggleConnection = toggleConnection;
+window.toggleBLE = toggleBLE;
 window.toggleDrawer = toggleDrawer;
 window.togglePanel = togglePanel;
 window.switchMode = switchMode;
@@ -80,11 +107,14 @@ window.toggleCalibCoords = toggleCalibCoords;
 // === Init check ===
 const isSecure = window.isSecureContext;
 const hasWebUSB = !!navigator.usb;
-log(`Secure: ${isSecure} | WebUSB: ${hasWebUSB}`);
-if (!isSecure || !hasWebUSB) {
-    dom.message.innerHTML = !isSecure
-        ? 'Requires HTTPS or localhost.'
-        : 'WebUSB not available. Use Chrome on Android.';
+const hasBLE = hasBluetooth();
+log(`Secure: ${isSecure} | WebUSB: ${hasWebUSB} | BLE: ${hasBLE}`);
+if (!isSecure) {
+    dom.message.innerHTML = 'Requires HTTPS or localhost.';
     dom.message.className = 'error';
     document.getElementById('big-btn').disabled = true;
+    document.getElementById('ble-btn').disabled = true;
+} else {
+    if (!hasWebUSB) document.getElementById('big-btn').disabled = true;
+    if (!hasBLE) document.getElementById('ble-btn').disabled = true;
 }
