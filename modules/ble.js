@@ -97,11 +97,22 @@ async function bleSend(cmd) {
 }
 
 /* ── Handle incoming BLE data (notifications) ── */
+let totalBleBytes = 0;
+let notifyCount = 0;
+
 function onBleData(event) {
     const value = new Uint8Array(event.target.value.buffer);
+    totalBleBytes += value.length;
+    notifyCount++;
     for (let i = 0; i < value.length; i++) {
         accumulator.push(value[i]);
     }
+
+    /* Log every 50 notifications to show data is flowing */
+    if (notifyCount % 50 === 0) {
+        log(`BLE: ${notifyCount} notifs, ${totalBleBytes}B, buf=${accumulator.length}`);
+    }
+
     extractAndDisplayFrames();
 }
 
