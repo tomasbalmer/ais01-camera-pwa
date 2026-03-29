@@ -38,7 +38,12 @@ export async function connectBLE() {
 
     try {
         bleDevice = await navigator.bluetooth.requestDevice({
-            acceptAllDevices: true,
+            filters: [
+                { namePrefix: '8691' },   /* Match IMEI-based names */
+                { namePrefix: 'BT24' },   /* Match default BT24 name */
+                { namePrefix: 'Dragino' },
+                { services: [BLE_SERVICE_UUID] },
+            ],
             optionalServices: [BLE_SERVICE_UUID, NUS_SERVICE_UUID],
         });
 
