@@ -45,21 +45,21 @@ export function buildRoiPayload(config) {
     // --- Byte 32-33: numDigits (u16LE) ---
     view.setUint16(32, config.numDigits, true);
 
-    // --- Byte 34-35: numDials (u16LE) — always 0 per Windows UART capture ---
-    view.setUint16(34, 0, true);
+    // --- Byte 34-35: numDials (u16LE) — always 4 for Digit Wheel calibration ---
+    view.setUint16(ROI.NUM_DIALS_OFFSET, ROI.NUM_DIALS_DEFAULT, true);
 
-    // --- Bytes 36-43: reserved (8 bytes zeros) — already zero from Uint8Array init ---
-    // --- Bytes 44-75: dial refs (32 bytes) — zeros for now (no dial calibration) ---
+    // --- Bytes 36-39: reserved (4 bytes zeros) — already zero from Uint8Array init ---
+    // --- Bytes 40-71: dial refs (32 bytes) — zeros for now (no dial calibration) ---
 
-    // --- Byte 76-77: boundary_x (u16LE) ---
-    // --- Byte 78-79: boundary_y (u16LE) ---
+    // --- Byte 72-73: boundary_x (u16LE) ---
+    // --- Byte 74-75: boundary_y (u16LE) ---
     const bx = clampCoord(config.boundaryX, CAL_W);
     const by = clampCoord(config.boundaryY, CAL_H);
     if (bx !== config.boundaryX || by !== config.boundaryY) {
         log(`WARNING: Boundary (${config.boundaryX},${config.boundaryY}) clamped to (${bx},${by})`);
     }
-    view.setUint16(76, bx, true);
-    view.setUint16(78, by, true);
+    view.setUint16(ROI.BOUNDARY_X_OFFSET, bx, true);
+    view.setUint16(ROI.BOUNDARY_Y_OFFSET, by, true);
 
     return payload;
 }
@@ -80,6 +80,7 @@ export async function sendRoiConfig(config) {
         const py = pv.getUint16(ROI.POINTS_OFFSET + d * 4 + 2, true);
         log('  P' + (d + 1) + ': x=' + px + ' y=' + py);
     }
+    log(`  numDigits: ${pv.getUint16(ROI.NUM_DIGITS_OFFSET, true)}`);
     log(`  numDials: ${pv.getUint16(ROI.NUM_DIALS_OFFSET, true)}`);
     log(`  Boundary: ${pv.getUint16(ROI.BOUNDARY_X_OFFSET, true)} x ${pv.getUint16(ROI.BOUNDARY_Y_OFFSET, true)}`);
     const hexRows = [];

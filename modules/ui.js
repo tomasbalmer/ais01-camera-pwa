@@ -125,20 +125,29 @@ export function switchMode(mode) {
 }
 
 // === Image mode switching (Full / ROI) ===
+// Grace period: ignore auto-detection for 3s after user-initiated switch,
+// so stale frames don't revert the selection while the camera transitions.
+const MODE_SWITCH_GRACE_MS = 3000;
+let modeSwitchTime = 0;
+
 export function switchImageMode(mode) {
     // Immediate visual feedback
     dom.btnFull.classList.toggle('active', mode === 'FULL');
     dom.btnROI.classList.toggle('active', mode === 'ROI');
     state.imageMode = mode === 'FULL' ? 'full' : 'roi';
+    modeSwitchTime = performance.now();
     // Send command to camera
     sendCommand(mode === 'FULL' ? 'SHOW_FULL_IMAGE' : 'SHOW_ROI');
 }
 
 // === Auto-detect image mode from actual frame dimensions ===
 // Called after each frame loads. Updates toggle only when mode actually changes.
+// Skipped during grace period after user-initiated switch.
 const FULL_WIDTH_THRESHOLD = 400; // full=640, ROI is significantly smaller
 
 export function syncImageModeFromFrame() {
+    // Don't override user selection while camera is still transitioning
+    if (performance.now() - modeSwitchTime < MODE_SWITCH_GRACE_MS) return;
     const w = dom.cam.naturalWidth;
     if (!w) return;
     const detected = w >= FULL_WIDTH_THRESHOLD ? 'full' : 'roi';

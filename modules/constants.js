@@ -89,13 +89,15 @@ export const ROI = {
     POINTS_SIZE:        32,
     NUM_DIGITS_OFFSET:  32,
     NUM_DIALS_OFFSET:   34,
-    NUM_DIALS_DEFAULT:  0,       // Always 0 in Windows UART captures
-    RESERVED_OFFSET:    36,      // 8 bytes reserved/flags (always zeros)
-    RESERVED_SIZE:      8,
-    DIAL_REFS_OFFSET:   44,      // 32 bytes dial references (8 points x 4 bytes)
-    DIAL_REFS_SIZE:     32,
-    BOUNDARY_X_OFFSET:  76,      // Validated from Windows UART capture
-    BOUNDARY_Y_OFFSET:  78,
+    NUM_DIALS_DEFAULT:  4,       // Always 4 for Digit Wheel calibration (Windows UART captures)
+    RESERVED_OFFSET:    36,      // 4 bytes reserved/padding (always zeros)
+    RESERVED_SIZE:      4,
+    DIAL_REFS_OFFSET:   40,      // 24 bytes dial references (6 × u16LE = 3 dials × 2 corners)
+    DIAL_REFS_SIZE:     24,
+    ADDL_DIAL_OFFSET:   64,      // 8 bytes additional dial refs (2 × u16LE points)
+    ADDL_DIAL_SIZE:     8,
+    BOUNDARY_X_OFFSET:  72,      // Validated from Windows software ROI files
+    BOUNDARY_Y_OFFSET:  74,
 };
 
 // === FTDI Transport (Spec Section 6) ===

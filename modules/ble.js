@@ -42,6 +42,7 @@ export async function connectBLE() {
                 { namePrefix: '8691' },   /* Match IMEI-based names */
                 { namePrefix: 'BT24' },   /* Match default BT24 name */
                 { namePrefix: 'Dragino' },
+                { namePrefix: 'AIS01' },  /* Match AIS01-LB-LoRawan etc. */
                 { services: [BLE_SERVICE_UUID] },
             ],
             optionalServices: [BLE_SERVICE_UUID, NUS_SERVICE_UUID],
