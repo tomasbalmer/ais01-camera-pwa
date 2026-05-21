@@ -161,11 +161,8 @@
     </aside>
 
     <script>
-    // Cache-bust JS modules
-    var s = document.createElement('script');
-    s.type = 'module';
-    s.src = 'app.js?v=' + Date.now();
-    document.body.appendChild(s);
+    if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js');
     </script>
+    <script type="module" src="app.js"></script>
 </body>
 </html>
