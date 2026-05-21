@@ -8,20 +8,19 @@ function clampCoord(v, max) { return Math.max(0, Math.min(max, v)); }
 // ============================================================================
 // ROI Payload Builder — 80 bytes, Little Endian
 // ============================================================================
-// Byte map (validated against Windows software UART capture):
+// Validated against manufacturer tool (HMX_FT4222H_GUI) Read ROI output.
 //
-//   Offset  Size  Field              Source
-//   ------  ----  -----------------  ------------------------------------------
-//    0-31   32B   ROI Points         8 × u16LE {x, y} — 4 refs × 2 corners
-//   32-33    2B   numDigits          u16LE — number of integer digits (4-8)
-//   34-35    2B   numDials           u16LE — always 0 in Windows captures
-//   36-43    8B   Reserved           zeros (flags / padding)
-//   44-75   32B   Dial Refs          8 × u16LE {x, y} — dial reference points
-//   76-77    2B   boundary_x         u16LE — digit boundary width
-//   78-79    2B   boundary_y         u16LE — digit boundary height
-//
-// Windows reference payload (6 digits, boundary 70×70):
-//   [ROI 32B] 06 00 00 00 00 00 00 00 00 00 00 00 [Dial 32B] 46 00 46 00
+//   Offset  Size  Field                       Editable?  What we do
+//   ------  ----  --------------------------  ---------  -------------------------
+//    0-31   32B   Digit points (8 × u16LE)    YES        Write from calibration rect
+//   32-33    2B   Number of digits             YES        Write from user selection
+//   34-35    2B   Number of dials              NO         Don't touch (0)
+//   36-37    2B   Enable Inference 3 times     YES        Fixed 0 (not needed yet)
+//   38-39    2B   Reserved                     NO         Don't touch (0)
+//   40-71   32B   Dial refs (4×4 u16LE)        NO         Hardcoded original values
+//   72-73    2B   Boundary width               NO         Hardcoded original (70)
+//   74-75    2B   Boundary height              NO         Hardcoded original (70)
+//   76-79    4B   Reserved                     NO         Don't touch (0)
 // ============================================================================
 export function buildRoiPayload(config) {
     const payload = new Uint8Array(ROI.PAYLOAD_SIZE);  // 80 bytes, all zeros
@@ -45,8 +44,9 @@ export function buildRoiPayload(config) {
     // --- Byte 32-33: numDigits (u16LE) ---
     view.setUint16(32, config.numDigits, true);
 
-    // --- Byte 34-35: numDials — not ours to touch, stays 0 from Uint8Array init ---
-    // --- Bytes 36-39: reserved — stays 0 from Uint8Array init ---
+    // --- Byte 34-35: numDials — non-editable, stays 0 ---
+    // --- Byte 36-37: Enable Inference 3 times — editable, 0 for now (not needed) ---
+    // --- Byte 38-39: reserved — stays 0 ---
 
     // --- Bytes 40-71: dial refs (32 bytes) — fixed digit wheel values ---
     // 4 dials × {org_x, org_y, c_x, c_y} u16LE = 32 bytes
@@ -61,15 +61,9 @@ export function buildRoiPayload(config) {
         view.setUint16(40 + i * 2, DIAL_REFS[i], true);
     }
 
-    // --- Byte 72-73: boundary_x (u16LE) ---
-    // --- Byte 74-75: boundary_y (u16LE) ---
-    const bx = clampCoord(config.boundaryX, CAL_W);
-    const by = clampCoord(config.boundaryY, CAL_H);
-    if (bx !== config.boundaryX || by !== config.boundaryY) {
-        log(`WARNING: Boundary (${config.boundaryX},${config.boundaryY}) clamped to (${bx},${by})`);
-    }
-    view.setUint16(ROI.BOUNDARY_X_OFFSET, bx, true);
-    view.setUint16(ROI.BOUNDARY_Y_OFFSET, by, true);
+    // --- Bytes 72-75: boundary — not editable, preserve original values ---
+    view.setUint16(ROI.BOUNDARY_X_OFFSET, 70, true);
+    view.setUint16(ROI.BOUNDARY_Y_OFFSET, 70, true);
 
     return payload;
 }

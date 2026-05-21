@@ -161,8 +161,17 @@
     </aside>
 
     <script>
-    if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js');
+    // Ensure service worker is active before loading modules,
+    // so all JS fetches bypass browser cache via sw.js.
+    (async () => {
+        if ('serviceWorker' in navigator) {
+            await navigator.serviceWorker.register('sw.js');
+            if (!navigator.serviceWorker.controller) {
+                await new Promise(r => navigator.serviceWorker.addEventListener('controllerchange', r));
+            }
+        }
+        import('./app.js');
+    })();
     </script>
-    <script type="module" src="app.js"></script>
 </body>
 </html>
