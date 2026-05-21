@@ -70,22 +70,40 @@ function extractAiResult(acc, soiIndex) {
     }
 }
 
-// === Display a single JPEG frame ===
-function displayFrame(jpegBytes) {
-    const blob = new Blob([jpegBytes], { type: 'image/jpeg' });
-    const url = URL.createObjectURL(blob);
+// === Display a single JPEG frame (throttled to rAF) ===
+// Multiple JPEGs may arrive between animation frames; only the latest is displayed.
+// This keeps the USB read loop unblocked and avoids redundant JPEG decodes.
+let pendingUrl = null;
+let rafId = 0;
+
+function flushFrame() {
+    rafId = 0;
+    if (!pendingUrl) return;
+    const url = pendingUrl;
+    pendingUrl = null;
     const prev = dom.cam.src;
     dom.cam.onload = () => {
         if (prev && prev.startsWith('blob:')) URL.revokeObjectURL(prev);
         syncImageModeFromFrame();
     };
     dom.cam.src = url;
+}
+
+function displayFrame(jpegBytes) {
+    // Revoke previous pending frame if it was never displayed
+    if (pendingUrl) URL.revokeObjectURL(pendingUrl);
+
+    const blob = new Blob([jpegBytes], { type: 'image/jpeg' });
+    pendingUrl = URL.createObjectURL(blob);
     state.frameCount++;
     state.fpsCount++;
 
     if (state.frameCount === 1) {
         log(`First frame: ${jpegBytes.length} bytes`);
     }
+
+    // Schedule display on next animation frame
+    if (!rafId) rafId = requestAnimationFrame(flushFrame);
 }
 
 // === Main frame extraction loop ===
