@@ -45,10 +45,8 @@ export function buildRoiPayload(config) {
     // --- Byte 32-33: numDigits (u16LE) ---
     view.setUint16(32, config.numDigits, true);
 
-    // --- Byte 34-35: numDials (u16LE) — 0, no dial calibration ---
-    view.setUint16(ROI.NUM_DIALS_OFFSET, 0, true);
-
-    // --- Bytes 36-39: reserved (4 bytes zeros) — already zero from Uint8Array init ---
+    // --- Byte 34-35: numDials — not ours to touch, stays 0 from Uint8Array init ---
+    // --- Bytes 36-39: reserved — stays 0 from Uint8Array init ---
 
     // --- Bytes 40-71: dial refs (32 bytes) — fixed digit wheel values ---
     // 4 dials × {org_x, org_y, c_x, c_y} u16LE = 32 bytes
