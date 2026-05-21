@@ -60,10 +60,9 @@ function extractFrames(acc) {
             if (acc.length > FRAME_BUFFER_MAX) acc.splice(0, acc.length - FRAME_BUFFER_MAX);
             return;
         }
-        if (soi > 0) acc.splice(0, soi);
 
-        // Find EOI
-        const eoi = findMarker(acc, 2, JPEG_EOI);
+        // Find EOI after SOI
+        const eoi = findMarker(acc, soi + 2, JPEG_EOI);
         if (eoi === -1) return;
 
         // Complete JPEG found
@@ -73,8 +72,8 @@ function extractFrames(acc) {
 
         const now = performance.now();
         if (now - state.lastDisplayTime >= DISPLAY_INTERVAL_MS) {
-            // This is the frame we show — extract its AI result + display
-            extractAiResult(acc, soi > 0 ? soi : 0);
+            // Extract AI from bytes BEFORE SOI (still in accumulator)
+            if (soi > 0) extractAiResult(acc, soi);
 
             const jpeg = new Uint8Array(acc.slice(0, jpegEnd));
             const blob = new Blob([jpeg], { type: 'image/jpeg' });
@@ -104,7 +103,7 @@ export async function readStream(epIn) {
     const pktSz = epIn.packetSize || FTDI_DEFAULT_PACKET_SIZE;
 
     state.running = true;
-    state.lastDisplayTime = 0;
+    state.lastDisplayTime = performance.now(); // skip first second to avoid partial frames
     dom.connectScreen.style.display = 'none';
     dom.cam.style.display = 'block';
     dom.stats.className = 'active';
