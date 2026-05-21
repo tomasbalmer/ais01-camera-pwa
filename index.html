@@ -160,6 +160,12 @@
         </div>
     </aside>
 
-    <script type="module" src="app.js"></script>
+    <script>
+    // Cache-bust JS modules
+    var s = document.createElement('script');
+    s.type = 'module';
+    s.src = 'app.js?v=' + Date.now();
+    document.body.appendChild(s);
+    </script>
 </body>
 </html>
