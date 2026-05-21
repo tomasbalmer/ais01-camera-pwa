@@ -71,14 +71,11 @@ function unlockCalibrate() {
     if (btn) btn.disabled = false;
 }
 
-// Slow interval (2s) for ambient updates: window resize + AI reading
+// Slow interval for AI reading update only — canvas position is fixed at entry
 function startCalibInterval() {
     stopCalibInterval();
     state.calibInterval = setInterval(() => {
         if (!state.calibMode) return;
-        const changed = syncOverlay();
-        syncCalibPosition();
-        if (changed) drawDimOverlay();
         updateCalibReading();
     }, 2000);
 }
