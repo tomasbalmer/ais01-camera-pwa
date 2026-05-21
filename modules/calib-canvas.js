@@ -170,6 +170,19 @@ export function createCalibOverlay(canvas, onChange) {
         ctx.restore();
     }
 
+    // --- Throttled redraw (once per animation frame) ---
+
+    let rafPending = false;
+    function scheduleRedraw() {
+        if (rafPending) return;
+        rafPending = true;
+        requestAnimationFrame(() => {
+            rafPending = false;
+            draw();
+            onChange();
+        });
+    }
+
     // --- Pointer events ---
 
     function ptrPos(e) {
@@ -217,8 +230,7 @@ export function createCalibOverlay(canvas, onChange) {
             resizeFromHandle(action, p.x, p.y);
         }
 
-        draw();
-        onChange();
+        scheduleRedraw();
     }
 
     function onUp(e) {
