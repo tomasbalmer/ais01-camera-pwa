@@ -211,12 +211,17 @@ export function computeRoiCoords() {
     const n = state.calibDigits;
     const digitW = rw / n;
 
-    // 4 evenly-spaced references: center of first digit -> center of last digit
+    // 4 reference positions at digit boundaries: [0, 2, N-2, N]
+    // Based on Dragino wiki calibration diagrams for each digit count.
+    // For N=4: P1,P2 unused (0,0), only 3 refs at [0, 2, 4]
+    const refPositions = n === 4
+        ? [0, 0, 2, 4]   // P1,P2 unused, P3-P8 at 0, N/2, N
+        : [0, 2, n - 2, n]; // standard: left edge, +2, N-2, right edge
+
     const digits = [];
     for (let ref = 0; ref < 4; ref++) {
-        const t = ref / 3;
-        const centerX = digitW / 2 + t * (rw - digitW);
-        const localX = -rw / 2 + centerX;
+        const frac = refPositions[ref] / n;
+        const localX = -rw / 2 + frac * rw;
 
         const topDispX = cx + localX * Math.cos(rot) - (-rh / 2) * Math.sin(rot);
         const topDispY = cy + localX * Math.sin(rot) + (-rh / 2) * Math.cos(rot);
