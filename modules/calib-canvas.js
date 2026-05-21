@@ -292,6 +292,8 @@ export function createCalibOverlay(canvas, onChange) {
         draw,
 
         resize(w, h) {
+            if (w === W && h === H) return;
+            if (!w || !h) return;  // skip zero/invalid dimensions
             W = w; H = h;
             canvas.width = w;
             canvas.height = h;
