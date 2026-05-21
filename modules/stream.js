@@ -53,13 +53,7 @@ function extractAiResult(acc, soiIndex) {
 
 // === Extract frames: always parse AI, only display 1/sec ===
 function extractFrames(acc) {
-    const now = performance.now();
-
     while (true) {
-        // Extract AI result from bytes before SOI
-        const preSoi = findMarker(acc, 0, JPEG_SOI);
-        if (preSoi > 0) extractAiResult(acc, preSoi);
-
         // Find SOI
         const soi = findMarker(acc, 0, JPEG_SOI);
         if (soi === -1) {
@@ -77,8 +71,11 @@ function extractFrames(acc) {
         state.frameCount++;
         state.fpsCount++;
 
-        // Only display if enough time has passed
+        const now = performance.now();
         if (now - state.lastDisplayTime >= DISPLAY_INTERVAL_MS) {
+            // This is the frame we show — extract its AI result + display
+            extractAiResult(acc, soi > 0 ? soi : 0);
+
             const jpeg = new Uint8Array(acc.slice(0, jpegEnd));
             const blob = new Blob([jpeg], { type: 'image/jpeg' });
             const url = URL.createObjectURL(blob);
@@ -95,7 +92,7 @@ function extractFrames(acc) {
             }
         }
 
-        // Always discard the frame from accumulator (whether displayed or not)
+        // Discard frame (displayed or not)
         acc.splice(0, jpegEnd);
     }
 }
