@@ -20,10 +20,4 @@ export const state = {
     calibInterval: null,
     calibRectTouched: false,
 
-    // Konva calibration objects
-    konvaStage: null,
-    konvaLayer: null,
-    konvaRect: null,
-    konvaTransformer: null,
-    konvaDividers: null,
 };

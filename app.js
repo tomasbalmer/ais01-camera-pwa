@@ -1,5 +1,5 @@
 import { state } from './modules/state.js';
-import { dom, log, toggleDrawer, togglePanel, switchMode, switchImageMode } from './modules/ui.js';
+import { dom, log, toggleDrawer, togglePanel, switchMode, switchImageMode, resetImageModeSelection } from './modules/ui.js';
 import { adjustSensor, onAdvancedReadRegister, onWriteRegister } from './modules/protocol.js';
 import { connectDevice } from './modules/ftdi.js';
 import { readStream } from './modules/stream.js';
@@ -39,6 +39,7 @@ async function toggleConnection() {
             });
             // Reset image mode state (will be re-detected from first frame)
             state.imageMode = null;
+            resetImageModeSelection();
             dom.btnFull.classList.remove('active');
             dom.btnROI.classList.remove('active');
             try { await state.device.close(); } catch (e) {}

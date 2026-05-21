@@ -195,15 +195,15 @@
     pointer-events: none;
 }
 
-/* ─── Konva container ─── */
-#konva-container {
+/* ─── Calibration canvas ─── */
+#calib-canvas {
     display: none;
     position: absolute;
     top: 0;
     left: 0;
     pointer-events: none;
 }
-#konva-container.active {
+#calib-canvas.active {
     display: block;
     pointer-events: auto;
 }
