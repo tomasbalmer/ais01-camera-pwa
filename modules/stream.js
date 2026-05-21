@@ -75,7 +75,7 @@ function extractFrames(acc) {
             // Extract AI from bytes BEFORE SOI (still in accumulator)
             if (soi > 0) extractAiResult(acc, soi);
 
-            const jpeg = new Uint8Array(acc.slice(0, jpegEnd));
+            const jpeg = new Uint8Array(acc.slice(soi, jpegEnd));
             const blob = new Blob([jpeg], { type: 'image/jpeg' });
             const url = URL.createObjectURL(blob);
             const prev = dom.cam.src;
