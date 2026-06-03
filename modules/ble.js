@@ -252,19 +252,31 @@ export async function startCalibMode() {
     /* Send AT+CALIB every 2s until frames arrive.
      * The device only processes AT commands when awake (5s boot window
      * or brief RTC wakes). Retrying ensures the command lands. */
-    await bleSend('AT+CALIB');
-    calibRetryInterval = setInterval(async () => {
+    log('Starting AT+CALIB retry loop (every 2s)...');
+    let retryCount = 0;
+
+    const sendCalib = async () => {
+        retryCount++;
+        log(`AT+CALIB attempt #${retryCount} (frames=${frameCount}, bleRx=${!!bleRxChar})`);
         if (frameCount > 0) {
+            log('Frames detected! Stopping retry.');
             clearInterval(calibRetryInterval);
             calibRetryInterval = null;
-            log('Calibration mode active — device responding');
+            return;
+        }
+        if (!bleRxChar) {
+            log('WARNING: bleRxChar is null — BLE not ready');
             return;
         }
         try {
             await bleSend('AT+CALIB');
-            log('Retrying AT+CALIB...');
-        } catch (e) { /* BLE not ready yet */ }
-    }, 2000);
+        } catch (e) {
+            log('AT+CALIB send error: ' + e.message);
+        }
+    };
+
+    await sendCalib();
+    calibRetryInterval = setInterval(sendCalib, 2000);
 }
 
 /* ── Send AT command over BLE (for calibration sub-commands) ── */
