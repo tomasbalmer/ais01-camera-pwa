@@ -64,7 +64,8 @@ export async function connectBLE() {
             const char = await service.getCharacteristic(BLE_CHAR_UUID);
             rxChar = char; /* BT24: same characteristic for read/write */
             txChar = char;
-            log('BT24 service (FFE0/FFE1)');
+            const p = char.properties;
+            log(`BT24 (FFE0/FFE1) write=${p.write} writeNoResp=${p.writeWithoutResponse} notify=${p.notify}`);
         } catch (e) {
             service = await server.getPrimaryService(NUS_SERVICE_UUID);
             rxChar = await service.getCharacteristic(NUS_RX_CHAR_UUID);
@@ -94,10 +95,22 @@ async function bleSend(cmd) {
     const encoder = new TextEncoder();
     const data = encoder.encode(cmd + '\r\n');
 
+    /* Detect write method: some characteristics only support writeWithResponse */
+    const props = bleRxChar.properties;
+    const useWriteWithout = props.writeWithoutResponse;
+    const useWrite = props.write;
+
     /* BLE has 20-byte MTU limit — send in chunks */
     for (let i = 0; i < data.length; i += 20) {
         const chunk = data.slice(i, i + 20);
-        await bleRxChar.writeValueWithoutResponse(chunk);
+        if (useWriteWithout) {
+            await bleRxChar.writeValueWithoutResponse(chunk);
+        } else if (useWrite) {
+            await bleRxChar.writeValueWithResponse(chunk);
+        } else {
+            log('ERROR: characteristic has no write property');
+            return;
+        }
     }
     log('Sent: ' + cmd);
 }
