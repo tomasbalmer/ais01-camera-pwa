@@ -1,10 +1,8 @@
 /*
- * BLE Module — Web Bluetooth connection to BT24 for calibration + install
+ * BLE Module — Web Bluetooth connection to BT24 transparent UART
  *
- * BT24 transparent UART bridge:
- *   Service:  FFE0
- *   Notify:   FFE1 (device → phone)
- *   Write:    FFE2 (phone → device), fallback FFE1
+ * BT24 exposes one characteristic (FFE1) with read/write/writeNoResp/notify.
+ * Same char is used for sending commands and receiving JPEG frames.
  */
 
 import { state } from './state.js';
@@ -13,16 +11,14 @@ import { findMarker } from './helpers.js';
 import { JPEG_SOI, JPEG_EOI } from './constants.js';
 
 const BLE_SERVICE_UUID = 0xFFE0;
-const BLE_NOTIFY_UUID = 0xFFE1;
-const BLE_WRITE_UUID = 0xFFE2;
+const BLE_CHAR_UUID = 0xFFE1;
 
 const NUS_SERVICE_UUID = '6e400001-b5a3-f393-e0a9-e50e24dcca9e';
 const NUS_TX_CHAR_UUID = '6e400003-b5a3-f393-e0a9-e50e24dcca9e';
 const NUS_RX_CHAR_UUID = '6e400002-b5a3-f393-e0a9-e50e24dcca9e';
 
 let bleDevice = null;
-let bleWriteChar = null;
-let bleNotifyChar = null;
+let bleChar = null;       /* single FFE1 char for read/write/notify */
 let accumulator = [];
 let frameCount = 0;
 let fpsCount = 0;
@@ -36,7 +32,7 @@ export async function connectBLE() {
         return true;
     }
 
-    log('[v2] Scanning for BLE devices...');
+    log('[v3] Scanning...');
 
     try {
         bleDevice = await navigator.bluetooth.requestDevice({
@@ -54,76 +50,23 @@ export async function connectBLE() {
         const server = await bleDevice.gatt.connect();
         log('GATT connected');
 
-        let service;
         try {
-            service = await server.getPrimaryService(BLE_SERVICE_UUID);
-            log('Got BT24 service (FFE0)');
+            const service = await server.getPrimaryService(BLE_SERVICE_UUID);
+            bleChar = await service.getCharacteristic(BLE_CHAR_UUID);
+            const p = bleChar.properties;
+            log(`FFE1: write=${p.write} writeNoResp=${p.writeWithoutResponse} notify=${p.notify}`);
         } catch (e) {
-            service = await server.getPrimaryService(NUS_SERVICE_UUID);
-            log('Got Nordic UART service');
-            bleWriteChar = await service.getCharacteristic(NUS_RX_CHAR_UUID);
-            bleNotifyChar = await service.getCharacteristic(NUS_TX_CHAR_UUID);
-            await bleNotifyChar.startNotifications();
-            bleNotifyChar.addEventListener('characteristicvaluechanged', onBleData);
-            log('NUS ready');
+            const service = await server.getPrimaryService(NUS_SERVICE_UUID);
+            bleChar = await service.getCharacteristic(NUS_RX_CHAR_UUID);
+            const txChar = await service.getCharacteristic(NUS_TX_CHAR_UUID);
+            await txChar.startNotifications();
+            txChar.addEventListener('characteristicvaluechanged', onBleData);
+            log('Nordic UART service');
             return true;
         }
 
-        /* Get all characteristics and log them */
-        const chars = await service.getCharacteristics();
-        log(`Service has ${chars.length} characteristic(s)`);
-        for (const c of chars) {
-            const uuid = c.uuid;
-            const p = c.properties;
-            const flags = [];
-            if (p.read) flags.push('read');
-            if (p.write) flags.push('write');
-            if (p.writeWithoutResponse) flags.push('writeNoResp');
-            if (p.notify) flags.push('notify');
-            log(`  ${uuid}: ${flags.join(', ')}`);
-        }
-
-        /* Find notify characteristic (FFE1) */
-        bleNotifyChar = null;
-        for (const c of chars) {
-            if (c.properties.notify) {
-                bleNotifyChar = c;
-                break;
-            }
-        }
-        if (!bleNotifyChar) {
-            log('ERROR: no notify characteristic found');
-            return false;
-        }
-
-        /* Find write characteristic — prefer one that's NOT the notify char */
-        bleWriteChar = null;
-        for (const c of chars) {
-            if ((c.properties.write || c.properties.writeWithoutResponse) && c !== bleNotifyChar) {
-                bleWriteChar = c;
-                break;
-            }
-        }
-        /* Fallback: use notify char for write too */
-        if (!bleWriteChar) {
-            if (bleNotifyChar.properties.write || bleNotifyChar.properties.writeWithoutResponse) {
-                bleWriteChar = bleNotifyChar;
-                log('Using same char for notify + write');
-            } else {
-                log('ERROR: no writable characteristic found');
-                return false;
-            }
-        }
-
-        log(`Notify: ${bleNotifyChar.uuid}`);
-        log(`Write:  ${bleWriteChar.uuid}`);
-
-        await bleNotifyChar.startNotifications();
-        bleNotifyChar.addEventListener('characteristicvaluechanged', onBleData);
-
-        /* Give BLE stack time to stabilize before first write */
-        await new Promise(r => setTimeout(r, 500));
-
+        await bleChar.startNotifications();
+        bleChar.addEventListener('characteristicvaluechanged', onBleData);
         log('BLE ready');
         return true;
 
@@ -135,42 +78,14 @@ export async function connectBLE() {
 
 /* ── Send ── */
 async function bleSend(cmd) {
-    if (!bleWriteChar) {
-        log('bleSend: no write char');
-        return;
-    }
-
-    /* Check GATT is still connected */
-    if (!bleDevice || !bleDevice.gatt.connected) {
-        log('bleSend: GATT disconnected');
-        return;
-    }
+    if (!bleChar) { log('No BLE char'); return; }
+    if (!bleDevice || !bleDevice.gatt.connected) { log('GATT disconnected'); return; }
 
     const data = new TextEncoder().encode(cmd + '\r\n');
 
     for (let i = 0; i < data.length; i += 20) {
         const chunk = data.slice(i, i + 20);
-        /* Try writeValueWithResponse first (more compatible), fallback to without */
-        try {
-            if (bleWriteChar.properties.write) {
-                await bleWriteChar.writeValueWithResponse(chunk);
-            } else {
-                await bleWriteChar.writeValueWithoutResponse(chunk);
-            }
-        } catch (e) {
-            log(`bleSend chunk error: ${e.message}`);
-            /* Try the other method */
-            try {
-                if (bleWriteChar.properties.writeWithoutResponse) {
-                    await bleWriteChar.writeValueWithoutResponse(chunk);
-                } else {
-                    await bleWriteChar.writeValueWithResponse(chunk);
-                }
-            } catch (e2) {
-                log(`bleSend fallback error: ${e2.message}`);
-                return;
-            }
-        }
+        await bleChar.writeValueWithoutResponse(chunk);
     }
     log('Sent: ' + cmd);
 }
@@ -250,7 +165,6 @@ export async function stopInstallMode() {
     disconnectBLE();
     state.running = false;
     state.bleMode = false;
-    log('BLE install disconnected');
 }
 
 /* ── Calibration Mode ── */
@@ -263,28 +177,22 @@ export async function startCalibMode() {
     dom.cam.style.display = 'block';
     dom.stats.className = 'active';
     dom.statusDot.classList.add('connected');
-    dom.stats.textContent = 'BLE Calibration — reset device now, waiting...';
+    dom.stats.textContent = 'BLE Calibration — reset device now...';
     state.running = true;
     state.bleMode = true;
     state.bleCalibMode = true;
 
-    log('Starting AT+CALIB retry (every 2s)...');
     let retryCount = 0;
-
     const sendCalib = async () => {
         retryCount++;
         if (frameCount > 0) {
-            log('Frames detected! Stopping retry.');
+            log('Frames arriving — calibration active');
             clearInterval(calibRetryInterval);
             calibRetryInterval = null;
             return;
         }
         log(`AT+CALIB #${retryCount}`);
-        try {
-            await bleSend('AT+CALIB');
-        } catch (e) {
-            log('Send error: ' + e.message);
-        }
+        try { await bleSend('AT+CALIB'); } catch (e) {}
     };
 
     await sendCalib();
@@ -301,54 +209,42 @@ export async function stopCalibMode() {
     state.running = false;
     state.bleMode = false;
     state.bleCalibMode = false;
-    log('BLE calibration disconnected');
 }
 
-/* ── Shared BLE commands ── */
+/* ── Calibration sub-commands ── */
 export async function bleSendATCommand(cmd) {
     await bleSend(cmd);
 }
 
 export async function bleSendCameraCommand(name) {
-    const cmdMap = {
-        'SHOW_FULL_IMAGE': 'AT+FULLIMG',
-        'SHOW_ROI': 'AT+ROIIMG',
-        'START': 'AT+CALIB',
-    };
-    const atCmd = cmdMap[name];
-    if (atCmd) await bleSend(atCmd);
-    else log('BLE: unsupported command: ' + name);
+    const map = { 'SHOW_FULL_IMAGE': 'AT+FULLIMG', 'SHOW_ROI': 'AT+ROIIMG', 'START': 'AT+CALIB' };
+    if (map[name]) await bleSend(map[name]);
 }
 
 export async function bleSendRoiPayload(payloadBytes) {
-    const hex = Array.from(payloadBytes)
-        .map(b => b.toString(16).padStart(2, '0'))
-        .join('');
+    const hex = Array.from(payloadBytes).map(b => b.toString(16).padStart(2, '0')).join('');
     await bleSend('AT+SETROI=' + hex);
 }
 
 export function isBleCalibMode() {
-    return state.bleCalibMode && bleWriteChar != null;
+    return state.bleCalibMode && bleChar != null;
 }
 
 export function hasBluetooth() {
     return !!navigator.bluetooth;
 }
 
-/* ── Disconnect helper ── */
+/* ── Disconnect ── */
 function disconnectBLE() {
-    if (bleNotifyChar) {
+    if (bleChar) {
         try {
-            bleNotifyChar.removeEventListener('characteristicvaluechanged', onBleData);
-            bleNotifyChar.stopNotifications();
+            bleChar.removeEventListener('characteristicvaluechanged', onBleData);
+            bleChar.stopNotifications();
         } catch (e) {}
     }
-    if (bleDevice && bleDevice.gatt.connected) {
-        bleDevice.gatt.disconnect();
-    }
+    if (bleDevice && bleDevice.gatt.connected) bleDevice.gatt.disconnect();
     bleDevice = null;
-    bleWriteChar = null;
-    bleNotifyChar = null;
+    bleChar = null;
     accumulator = [];
     frameCount = 0;
     dom.cam.style.display = 'none';
