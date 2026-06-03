@@ -230,6 +230,8 @@ export async function stopInstallMode() {
 }
 
 /* ── Start calibration mode ── */
+let calibRetryInterval = null;
+
 export async function startCalibMode() {
     accumulator = [];
     frameCount = 0;
@@ -241,14 +243,28 @@ export async function startCalibMode() {
     dom.cam.style.display = 'block';
     dom.stats.className = 'active';
     dom.statusDot.classList.add('connected');
-    dom.stats.textContent = 'BLE Calibration Mode — waiting for frames...';
-
-    /* Send AT+CALIB to enter calibration mode */
-    await bleSend('AT+CALIB');
+    dom.stats.textContent = 'BLE Calibration — reset device now, waiting...';
 
     state.running = true;
     state.bleMode = true;
     state.bleCalibMode = true;
+
+    /* Send AT+CALIB every 2s until frames arrive.
+     * The device only processes AT commands when awake (5s boot window
+     * or brief RTC wakes). Retrying ensures the command lands. */
+    await bleSend('AT+CALIB');
+    calibRetryInterval = setInterval(async () => {
+        if (frameCount > 0) {
+            clearInterval(calibRetryInterval);
+            calibRetryInterval = null;
+            log('Calibration mode active — device responding');
+            return;
+        }
+        try {
+            await bleSend('AT+CALIB');
+            log('Retrying AT+CALIB...');
+        } catch (e) { /* BLE not ready yet */ }
+    }, 2000);
 }
 
 /* ── Send AT command over BLE (for calibration sub-commands) ── */
@@ -282,6 +298,11 @@ export async function bleSendRoiPayload(payloadBytes) {
 
 /* ── Stop calibration mode ── */
 export async function stopCalibMode() {
+    if (calibRetryInterval) {
+        clearInterval(calibRetryInterval);
+        calibRetryInterval = null;
+    }
+
     if (bleRxChar) {
         try { await bleSend('AT+STOP'); } catch (e) {}
     }
