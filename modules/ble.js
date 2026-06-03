@@ -15,9 +15,10 @@ import { dom, log } from './ui.js';
 import { findMarker } from './helpers.js';
 import { JPEG_SOI, JPEG_EOI } from './constants.js';
 
-/* BT24 typically uses FFE0/FFE1 for transparent UART */
+/* BT24 transparent UART: FFE0 service, FFE1 notify (RX), FFE2 write (TX) */
 const BLE_SERVICE_UUID = 0xFFE0;
-const BLE_CHAR_UUID = 0xFFE1;
+const BLE_NOTIFY_UUID = 0xFFE1;  /* device → phone (notify) */
+const BLE_WRITE_UUID = 0xFFE2;   /* phone → device (write) */
 
 /* Fallback: Nordic UART Service */
 const NUS_SERVICE_UUID = '6e400001-b5a3-f393-e0a9-e50e24dcca9e';
@@ -61,11 +62,19 @@ export async function connectBLE() {
         let service, rxChar, txChar;
         try {
             service = await server.getPrimaryService(BLE_SERVICE_UUID);
-            const char = await service.getCharacteristic(BLE_CHAR_UUID);
-            rxChar = char; /* BT24: same characteristic for read/write */
-            txChar = char;
-            const p = char.properties;
-            log(`BT24 (FFE0/FFE1) write=${p.write} writeNoResp=${p.writeWithoutResponse} notify=${p.notify}`);
+            const notifyChar = await service.getCharacteristic(BLE_NOTIFY_UUID);
+            let writeChar;
+            try {
+                writeChar = await service.getCharacteristic(BLE_WRITE_UUID);
+                log('BT24 (FFE0) notify=FFE1 write=FFE2');
+            } catch (e2) {
+                writeChar = notifyChar; /* fallback: same char for both */
+                log('BT24 (FFE0) FFE2 not found, using FFE1 for write');
+            }
+            const p = writeChar.properties;
+            log(`Write char: write=${p.write} writeNoResp=${p.writeWithoutResponse}`);
+            rxChar = writeChar; /* phone → device */
+            txChar = notifyChar; /* device → phone */
         } catch (e) {
             service = await server.getPrimaryService(NUS_SERVICE_UUID);
             rxChar = await service.getCharacteristic(NUS_RX_CHAR_UUID);
