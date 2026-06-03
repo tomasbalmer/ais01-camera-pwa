@@ -8,7 +8,10 @@ import {
     enterCalibMode, exitCalibMode,
     computeAndSendRoi, onCalibDigitChange, toggleCalibCoords,
 } from './modules/calibration.js';
-import { connectBLE, startInstallMode, stopInstallMode, hasBluetooth } from './modules/ble.js';
+import {
+    connectBLE, startInstallMode, stopInstallMode, hasBluetooth,
+    startCalibMode, stopCalibMode,
+} from './modules/ble.js';
 
 // === Main connect/disconnect toggle ===
 async function toggleConnection() {
@@ -88,9 +91,41 @@ async function toggleBLE() {
     }
 }
 
+// === BLE Calibration Mode connect/disconnect ===
+async function toggleBLECalib() {
+    try {
+        if (state.bleCalibMode) {
+            if (state.calibMode) exitCalibMode();
+            await stopCalibMode();
+            document.getElementById('ble-calib-btn').textContent = 'BLE Calibrate';
+        } else {
+            document.getElementById('ble-calib-btn').disabled = true;
+            document.getElementById('ble-calib-btn').textContent = 'Connecting BLE...';
+            const ok = await connectBLE();
+            document.getElementById('ble-calib-btn').disabled = false;
+            if (ok) {
+                document.getElementById('ble-calib-btn').textContent = 'Stop BLE Calib';
+                await startCalibMode();
+                /* Show calibration UI elements */
+                dom.modeToggle.classList.add('visible');
+                dom.modeArea.classList.add('visible');
+                dom.modeSelector.classList.add('visible');
+                dom.btnStop.classList.add('visible');
+            } else {
+                document.getElementById('ble-calib-btn').textContent = 'BLE Calibrate';
+            }
+        }
+    } catch (err) {
+        log('BLE Calib Error: ' + err.message);
+        document.getElementById('ble-calib-btn').disabled = false;
+        document.getElementById('ble-calib-btn').textContent = 'BLE Calibrate';
+    }
+}
+
 // === Expose functions to inline onclick handlers ===
 window.toggleConnection = toggleConnection;
 window.toggleBLE = toggleBLE;
+window.toggleBLECalib = toggleBLECalib;
 window.toggleDrawer = toggleDrawer;
 window.togglePanel = togglePanel;
 window.switchMode = switchMode;
@@ -117,5 +152,8 @@ if (!isSecure) {
     document.getElementById('ble-btn').disabled = true;
 } else {
     if (!hasWebUSB) document.getElementById('big-btn').disabled = true;
-    if (!hasBLE) document.getElementById('ble-btn').disabled = true;
+    if (!hasBLE) {
+        document.getElementById('ble-btn').disabled = true;
+        document.getElementById('ble-calib-btn').disabled = true;
+    }
 }

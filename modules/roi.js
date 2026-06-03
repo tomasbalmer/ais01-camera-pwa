@@ -1,6 +1,7 @@
 import { CMDS, ROI, CAL_W, CAL_H } from './constants.js';
 import { log } from './ui.js';
 import { sendRawBytes, sendCommand } from './protocol.js';
+import { isBleCalibMode, bleSendRoiPayload } from './ble.js';
 
 // Clamp coordinate to calibration space (0..CAL_W / 0..CAL_H)
 function clampCoord(v, max) { return Math.max(0, Math.min(max, v)); }
@@ -69,12 +70,7 @@ export function buildRoiPayload(config) {
 }
 
 export async function sendRoiConfig(config) {
-    await sendRawBytes(CMDS.SET_MODE);
-    await new Promise(r => setTimeout(r, ROI.SETUP_DELAY_MS));
     const payload = buildRoiPayload(config);
-    const frame = new Uint8Array(ROI.DATA_HDR.length + payload.length);
-    frame.set(ROI.DATA_HDR);
-    frame.set(payload, ROI.DATA_HDR.length);
 
     // Log decoded payload
     const pv = new DataView(payload.buffer);
@@ -95,17 +91,28 @@ export async function sendRoiConfig(config) {
     hexRows.forEach(r => log(r));
     log('--- END ---');
 
-    await sendRawBytes(Array.from(frame));
-    log(`ROI sent: ${config.numDigits} digits, ${ROI.NUM_DIALS_DEFAULT} dials`);
+    if (isBleCalibMode()) {
+        /* BLE path: firmware handles SET_MODE + delay + DATA_HDR + re-init */
+        await bleSendRoiPayload(payload);
+        log(`ROI sent via BLE: ${config.numDigits} digits`);
+    } else {
+        /* FTDI/USB path: send raw protocol bytes */
+        await sendRawBytes(CMDS.SET_MODE);
+        await new Promise(r => setTimeout(r, ROI.SETUP_DELAY_MS));
+        const frame = new Uint8Array(ROI.DATA_HDR.length + payload.length);
+        frame.set(ROI.DATA_HDR);
+        frame.set(payload, ROI.DATA_HDR.length);
+        await sendRawBytes(Array.from(frame));
+        log(`ROI sent: ${config.numDigits} digits, ${ROI.NUM_DIALS_DEFAULT} dials`);
 
-    // Re-initialize sensor session after calibration to prevent camera freeze.
-    // Without this, subsequent SHOW_ROI/SHOW_FULL_IMAGE commands hang the sensor.
-    log('Re-initializing sensor session...');
-    await new Promise(r => setTimeout(r, 200));
-    await sendCommand('START');
-    await new Promise(r => setTimeout(r, 200));
-    await sendCommand('SEND');
-    log('Sensor session restored');
+        // Re-initialize sensor session after calibration
+        log('Re-initializing sensor session...');
+        await new Promise(r => setTimeout(r, 200));
+        await sendCommand('START');
+        await new Promise(r => setTimeout(r, 200));
+        await sendCommand('SEND');
+        log('Sensor session restored');
+    }
 }
 
 export function onSendROI() {

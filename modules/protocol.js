@@ -1,14 +1,18 @@
 import { CMDS, FRAME_SYNC, CMD_GROUP_REGISTER, CMD_ID_REG_READ, CMD_ID_REG_WRITE, SENSOR_CTRL } from './constants.js';
 import { state } from './state.js';
 import { log } from './ui.js';
+import { isBleCalibMode, bleSendCameraCommand } from './ble.js';
 
 // === Send raw bytes to sensor via FTDI UART TX ===
+// Note: In BLE calibration mode, roi.js handles ROI payloads directly via bleSendRoiPayload.
+// This function is only used for FTDI/USB raw byte transmission.
 export async function sendRawBytes(bytes) {
     if (!state.device || !state.epOutNum) { log('Not connected'); return; }
-    const hex = bytes.map(b => b.toString(16).padStart(2, '0')).join(' ');
+    const arr = Array.isArray(bytes) ? bytes : Array.from(bytes);
+    const hex = arr.map(b => b.toString(16).padStart(2, '0')).join(' ');
     log(`TX → ${hex}`);
     try {
-        const result = await state.device.transferOut(state.epOutNum, new Uint8Array(bytes));
+        const result = await state.device.transferOut(state.epOutNum, new Uint8Array(arr));
         log(`TX OK: ${result.bytesWritten} bytes`);
     } catch (err) {
         log(`TX ERROR: ${err.message}`);
@@ -17,6 +21,11 @@ export async function sendRawBytes(bytes) {
 
 // === Send named command to sensor ===
 export async function sendCommand(name) {
+    if (isBleCalibMode()) {
+        log(`CMD (BLE): ${name}`);
+        await bleSendCameraCommand(name);
+        return;
+    }
     const cmd = CMDS[name];
     if (!cmd) { log(`Unknown command: ${name}`); return; }
     log(`CMD: ${name}`);

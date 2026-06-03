@@ -34,6 +34,11 @@ let lastFpsTime = 0;
 
 /* ── Connect via Web Bluetooth ── */
 export async function connectBLE() {
+    /* Reuse existing connection if still active */
+    if (bleDevice && bleDevice.gatt.connected) {
+        log('BLE already connected');
+        return true;
+    }
     log('Scanning for BLE devices...');
 
     try {
@@ -222,6 +227,98 @@ export async function stopInstallMode() {
     frameCount = 0;
 
     log('BLE disconnected');
+}
+
+/* ── Start calibration mode ── */
+export async function startCalibMode() {
+    accumulator = [];
+    frameCount = 0;
+    fpsCount = 0;
+    lastFpsTime = performance.now();
+
+    /* Show camera view */
+    dom.connectScreen.style.display = 'none';
+    dom.cam.style.display = 'block';
+    dom.stats.className = 'active';
+    dom.statusDot.classList.add('connected');
+    dom.stats.textContent = 'BLE Calibration Mode — waiting for frames...';
+
+    /* Send AT+CALIB to enter calibration mode */
+    await bleSend('AT+CALIB');
+
+    state.running = true;
+    state.bleMode = true;
+    state.bleCalibMode = true;
+}
+
+/* ── Send AT command over BLE (for calibration sub-commands) ── */
+export async function bleSendATCommand(cmd) {
+    await bleSend(cmd);
+}
+
+/* ── Send camera command name over BLE ── */
+export async function bleSendCameraCommand(name) {
+    const cmdMap = {
+        'SHOW_FULL_IMAGE': 'AT+FULLIMG',
+        'SHOW_ROI': 'AT+ROIIMG',
+        'START': 'AT+CALIB',
+    };
+    const atCmd = cmdMap[name];
+    if (atCmd) {
+        await bleSend(atCmd);
+    } else {
+        log('BLE: unsupported camera command: ' + name);
+    }
+}
+
+/* ── Send ROI calibration payload over BLE ── */
+export async function bleSendRoiPayload(payloadBytes) {
+    /* Convert 80 bytes to hex string */
+    const hex = Array.from(payloadBytes)
+        .map(b => b.toString(16).padStart(2, '0'))
+        .join('');
+    await bleSend('AT+SETROI=' + hex);
+}
+
+/* ── Stop calibration mode ── */
+export async function stopCalibMode() {
+    if (bleRxChar) {
+        try { await bleSend('AT+STOP'); } catch (e) {}
+    }
+
+    state.running = false;
+    state.bleMode = false;
+    state.bleCalibMode = false;
+
+    dom.cam.style.display = 'none';
+    dom.connectScreen.style.display = 'flex';
+    dom.stats.className = '';
+    dom.stats.textContent = 'Disconnected';
+    dom.statusDot.classList.remove('connected');
+
+    if (bleTxChar) {
+        try {
+            bleTxChar.removeEventListener('characteristicvaluechanged', onBleData);
+            await bleTxChar.stopNotifications();
+        } catch (e) {}
+    }
+
+    if (bleDevice && bleDevice.gatt.connected) {
+        bleDevice.gatt.disconnect();
+    }
+
+    bleDevice = null;
+    bleRxChar = null;
+    bleTxChar = null;
+    accumulator = [];
+    frameCount = 0;
+
+    log('BLE calibration disconnected');
+}
+
+/* ── Check if in BLE calibration mode ── */
+export function isBleCalibMode() {
+    return state.bleCalibMode && bleRxChar != null;
 }
 
 /* ── Check Web Bluetooth availability ── */
