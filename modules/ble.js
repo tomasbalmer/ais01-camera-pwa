@@ -191,8 +191,8 @@ export async function startCalibMode() {
             calibRetryInterval = null;
             return;
         }
-        log(`AT+CALIB #${retryCount}`);
-        try { await bleSend('AT+CALIB'); } catch (e) {}
+        log(`AT+INSTALL #${retryCount}`);
+        try { await bleSend('AT+INSTALL'); } catch (e) {}
     };
 
     await sendCalib();
@@ -217,7 +217,7 @@ export async function bleSendATCommand(cmd) {
 }
 
 export async function bleSendCameraCommand(name) {
-    const map = { 'SHOW_FULL_IMAGE': 'AT+FULLIMG', 'SHOW_ROI': 'AT+ROIIMG', 'START': 'AT+CALIB' };
+    const map = { 'SHOW_FULL_IMAGE': 'AT+FULLIMG', 'SHOW_ROI': 'AT+ROIIMG', 'START': 'AT+INSTALL' };
     if (map[name]) await bleSend(map[name]);
 }
 
