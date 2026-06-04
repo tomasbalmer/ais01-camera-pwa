@@ -183,20 +183,27 @@ export async function startCalibMode() {
     state.bleCalibMode = true;
 
     let retryCount = 0;
+    const MAX_RETRIES = 10;
     const sendCalib = async () => {
         retryCount++;
         if (frameCount > 0) {
-            log('Frames arriving — calibration active');
+            log('Frames arriving');
             clearInterval(calibRetryInterval);
             calibRetryInterval = null;
             return;
         }
-        log(`AT+INSTALL #${retryCount}`);
+        if (retryCount > MAX_RETRIES) {
+            log('Stopped after ' + MAX_RETRIES + ' attempts');
+            clearInterval(calibRetryInterval);
+            calibRetryInterval = null;
+            return;
+        }
+        log(`AT+INSTALL #${retryCount}/${MAX_RETRIES}`);
         try { await bleSend('AT+INSTALL'); } catch (e) {}
     };
 
     await sendCalib();
-    calibRetryInterval = setInterval(sendCalib, 2000);
+    calibRetryInterval = setInterval(sendCalib, 3000);
 }
 
 export async function stopCalibMode() {
