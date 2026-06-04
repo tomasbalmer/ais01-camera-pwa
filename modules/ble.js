@@ -25,14 +25,46 @@ let fpsCount = 0;
 let lastFpsTime = 0;
 let calibRetryInterval = null;
 
-/* ── Connect ── */
+/* ── Connect (or reconnect) to GATT ── */
+async function gattConnect() {
+    if (!bleDevice) return false;
+    try {
+        const server = await bleDevice.gatt.connect();
+        log('GATT connected');
+
+        const service = await server.getPrimaryService(BLE_SERVICE_UUID);
+        bleChar = await service.getCharacteristic(BLE_CHAR_UUID);
+
+        await bleChar.startNotifications();
+        bleChar.addEventListener('characteristicvaluechanged', onBleData);
+        log('BLE ready');
+        return true;
+    } catch (e) {
+        log('GATT connect failed: ' + e.message);
+        bleChar = null;
+        return false;
+    }
+}
+
+/* ── Handle GATT disconnect — auto-reconnect ── */
+function onDisconnect() {
+    log('GATT disconnected — will reconnect...');
+    bleChar = null;
+    setTimeout(async () => {
+        if (state.bleMode || state.bleCalibMode) {
+            await gattConnect();
+        }
+    }, 1000);
+}
+
+/* ── Initial BLE connect (user picks device) ── */
 export async function connectBLE() {
     if (bleDevice && bleDevice.gatt.connected) {
         log('BLE already connected');
         return true;
     }
 
-    log('[v3] Scanning...');
+    log('[v4] Scanning...');
 
     try {
         bleDevice = await navigator.bluetooth.requestDevice({
@@ -47,28 +79,9 @@ export async function connectBLE() {
         });
 
         log(`Found: ${bleDevice.name || 'Unknown'}`);
-        const server = await bleDevice.gatt.connect();
-        log('GATT connected');
+        bleDevice.addEventListener('gattserverdisconnected', onDisconnect);
 
-        try {
-            const service = await server.getPrimaryService(BLE_SERVICE_UUID);
-            bleChar = await service.getCharacteristic(BLE_CHAR_UUID);
-            const p = bleChar.properties;
-            log(`FFE1: write=${p.write} writeNoResp=${p.writeWithoutResponse} notify=${p.notify}`);
-        } catch (e) {
-            const service = await server.getPrimaryService(NUS_SERVICE_UUID);
-            bleChar = await service.getCharacteristic(NUS_RX_CHAR_UUID);
-            const txChar = await service.getCharacteristic(NUS_TX_CHAR_UUID);
-            await txChar.startNotifications();
-            txChar.addEventListener('characteristicvaluechanged', onBleData);
-            log('Nordic UART service');
-            return true;
-        }
-
-        await bleChar.startNotifications();
-        bleChar.addEventListener('characteristicvaluechanged', onBleData);
-        log('BLE ready');
-        return true;
+        return await gattConnect();
 
     } catch (err) {
         log('BLE error: ' + err.message);
@@ -78,8 +91,12 @@ export async function connectBLE() {
 
 /* ── Send ── */
 async function bleSend(cmd) {
-    if (!bleChar) { log('No BLE char'); return; }
-    if (!bleDevice || !bleDevice.gatt.connected) { log('GATT disconnected'); return; }
+    /* Reconnect if needed */
+    if (bleDevice && !bleDevice.gatt.connected) {
+        log('Reconnecting...');
+        if (!await gattConnect()) return;
+    }
+    if (!bleChar) return;
 
     const data = new TextEncoder().encode(cmd + '\r\n');
 
