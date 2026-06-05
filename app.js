@@ -139,6 +139,23 @@ window.exitCalibMode = exitCalibMode;
 window.computeAndSendRoi = computeAndSendRoi;
 window.onCalibDigitChange = onCalibDigitChange;
 window.toggleCalibCoords = toggleCalibCoords;
+window.copyLogs = function() {
+    const logEl = document.getElementById('log');
+    const text = Array.from(logEl.children).map(l => l.textContent).join('\n');
+    navigator.clipboard.writeText(text).then(() => {
+        const btn = event.target;
+        btn.textContent = 'Copied!';
+        setTimeout(() => btn.textContent = 'Copy', 1500);
+    }).catch(() => {
+        // Fallback for older browsers
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+    });
+};
 
 // === Init check ===
 const isSecure = window.isSecureContext;

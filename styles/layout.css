@@ -156,6 +156,8 @@
     flex: 1;
     overflow-y: auto;
     -webkit-overflow-scrolling: touch;
+    display: flex;
+    flex-direction: column;
 }
 
 /* ─── Drawer sections ─── */

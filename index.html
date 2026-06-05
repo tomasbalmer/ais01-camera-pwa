@@ -149,13 +149,13 @@
         </div>
         <div class="drawer-content">
             <!-- Log Section -->
-            <div class="drawer-section">
-                <div class="section-header" onclick="togglePanel('section-log')">
-                    <span>Log</span>
-                    <svg class="chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="6 9 12 15 18 9"/></svg>
+            <div class="drawer-section" style="flex:1; display:flex; flex-direction:column;">
+                <div class="section-header" style="display:flex; justify-content:space-between; align-items:center;">
+                    <span onclick="togglePanel('section-log')">Log</span>
+                    <button onclick="copyLogs()" style="font-size:12px; padding:4px 10px; background:#374151; color:#fff; border:none; border-radius:4px;">Copy</button>
                 </div>
-                <div id="section-log" class="section-body">
-                    <div id="log"></div>
+                <div id="section-log" class="section-body" style="flex:1; overflow:hidden; display:flex;">
+                    <div id="log" style="flex:1; overflow-y:auto; user-select:text; -webkit-user-select:text;"></div>
                 </div>
             </div>
         </div>
