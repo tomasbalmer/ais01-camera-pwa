@@ -9,52 +9,61 @@ import {
     computeAndSendRoi, onCalibDigitChange, toggleCalibCoords,
 } from './modules/calibration.js';
 import {
-    connectBLE, startInstallMode, stopInstallMode, hasBluetooth,
-    startCalibMode, stopCalibMode,
+    connectBLE, startBleSession, stopBleSession, hasBluetooth,
+    isBleConnected,
 } from './modules/ble.js';
 
-// === Main connect/disconnect toggle ===
+// === Stop any active connection (USB or BLE) ===
+async function stopConnection() {
+    if (state.calibMode) exitCalibMode();
+
+    if (isBleConnected()) {
+        await stopBleSession();
+    } else {
+        state.running = false;
+        dom.modeToggle.classList.remove('visible');
+        dom.modeArea.classList.remove('visible');
+        dom.modeSelector.classList.remove('visible');
+        dom.btnStop.classList.remove('visible');
+        dom.modeHint.style.display = 'none';
+        dom.connectScreen.style.display = 'flex';
+        dom.cam.style.display = 'none';
+        dom.stats.className = '';
+        dom.stats.textContent = 'Disconnected';
+        dom.statusDot.classList.remove('connected');
+        try { await state.device.close(); } catch (e) {}
+        state.device = null;
+        state.epOutNum = null;
+    }
+
+    // Reset to validate mode
+    state.activeMode = 'validate';
+    dom.panelValidate.classList.add('active');
+    dom.panelCalibrate.classList.remove('active');
+    dom.panelSettings.classList.remove('active');
+    const tabs = dom.modeSelector.querySelectorAll('.mode-tab');
+    tabs.forEach(tab => {
+        tab.classList.toggle('active', tab.dataset.mode === 'validate');
+    });
+    state.imageMode = null;
+    resetImageModeSelection();
+    dom.btnFull.classList.remove('active');
+    dom.btnROI.classList.remove('active');
+    log('Disconnected');
+}
+
+// === USB connect/disconnect toggle ===
 async function toggleConnection() {
     log('Button clicked');
     try {
         if (state.running) {
-            state.running = false;
-            // Hide connected UI elements
-            dom.modeToggle.classList.remove('visible');
-            dom.modeArea.classList.remove('visible');
-            dom.modeSelector.classList.remove('visible');
-            dom.btnStop.classList.remove('visible');
-            dom.modeHint.style.display = 'none';
-            dom.connectScreen.style.display = 'flex';
-            dom.cam.style.display = 'none';
-            dom.stats.className = '';
-            dom.stats.textContent = 'Disconnected';
-            dom.statusDot.classList.remove('connected');
-            if (state.calibMode) exitCalibMode();
-            // Reset to validate mode
-            state.activeMode = 'validate';
-            dom.panelValidate.classList.add('active');
-            dom.panelCalibrate.classList.remove('active');
-            dom.panelSettings.classList.remove('active');
-            const tabs = dom.modeSelector.querySelectorAll('.mode-tab');
-            tabs.forEach(tab => {
-                tab.classList.toggle('active', tab.dataset.mode === 'validate');
-            });
-            // Reset image mode state (will be re-detected from first frame)
-            state.imageMode = null;
-            resetImageModeSelection();
-            dom.btnFull.classList.remove('active');
-            dom.btnROI.classList.remove('active');
-            try { await state.device.close(); } catch (e) {}
-            state.device = null;
-            state.epOutNum = null;
-            log('Disconnected');
+            await stopConnection();
         } else {
             document.getElementById('big-btn').disabled = true;
             document.getElementById('big-btn').textContent = 'Connecting...';
             const epIn = await connectDevice();
             document.getElementById('big-btn').disabled = false;
-            document.getElementById('big-btn').textContent = 'Connect Camera';
+            document.getElementById('big-btn').textContent = 'USB Camera';
             if (epIn) {
                 readStream(epIn);
             }
@@ -62,70 +71,40 @@ async function toggleConnection() {
     } catch (err) {
         log('Error: ' + err.message);
         document.getElementById('big-btn').disabled = false;
-        document.getElementById('big-btn').textContent = 'Connect Camera';
+        document.getElementById('big-btn').textContent = 'USB Camera';
     }
 }
 
-// === BLE Installation Mode connect/disconnect ===
+// === BLE connect/disconnect ===
 async function toggleBLE() {
     try {
         if (state.bleMode) {
-            await stopInstallMode();
-            document.getElementById('ble-btn').textContent = 'BLE Install Mode';
+            await stopConnection();
+            document.getElementById('ble-btn').textContent = 'BLE Connect';
         } else {
             document.getElementById('ble-btn').disabled = true;
-            document.getElementById('ble-btn').textContent = 'Connecting BLE...';
+            document.getElementById('ble-btn').textContent = 'Connecting...';
             const ok = await connectBLE();
             document.getElementById('ble-btn').disabled = false;
             if (ok) {
-                document.getElementById('ble-btn').textContent = 'Stop BLE';
-                await startInstallMode();
+                document.getElementById('ble-btn').textContent = 'BLE Connect';
+                await startBleSession();
             } else {
-                document.getElementById('ble-btn').textContent = 'BLE Install Mode';
+                document.getElementById('ble-btn').textContent = 'BLE Connect';
             }
         }
     } catch (err) {
         log('BLE Error: ' + err.message);
         document.getElementById('ble-btn').disabled = false;
-        document.getElementById('ble-btn').textContent = 'BLE Install Mode';
-    }
-}
-
-// === BLE Calibration Mode connect/disconnect ===
-async function toggleBLECalib() {
-    try {
-        if (state.bleCalibMode) {
-            if (state.calibMode) exitCalibMode();
-            await stopCalibMode();
-            document.getElementById('ble-calib-btn').textContent = 'BLE Calibrate';
-        } else {
-            document.getElementById('ble-calib-btn').disabled = true;
-            document.getElementById('ble-calib-btn').textContent = 'Connecting BLE...';
-            const ok = await connectBLE();
-            document.getElementById('ble-calib-btn').disabled = false;
-            if (ok) {
-                document.getElementById('ble-calib-btn').textContent = 'Stop BLE Calib';
-                await startCalibMode();
-                /* Show calibration UI elements */
-                dom.modeToggle.classList.add('visible');
-                dom.modeArea.classList.add('visible');
-                dom.modeSelector.classList.add('visible');
-                dom.btnStop.classList.add('visible');
-            } else {
-                document.getElementById('ble-calib-btn').textContent = 'BLE Calibrate';
-            }
-        }
-    } catch (err) {
-        log('BLE Calib Error: ' + err.message);
-        document.getElementById('ble-calib-btn').disabled = false;
-        document.getElementById('ble-calib-btn').textContent = 'BLE Calibrate';
+        document.getElementById('ble-btn').textContent = 'BLE Connect';
     }
 }
 
 // === Expose functions to inline onclick handlers ===
+window.bleSendAT = async (cmd) => { const { bleSendATCommand } = await import('./modules/ble.js'); await bleSendATCommand(cmd); };
 window.toggleConnection = toggleConnection;
 window.toggleBLE = toggleBLE;
-window.toggleBLECalib = toggleBLECalib;
+window.stopConnection = stopConnection;
 window.toggleDrawer = toggleDrawer;
 window.togglePanel = togglePanel;
 window.switchMode = switchMode;
@@ -171,6 +150,5 @@ if (!isSecure) {
     if (!hasWebUSB) document.getElementById('big-btn').disabled = true;
     if (!hasBLE) {
         document.getElementById('ble-btn').disabled = true;
-        document.getElementById('ble-calib-btn').disabled = true;
     }
 }
