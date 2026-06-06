@@ -152,7 +152,7 @@ async function bleSend(cmd) {
         const chunk = data.slice(i, i + 20);
         await bleRxChar.writeValueWithoutResponse(chunk);
     }
-    log('Sent: ' + cmd);
+    if (cmd !== 'AT') log('Sent: ' + cmd);
 }
 
 /* Send raw bytes to a specific characteristic */
@@ -214,11 +214,16 @@ function onBleData(event) {
             const line = textLineBuf.slice(0, nlIdx).replace(/\r/g, '').trim();
             textLineBuf = textLineBuf.slice(nlIdx + 1);
             if (line) {
-                log(`[device] ${line}`);
                 /* Detect firmware state from device output */
                 if (line.includes('AT+BAUD') || line.includes('AT+PWRM') || line.includes('AT+NAME')) {
                     bootloaderSeen = true;
                 }
+
+                /* Filter noise: skip AT ping responses and bootloader AT commands */
+                const isNoise = line === 'OK' || line === 'ERROR' || line === 'AT_ERROR'
+                    || line.startsWith('AT+BAUD') || line.startsWith('AT+PWRM')
+                    || line.startsWith('AT+NAME') || line === 'AT';
+                if (!isNoise) log(`[device] ${line}`);
                 if (line.includes('AT command window')) {
                     firmwareReady = true;
                     setStep('step-firmware', 'done');
