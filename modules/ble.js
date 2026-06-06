@@ -37,9 +37,36 @@ let gattDisconnected = false;
 /* Known BT24 passwords — tried in order on reconnect */
 const BT24_PASSWORDS = ['123456', '000000', '0000'];
 
+/* Auto-reconnect on ANY disconnect (v4 approach — simple, always on) */
 function onGattDisconnected() {
     gattDisconnected = true;
-    log('GATT disconnected (event)');
+    log('GATT disconnected — reconnecting in 1s...');
+    bleRxChar = null;
+    bleTxChar = null;
+    if (state.bleMode || state.bleCalibMode) {
+        setTimeout(() => gattConnect(), 1000);
+    }
+}
+
+async function gattConnect() {
+    if (!bleDevice) return false;
+    try {
+        const server = await bleDevice.gatt.connect();
+        log('GATT connected');
+        const service = await server.getPrimaryService(BLE_SERVICE_UUID);
+        const char = await service.getCharacteristic(BLE_CHAR_UUID);
+        await char.startNotifications();
+        char.addEventListener('characteristicvaluechanged', onBleData);
+        bleRxChar = char;
+        bleTxChar = char;
+        gattDisconnected = false;
+        return true;
+    } catch (e) {
+        log('GATT connect failed: ' + e.message);
+        bleRxChar = null;
+        bleTxChar = null;
+        return false;
+    }
 }
 
 /* Update setup step UI: 'pending' | 'active' | 'done' */
@@ -106,80 +133,26 @@ export async function connectBLE() {
         return true;
 
     } catch (err) {
+        /* Only reaches here if requestDevice itself failed (user cancelled scan) */
         log('BLE error: ' + err.message);
         return false;
     }
 }
 
-/* ── Reconnect to already-paired device (after reset) ── */
-async function reconnectBLE() {
-    const maxRetries = 20;
-    const retryDelay = 2000;
-    const attemptTimeout = 6000;
-
-    for (let i = 1; i <= maxRetries; i++) {
-        log(`Reconnect attempt ${i}/${maxRetries}...`);
-        try {
-            /* Step 1: GATT connect (with timeout — can hang) */
-            const connectPromise = bleDevice.gatt.connect();
-            const timeoutPromise = new Promise((_, reject) =>
-                setTimeout(() => reject(new Error('connect timeout')), attemptTimeout));
-            await Promise.race([connectPromise, timeoutPromise]);
-
-            /* Step 2: Discover service + characteristic */
-            try {
-                const service = await bleDevice.gatt.getPrimaryService(BLE_SERVICE_UUID);
-                const chars = await service.getCharacteristics();
-                const notifyChar = chars.find(c => c.properties.notify);
-                if (!notifyChar) throw new Error('no notify characteristic');
-
-                bleRxChar = notifyChar;
-                bleTxChar = notifyChar;
-
-                await bleTxChar.startNotifications();
-                bleTxChar.addEventListener('characteristicvaluechanged', onBleData);
-
-                log('BLE reconnected');
-                return true;
-            } catch (e2) {
-                log(`  service discovery failed: ${e2.message}`);
-                /* GATT connected but service not ready — disconnect and retry */
-                try { bleDevice.gatt.disconnect(); } catch (_) {}
-            }
-        } catch (e) {
-            log(`  connect failed: ${e.message}`);
-        }
-
-        if (i < maxRetries) {
-            await new Promise(r => setTimeout(r, retryDelay));
-        }
-    }
-    log('BLE reconnect failed after all attempts');
-    return false;
-}
-
 /* ── Send string command via BLE ── */
 async function bleSend(cmd) {
+    /* v4: reconnect if disconnected */
+    if (bleDevice && !bleDevice.gatt.connected) {
+        log('Reconnecting...');
+        if (!await gattConnect()) return;
+    }
     if (!bleRxChar) return;
-    const encoder = new TextEncoder();
-    const data = encoder.encode(cmd + '\r\n');
-
-    /* BLE has 20-byte MTU limit — send in chunks.
-     * Try writeValueWithResponse first (some BT24 modules ignore WithoutResponse).
-     * Fallback to writeValueWithoutResponse if the char doesn't support it. */
-    const charName = bleRxChar.uuid.includes('ffe1') ? 'FFE1' : 'FFE2';
-    let writeType = '?';
+    const data = new TextEncoder().encode(cmd + '\r\n');
     for (let i = 0; i < data.length; i += 20) {
         const chunk = data.slice(i, i + 20);
-        try {
-            await bleRxChar.writeValueWithResponse(chunk);
-            writeType = 'withResponse';
-        } catch (e) {
-            await bleRxChar.writeValueWithoutResponse(chunk);
-            writeType = 'withoutResponse';
-        }
+        await bleRxChar.writeValueWithoutResponse(chunk);
     }
-    log(`Sent [${charName}/${writeType}]: ${cmd}`);
+    log('Sent: ' + cmd);
 }
 
 /* Send raw bytes to a specific characteristic */
@@ -203,6 +176,7 @@ let notifyCount = 0;
 let firmwareReady = false;
 let installAcked = false;
 let bootloaderSeen = false;
+let dutyCycleStarted = false;
 let textLineBuf = '';
 
 /* Check if a byte array is printable ASCII text (not binary/JPEG) */
@@ -245,7 +219,7 @@ function onBleData(event) {
                 if (line.includes('AT+BAUD') || line.includes('AT+PWRM') || line.includes('AT+NAME')) {
                     bootloaderSeen = true;
                 }
-                if (line.includes('Custom Firmware') || line.includes('AT command window')) {
+                if (line.includes('AT command window')) {
                     firmwareReady = true;
                     setStep('step-firmware', 'done');
                     setStep('step-install', 'active');
@@ -254,6 +228,9 @@ function onBleData(event) {
                 if (line.includes('Entering installation mode') || line.includes('INSTALLATION MODE')) {
                     installAcked = true;
                     setStep('step-install', 'done');
+                }
+                if (line.includes('Window closed') || line.includes('duty cycle start') || line.includes('Duty cycle start')) {
+                    dutyCycleStarted = true;
                 }
             }
         }
@@ -368,128 +345,70 @@ export async function startBleSession() {
     dom.stats.className = 'active';
     dom.stats.textContent = 'Setting up...';
 
-    setStep('step-ble', 'done');
-    setInstruction('Reset the device and wait...');
-
     state.running = true;
     state.bleMode = true;
     state.bleCalibMode = true;
     firmwareReady = false;
     installAcked = false;
-    bootloaderSeen = false;
+    dutyCycleStarted = false;
     textLineBuf = '';
     gattDisconnected = false;
 
-    /* ── Phase 1: Connect to device ──
-     * BLE is already connected. The bootloader will reset the BT24,
-     * dropping our connection. We detect this and auto-reconnect.
-     * All of this is invisible to the user — just "Connecting..." */
-    setStep('step-connecting', 'active');
-    setInstruction('Connecting to device...');
-    log('Waiting for device...');
-    dom.stats.textContent = 'Connecting...';
+    setStep('step-connecting', 'done');
+    setInstruction('Reset the device and wait...');
+    dom.stats.textContent = 'Waiting for device...';
 
-    /* Wait for BLE disconnect (bootloader resets BT24) */
-    log('Waiting for BLE disconnect (up to 15s)...');
-    const t0 = performance.now();
-    while (!gattDisconnected && (performance.now() - t0) < 15000) {
-        await new Promise(r => setTimeout(r, 200));
-    }
+    /* v4 approach: AT+INSTALL every 3s. Stops on ACK or frames. */
+    let retryCount = 0;
+    const MAX_RETRIES = 30;
+    let installInterval = null;
 
-    if (gattDisconnected) {
-        log('BLE dropped (bootloader reset BT24)');
-        log('Starting reconnect loop...');
-        gattDisconnected = false;
-        const ok = await reconnectBLE();
-        if (!ok) {
-            log('ERROR: Could not reconnect after all attempts');
-            setInstruction('Connection failed — try again');
-            dom.stats.textContent = 'Connection failed';
+    const sendInstall = async () => {
+        retryCount++;
+        if (installAcked || frameCount > 0) {
+            clearInterval(installInterval);
+            installInterval = null;
+            setStep('step-install', 'done');
             return;
         }
-        log('Reconnect successful');
-    } else {
-        log('No disconnect detected after 15s — continuing anyway');
-    }
+        if (retryCount > MAX_RETRIES) {
+            clearInterval(installInterval);
+            installInterval = null;
+            log('Stopped after ' + MAX_RETRIES + ' attempts');
+            setInstruction('No response — reset device and try again');
+            dom.stats.textContent = 'No response';
+            return;
+        }
 
-    setStep('step-connecting', 'done');
-    log('Phase 1 complete: connected');
+        if (firmwareReady) {
+            /* Firmware detected — send AT+INSTALL */
+            setStep('step-firmware', 'done');
+            setStep('step-install', 'active');
+            setInstruction('Entering calibration mode...');
+            log(`AT+INSTALL #${retryCount}/${MAX_RETRIES}`);
+            try { await bleSend('AT+INSTALL'); } catch (e) {}
+        } else {
+            /* Bootloader — ping to keep GATT alive */
+            try { await bleSend('AT'); } catch (e) {}
+        }
+    };
 
-    /* ── Phase 2: Wait for firmware (NO commands sent) ──
-     * The bootloader has the BT24 in AT mode — sending commands now
-     * would confuse it. We just listen for firmware output.
-     * When we see the firmware banner, BT24 is in transparent mode. */
-    setStep('step-firmware', 'active');
-    setInstruction('Waiting for device to boot...');
-    log('Waiting for firmware (not sending commands yet)...');
-    dom.stats.textContent = 'Waiting for firmware...';
+    await sendInstall();
+    installInterval = setInterval(sendInstall, 3000);
 
-    const firmwareTimeout = 45000;
+    /* Wait for frames */
     const t1 = performance.now();
-    while (!firmwareReady && (performance.now() - t1) < firmwareTimeout) {
-        await new Promise(r => setTimeout(r, 200));
-    }
-
-    if (!firmwareReady) {
-        log('WARNING: firmware not detected after 45s');
-        log(`  gattDisconnected=${gattDisconnected}, bootloaderSeen=${bootloaderSeen}`);
-        log(`  notifications received: ${notifyCount}, bytes: ${totalBleBytes}`);
-        log(`  accumulator size: ${accumulator.length}`);
-        setInstruction('Device not responding — try resetting again');
-        dom.stats.textContent = 'Device not responding';
-        return;
-    }
-
-    setStep('step-firmware', 'done');
-    log('Phase 2 complete: firmware detected');
-
-    /* ── Phase 3: Send AT+INSTALL (one shot, firmware is ready) ── */
-    setStep('step-install', 'active');
-    setInstruction('Entering calibration mode...');
-    log('Firmware ready — sending AT+INSTALL...');
-    dom.stats.textContent = 'Entering calibration mode...';
-
-    log('Sending AT+INSTALL...');
-    try {
-        await bleSend('AT+INSTALL');
-    } catch (e) {
-        log(`Send error: ${e.message}`);
-        return;
-    }
-
-    /* Wait for device ACK */
-    log('Waiting for device ACK (up to 10s)...');
-    const t2 = performance.now();
-    while (!installAcked && (performance.now() - t2) < 10000) {
-        await new Promise(r => setTimeout(r, 200));
-    }
-
-    if (!installAcked) {
-        log('WARNING: device did not acknowledge AT+INSTALL');
-        log(`  notifications: ${notifyCount}, bytes: ${totalBleBytes}`);
-        setInstruction('Device did not respond — try again');
-        dom.stats.textContent = 'No response';
-        return;
-    }
-
-    setStep('step-install', 'done');
-    log('Phase 3 complete: install mode active');
-
-    /* ── Phase 4: Wait for camera to start streaming ── */
-    setStep('step-camera', 'active');
-    setInstruction('Starting camera...');
-    log('Waiting for camera...');
-    dom.stats.textContent = 'Starting camera...';
-
-    const t3 = performance.now();
-    while (frameCount === 0 && (performance.now() - t3) < 30000) {
+    while (frameCount === 0 && (performance.now() - t1) < 120000) {
         await new Promise(r => setTimeout(r, 300));
     }
 
+    if (installInterval) { clearInterval(installInterval); installInterval = null; }
+
     if (frameCount > 0) {
+        setStep('step-install', 'done');
         setStep('step-camera', 'done');
-        log(`Phase 4 complete: camera streaming (frame size: ${accumulator.length}B)`);
-        /* Transition: hide setup panel, show camera view */
+        setInstruction('Streaming');
+        log('Camera streaming');
         dom.connectScreen.style.display = 'none';
         dom.cam.style.display = 'block';
         dom.modeToggle.classList.add('visible');
@@ -497,8 +416,8 @@ export async function startBleSession() {
         dom.modeSelector.classList.add('visible');
         dom.stats.textContent = 'Streaming';
     } else {
-        log('WARNING: no frames received');
-        setInstruction('Camera not responding — check connection');
+        log('No frames after 120s');
+        setInstruction('No response — reset device and try again');
         dom.stats.textContent = 'No frames';
     }
 }
