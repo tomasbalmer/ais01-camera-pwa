@@ -136,6 +136,13 @@ window.copyLogs = function() {
     });
 };
 
+// === Clean up on page close — send AT+STOP to exit install mode ===
+window.addEventListener('beforeunload', () => {
+    if (isBleConnected()) {
+        stopBleSession().catch(() => {});
+    }
+});
+
 // === Init check ===
 const isSecure = window.isSecureContext;
 const hasWebUSB = !!navigator.usb;

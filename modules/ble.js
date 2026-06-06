@@ -42,82 +42,120 @@ function onGattDisconnected() {
     log('GATT disconnected (event)');
 }
 
-/* ── Connect via Web Bluetooth ── */
+/* Update setup step UI: 'pending' | 'active' | 'done' */
+function setStep(stepId, status) {
+    const el = document.getElementById(stepId);
+    if (!el) return;
+    el.classList.remove('active', 'done');
+    if (status === 'active') {
+        el.classList.add('active');
+        el.querySelector('.step-icon').textContent = '●';
+    } else if (status === 'done') {
+        el.classList.add('done');
+        el.querySelector('.step-icon').textContent = '✓';
+    } else {
+        el.querySelector('.step-icon').textContent = '○';
+    }
+}
+
+function setInstruction(text) {
+    const el = document.getElementById('setup-instruction');
+    if (el) el.textContent = text;
+}
+
+/* ── Setup GATT connection: discover service, subscribe to notifications ── */
+async function setupGatt() {
+    const server = await bleDevice.gatt.connect();
+
+    const service = await server.getPrimaryService(BLE_SERVICE_UUID);
+    const chars = await service.getCharacteristics();
+
+    /* FFE1 is the main UART bridge (read+write+notify).
+     * FFE2 accepts writes but doesn't relay to UART — don't use it. */
+    const notifyChar = chars.find(c => c.properties.notify);
+    if (!notifyChar) throw new Error('No notify characteristic found');
+
+    bleRxChar = notifyChar;  /* write to FFE1 → UART */
+    bleTxChar = notifyChar;  /* notify from FFE1 ← UART */
+
+    await bleTxChar.startNotifications();
+    bleTxChar.addEventListener('characteristicvaluechanged', onBleData);
+}
+
+/* ── Connect via Web Bluetooth (user scan + pair) ── */
 export async function connectBLE() {
     log('Scanning for BLE devices...');
 
     try {
         bleDevice = await navigator.bluetooth.requestDevice({
             filters: [
-                { namePrefix: '8691' },   /* Match IMEI-based names */
-                { namePrefix: 'BT24' },   /* Match default BT24 name */
+                { namePrefix: '8683' },   /* Match IMEI-based names (this device) */
+                { namePrefix: '8691' },   /* Match other IMEI prefixes */
+                { namePrefix: 'BT24' },
                 { namePrefix: 'Dragino' },
-                { namePrefix: 'AIS01' },  /* Match AIS01-LB-LoRawan etc. */
+                { namePrefix: 'AIS01' },
                 { services: [BLE_SERVICE_UUID] },
             ],
             optionalServices: [BLE_SERVICE_UUID, NUS_SERVICE_UUID],
         });
 
         log(`Found: ${bleDevice.name || 'Unknown'}`);
-        const server = await bleDevice.gatt.connect();
-        log('GATT connected');
-
-        /* Try FFE0 first (BT24), then NUS */
-        let service, rxChar, txChar;
-        try {
-            service = await server.getPrimaryService(BLE_SERVICE_UUID);
-            /* Enumerate all characteristics to find correct TX/RX */
-            const chars = await service.getCharacteristics();
-            for (const c of chars) {
-                const props = c.properties;
-                const propList = [];
-                if (props.read) propList.push('read');
-                if (props.write) propList.push('write');
-                if (props.writeWithoutResponse) propList.push('writeNoResp');
-                if (props.notify) propList.push('notify');
-                if (props.indicate) propList.push('indicate');
-                log(`  Char ${c.uuid}: ${propList.join(', ')}`);
-            }
-            /* Find notify char (device→phone) and SEPARATE write char (phone→device).
-             * BT24 uses FFE1 for notify (UART→BLE) and FFE2 for write (BLE→UART).
-             * They must be different characteristics! */
-            const notifyChar = chars.find(c => c.properties.notify || c.properties.indicate);
-            /* Prefer a write-only char (no notify) for BLE→UART — that's FFE2 */
-            let writeChar = chars.find(c => (c.properties.writeWithoutResponse || c.properties.write) && !c.properties.notify);
-            if (!writeChar) writeChar = chars.find(c => c.properties.writeWithoutResponse || c.properties.write);
-            if (!writeChar || !notifyChar) {
-                throw new Error(`Missing chars: write=${!!writeChar} notify=${!!notifyChar}`);
-            }
-            /* Use FFE1 for EVERYTHING (write + notify) — it's the main UART bridge.
-             * FFE2 accepts writes but doesn't relay to UART. */
-            rxChar = notifyChar;  /* write AT commands to FFE1 */
-            txChar = notifyChar;  /* receive notifications from FFE1 */
-            log(`BT24 chars: FFE1=${notifyChar.uuid} FFE2=${writeChar.uuid}`);
-            log(`  Using FFE1 for both write+notify`);
-        } catch (e) {
-            service = await server.getPrimaryService(NUS_SERVICE_UUID);
-            rxChar = await service.getCharacteristic(NUS_RX_CHAR_UUID);
-            txChar = await service.getCharacteristic(NUS_TX_CHAR_UUID);
-            log('Nordic UART service');
-        }
-
-        bleRxChar = rxChar;
-        bleTxChar = txChar;
-
-        /* Subscribe to notifications */
-        await bleTxChar.startNotifications();
-        bleTxChar.addEventListener('characteristicvaluechanged', onBleData);
-
-        /* BT24 is fully transparent — no password needed.
-         * IMPORTANT: USB cable must be disconnected before BLE use.
-         * The FT230X USB chip blocks BT24 writes on shared PA3 (USART2 RX). */
-        log('BLE ready (no password needed — BT24 transparent)');
+        bleDevice.addEventListener('gattserverdisconnected', onGattDisconnected);
+        await setupGatt();
+        log('BLE connected');
         return true;
 
     } catch (err) {
         log('BLE error: ' + err.message);
         return false;
     }
+}
+
+/* ── Reconnect to already-paired device (after reset) ── */
+async function reconnectBLE() {
+    const maxRetries = 20;
+    const retryDelay = 2000;
+    const attemptTimeout = 6000;
+
+    for (let i = 1; i <= maxRetries; i++) {
+        log(`Reconnect attempt ${i}/${maxRetries}...`);
+        try {
+            /* Step 1: GATT connect (with timeout — can hang) */
+            const connectPromise = bleDevice.gatt.connect();
+            const timeoutPromise = new Promise((_, reject) =>
+                setTimeout(() => reject(new Error('connect timeout')), attemptTimeout));
+            await Promise.race([connectPromise, timeoutPromise]);
+
+            /* Step 2: Discover service + characteristic */
+            try {
+                const service = await bleDevice.gatt.getPrimaryService(BLE_SERVICE_UUID);
+                const chars = await service.getCharacteristics();
+                const notifyChar = chars.find(c => c.properties.notify);
+                if (!notifyChar) throw new Error('no notify characteristic');
+
+                bleRxChar = notifyChar;
+                bleTxChar = notifyChar;
+
+                await bleTxChar.startNotifications();
+                bleTxChar.addEventListener('characteristicvaluechanged', onBleData);
+
+                log('BLE reconnected');
+                return true;
+            } catch (e2) {
+                log(`  service discovery failed: ${e2.message}`);
+                /* GATT connected but service not ready — disconnect and retry */
+                try { bleDevice.gatt.disconnect(); } catch (_) {}
+            }
+        } catch (e) {
+            log(`  connect failed: ${e.message}`);
+        }
+
+        if (i < maxRetries) {
+            await new Promise(r => setTimeout(r, retryDelay));
+        }
+    }
+    log('BLE reconnect failed after all attempts');
+    return false;
 }
 
 /* ── Send string command via BLE ── */
@@ -162,31 +200,70 @@ async function bleWriteRaw(char, data) {
 /* ── Handle incoming BLE data (notifications) ── */
 let totalBleBytes = 0;
 let notifyCount = 0;
+let firmwareReady = false;
+let installAcked = false;
+let bootloaderSeen = false;
+let textLineBuf = '';
+
+/* Check if a byte array is printable ASCII text (not binary/JPEG) */
+function isAsciiText(bytes) {
+    let printable = 0;
+    for (let i = 0; i < bytes.length; i++) {
+        const b = bytes[i];
+        if ((b >= 0x20 && b <= 0x7E) || b === 0x0D || b === 0x0A || b === 0x09)
+            printable++;
+    }
+    return printable > bytes.length * 0.8;
+}
 
 function onBleData(event) {
     const value = new Uint8Array(event.target.value.buffer);
     totalBleBytes += value.length;
     notifyCount++;
+
+    /* Periodic log so we know notifications are flowing */
+    if (notifyCount % 100 === 0) {
+        log(`[ble] ${notifyCount} notifications, ${totalBleBytes}B total, buf=${accumulator.length}`);
+    }
+
+    /* If data looks like ASCII text, show it in the PWA log.
+     * ALSO always accumulate for JPEG extraction — JPEG headers contain
+     * ASCII-like bytes (JFIF, Huffman tables) that fool the text detector.
+     * The frame extractor safely skips non-JPEG bytes. */
+    if (isAsciiText(value)) {
+        const text = new TextDecoder().decode(value);
+        textLineBuf += text;
+
+        /* Flush complete lines to log */
+        while (textLineBuf.includes('\n')) {
+            const nlIdx = textLineBuf.indexOf('\n');
+            const line = textLineBuf.slice(0, nlIdx).replace(/\r/g, '').trim();
+            textLineBuf = textLineBuf.slice(nlIdx + 1);
+            if (line) {
+                log(`[device] ${line}`);
+                /* Detect firmware state from device output */
+                if (line.includes('AT+BAUD') || line.includes('AT+PWRM') || line.includes('AT+NAME')) {
+                    bootloaderSeen = true;
+                }
+                if (line.includes('Custom Firmware') || line.includes('AT command window')) {
+                    firmwareReady = true;
+                    setStep('step-firmware', 'done');
+                    setStep('step-install', 'active');
+                    setInstruction('Sending install command...');
+                }
+                if (line.includes('Entering installation mode') || line.includes('INSTALLATION MODE')) {
+                    installAcked = true;
+                    setStep('step-install', 'done');
+                }
+            }
+        }
+    }
+
+    /* Always accumulate + extract — even text-looking data goes here
+     * so JPEG frames aren't broken by misclassified notifications */
     for (let i = 0; i < value.length; i++) {
         accumulator.push(value[i]);
     }
-
-    /* Log first notification bytes to debug data format */
-    if (notifyCount <= 3) {
-        const hex = Array.from(value.slice(0, 20)).map(b => b.toString(16).padStart(2, '0')).join(' ');
-        log(`BLE notif #${notifyCount} (${value.length}B): ${hex}`);
-    }
-
-    /* Log every 50 notifications to show data is flowing */
-    if (notifyCount % 50 === 0) {
-        /* Check if FF D8 exists anywhere in buffer */
-        let soiFound = false;
-        for (let i = 0; i < accumulator.length - 1; i++) {
-            if (accumulator[i] === 0xFF && accumulator[i+1] === 0xD8) { soiFound = true; break; }
-        }
-        log(`BLE: ${notifyCount} notifs, ${totalBleBytes}B, buf=${accumulator.length}, SOI=${soiFound}`);
-    }
-
     extractAndDisplayFrames();
 }
 
@@ -280,57 +357,149 @@ export async function startBleSession() {
     fpsCount = 0;
     lastFpsTime = performance.now();
 
-    /* Show camera view + full UI */
-    dom.connectScreen.style.display = 'none';
-    dom.cam.style.display = 'block';
-    dom.stats.className = 'active';
-    dom.statusDot.classList.add('connected');
-    dom.modeToggle.classList.add('visible');
-    dom.modeArea.classList.add('visible');
-    dom.modeSelector.classList.add('visible');
-    dom.btnStop.classList.add('visible');
-    dom.stats.textContent = 'BLE — waiting for frames...';
+    /* Switch from chooser to setup panel */
+    const chooser = document.getElementById('connect-chooser');
+    const panel = document.getElementById('setup-panel');
+    if (chooser) chooser.style.display = 'none';
+    if (panel) panel.style.display = 'block';
 
-    /* AT+INSTALL enters camera streaming mode on firmware.
-     *
-     * Problem: if the MCU is in Stop mode, the first command's bytes are
-     * lost during EXTI→USART2 reconfiguration. The firmware stays awake
-     * 500ms after UART wakeup, so we must:
-     *   1. Send AT+INSTALL (wakes MCU — command lost)
-     *   2. Wait 200ms (MCU is reconfiguring clocks + USART2)
-     *   3. Send AT+INSTALL again (arrives cleanly within 500ms window)
-     *   4. Wait for JPEG frames
-     */
+    dom.statusDot.classList.add('connected');
+    dom.btnStop.classList.add('visible');
+    dom.stats.className = 'active';
+    dom.stats.textContent = 'Setting up...';
+
+    setStep('step-ble', 'done');
+    setInstruction('Reset the device and wait...');
+
     state.running = true;
     state.bleMode = true;
     state.bleCalibMode = true;
+    firmwareReady = false;
+    installAcked = false;
+    bootloaderSeen = false;
+    textLineBuf = '';
+    gattDisconnected = false;
 
-    for (let attempt = 1; attempt <= 3; attempt++) {
-        log(`AT+INSTALL attempt ${attempt}/3...`);
+    /* ── Phase 1: Connect to device ──
+     * BLE is already connected. The bootloader will reset the BT24,
+     * dropping our connection. We detect this and auto-reconnect.
+     * All of this is invisible to the user — just "Connecting..." */
+    setStep('step-connecting', 'active');
+    setInstruction('Connecting to device...');
+    log('Waiting for device...');
+    dom.stats.textContent = 'Connecting...';
 
-        /* Double-send: first wakes MCU, second is processed */
-        await bleSend('AT+INSTALL');
+    /* Wait for BLE disconnect (bootloader resets BT24) */
+    log('Waiting for BLE disconnect (up to 15s)...');
+    const t0 = performance.now();
+    while (!gattDisconnected && (performance.now() - t0) < 15000) {
         await new Promise(r => setTimeout(r, 200));
-        await bleSend('AT+INSTALL');
-
-        /* Wait up to 15s for first frame (BLE at 9600 baud is slow) */
-        const t0 = performance.now();
-        while (performance.now() - t0 < 15000) {
-            if (frameCount > 0) break;
-            await new Promise(r => setTimeout(r, 300));
-        }
-        if (frameCount > 0) {
-            log(`Camera streaming after attempt ${attempt}`);
-            break;
-        }
-
-        if (attempt < 3) {
-            log('No frames yet — retrying...');
-        }
     }
 
-    if (frameCount === 0) {
-        log('WARNING: no frames received — camera may not have started');
+    if (gattDisconnected) {
+        log('BLE dropped (bootloader reset BT24)');
+        log('Starting reconnect loop...');
+        gattDisconnected = false;
+        const ok = await reconnectBLE();
+        if (!ok) {
+            log('ERROR: Could not reconnect after all attempts');
+            setInstruction('Connection failed — try again');
+            dom.stats.textContent = 'Connection failed';
+            return;
+        }
+        log('Reconnect successful');
+    } else {
+        log('No disconnect detected after 15s — continuing anyway');
+    }
+
+    setStep('step-connecting', 'done');
+    log('Phase 1 complete: connected');
+
+    /* ── Phase 2: Wait for firmware (NO commands sent) ──
+     * The bootloader has the BT24 in AT mode — sending commands now
+     * would confuse it. We just listen for firmware output.
+     * When we see the firmware banner, BT24 is in transparent mode. */
+    setStep('step-firmware', 'active');
+    setInstruction('Waiting for device to boot...');
+    log('Waiting for firmware (not sending commands yet)...');
+    dom.stats.textContent = 'Waiting for firmware...';
+
+    const firmwareTimeout = 45000;
+    const t1 = performance.now();
+    while (!firmwareReady && (performance.now() - t1) < firmwareTimeout) {
+        await new Promise(r => setTimeout(r, 200));
+    }
+
+    if (!firmwareReady) {
+        log('WARNING: firmware not detected after 45s');
+        log(`  gattDisconnected=${gattDisconnected}, bootloaderSeen=${bootloaderSeen}`);
+        log(`  notifications received: ${notifyCount}, bytes: ${totalBleBytes}`);
+        log(`  accumulator size: ${accumulator.length}`);
+        setInstruction('Device not responding — try resetting again');
+        dom.stats.textContent = 'Device not responding';
+        return;
+    }
+
+    setStep('step-firmware', 'done');
+    log('Phase 2 complete: firmware detected');
+
+    /* ── Phase 3: Send AT+INSTALL (one shot, firmware is ready) ── */
+    setStep('step-install', 'active');
+    setInstruction('Entering calibration mode...');
+    log('Firmware ready — sending AT+INSTALL...');
+    dom.stats.textContent = 'Entering calibration mode...';
+
+    log('Sending AT+INSTALL...');
+    try {
+        await bleSend('AT+INSTALL');
+    } catch (e) {
+        log(`Send error: ${e.message}`);
+        return;
+    }
+
+    /* Wait for device ACK */
+    log('Waiting for device ACK (up to 10s)...');
+    const t2 = performance.now();
+    while (!installAcked && (performance.now() - t2) < 10000) {
+        await new Promise(r => setTimeout(r, 200));
+    }
+
+    if (!installAcked) {
+        log('WARNING: device did not acknowledge AT+INSTALL');
+        log(`  notifications: ${notifyCount}, bytes: ${totalBleBytes}`);
+        setInstruction('Device did not respond — try again');
+        dom.stats.textContent = 'No response';
+        return;
+    }
+
+    setStep('step-install', 'done');
+    log('Phase 3 complete: install mode active');
+
+    /* ── Phase 4: Wait for camera to start streaming ── */
+    setStep('step-camera', 'active');
+    setInstruction('Starting camera...');
+    log('Waiting for camera...');
+    dom.stats.textContent = 'Starting camera...';
+
+    const t3 = performance.now();
+    while (frameCount === 0 && (performance.now() - t3) < 30000) {
+        await new Promise(r => setTimeout(r, 300));
+    }
+
+    if (frameCount > 0) {
+        setStep('step-camera', 'done');
+        log(`Phase 4 complete: camera streaming (frame size: ${accumulator.length}B)`);
+        /* Transition: hide setup panel, show camera view */
+        dom.connectScreen.style.display = 'none';
+        dom.cam.style.display = 'block';
+        dom.modeToggle.classList.add('visible');
+        dom.modeArea.classList.add('visible');
+        dom.modeSelector.classList.add('visible');
+        dom.stats.textContent = 'Streaming';
+    } else {
+        log('WARNING: no frames received');
+        setInstruction('Camera not responding — check connection');
+        dom.stats.textContent = 'No frames';
     }
 }
 

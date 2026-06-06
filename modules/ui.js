@@ -62,8 +62,21 @@ export function syncOverlay() {
 export function log(msg) {
     const line = document.createElement('div');
     line.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+
+    /* Always log to drawer log */
     dom.logEl.appendChild(line);
     dom.logEl.scrollTop = dom.logEl.scrollHeight;
+
+    /* Also log to setup-log panel if visible */
+    const setupLog = document.getElementById('setup-log-content');
+    if (setupLog && setupLog.offsetParent !== null) {
+        const clone = line.cloneNode(true);
+        /* Color device messages differently */
+        if (msg.startsWith('[device]')) clone.style.color = '#4af';
+        setupLog.appendChild(clone);
+        setupLog.scrollTop = setupLog.scrollHeight;
+    }
+
     console.log(msg);
 }
 
