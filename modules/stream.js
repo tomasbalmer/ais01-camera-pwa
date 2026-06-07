@@ -140,7 +140,7 @@ export async function readStream(epIn) {
     dom.modeArea.classList.add('visible');
     dom.modeSelector.classList.add('visible');
     dom.btnStop.classList.add('visible');
-    dom.modeHint.style.display = 'none';
+    if (dom.modeHint) dom.modeHint.style.display = 'none';
     state.lastFpsTime = performance.now();
     state.fpsCount = 0;
 
