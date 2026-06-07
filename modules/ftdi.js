@@ -79,11 +79,11 @@ export async function connectDevice() {
 
         if (!state.epOutNum) log('WARNING: No OUT endpoint');
 
-        // Initialize sensor: Start + Send only (no SHOW_FULL_IMAGE to preserve AI result)
+        // Initialize sensor: Start + Full Image for consistent initial state
         await sendCommand('START');
         await new Promise(r => setTimeout(r, 200));
-        await sendCommand('SEND');
-        log('Sensor initialized — streaming (AI mode)');
+        await sendCommand('SHOW_FULL_IMAGE');
+        log('Sensor initialized — streaming (Full Image)');
 
         return epIn;
 
