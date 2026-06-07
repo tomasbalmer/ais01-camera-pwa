@@ -28,6 +28,9 @@ async function stopConnection() {
         const mt = document.getElementById('mode-title');
         if (mt) mt.style.display = 'none';
         if (typeof window.hideCalibHint === 'function') window.hideCalibHint();
+        ['install-hint', 'settings-hint', 'calib-progress'].forEach(id => {
+            const el = document.getElementById(id); if (el) el.style.display = 'none';
+        });
         hideOverlayPickers();
         dom.connectScreen.style.display = 'flex';
         dom.cam.style.display = 'none';
