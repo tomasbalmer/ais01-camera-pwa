@@ -9,7 +9,7 @@ import { dom, log, syncImageModeFromFrame } from './ui.js';
 import { aiReading } from './helpers.js';
 
 // === Configuration ===
-const DISPLAY_INTERVAL_MS = 1000;
+const DISPLAY_INTERVAL_MS = 1500;
 const ACC_MAX = 256 * 1024;
 
 // Full image: 640x480 JPEG ~8-35KB. ROI: 160x64 ~1-8KB.
