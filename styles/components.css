@@ -164,9 +164,9 @@
     font-weight: 500;
 }
 .field-row input, .field-row select {
-    background: var(--bg);
+    background: rgba(56,189,248,0.03);
     color: var(--text);
-    border: 1px solid var(--border);
+    border: 1px solid rgba(56,189,248,0.15);
     border-radius: 6px;
     padding: 6px 8px;
     font-size: 13px;
@@ -280,10 +280,10 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 6px 0;
+    padding: 8px 0;
 }
 .sensor-ctrl + .sensor-ctrl {
-    border-top: 1px solid var(--border);
+    border-top: 1px solid rgba(56,189,248,0.08);
 }
 .ctrl-label {
     font-size: 13px;
@@ -300,9 +300,9 @@
     width: 36px;
     height: 36px;
     border-radius: 8px;
-    border: 1px solid var(--border);
-    background: var(--elevated);
-    color: var(--text);
+    border: 1px solid rgba(56,189,248,0.15);
+    background: rgba(56,189,248,0.03);
+    color: var(--accent);
     font-size: 18px;
     font-weight: 600;
     cursor: pointer;
@@ -326,8 +326,8 @@
     font-family: 'SF Mono', 'Menlo', 'Consolas', monospace;
     font-size: 15px;
     font-weight: 600;
-    color: var(--text);
-    opacity: 0.5;
+    color: var(--accent);
+    opacity: 0.7;
 }
 
 /* ─── WIP badge / notice ─── */
@@ -351,18 +351,20 @@
 /* ─── Advanced register section ─── */
 .adv-section {
     margin-top: 10px;
-    border-top: 1px solid var(--border);
+    border-top: 1px solid rgba(56,189,248,0.08);
     padding-top: 8px;
 }
 .adv-section summary {
     font-size: 12px;
-    color: var(--muted);
+    color: var(--accent);
     cursor: pointer;
     font-weight: 600;
     padding: 4px 0;
+    opacity: 0.6;
 }
 .adv-section[open] summary {
     margin-bottom: 8px;
+    opacity: 1;
 }
 .adv-btns {
     display: flex;

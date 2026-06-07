@@ -98,11 +98,14 @@ export function switchMode(mode) {
     const prev = state.activeMode;
     if (prev === mode) return;
 
+    // Hide all mode hints on any switch
+    const hintIds = ['install-hint', 'calib-hint', 'settings-hint'];
+    hintIds.forEach(id => { const el = document.getElementById(id); if (el) el.style.display = 'none'; });
+    if (typeof window.hideOverlayPickers === 'function') window.hideOverlayPickers();
+
     // Exit calibrate if leaving that mode
     if (prev === 'calibrate' && _exitCalibMode) {
         _exitCalibMode();
-        if (typeof window.hideCalibHint === 'function') window.hideCalibHint();
-        if (typeof window.hideOverlayPickers === 'function') window.hideOverlayPickers();
     }
 
     state.activeMode = mode;
@@ -167,6 +170,16 @@ export function switchMode(mode) {
         }
         if (_enterCalibMode) _enterCalibMode();
     }
+
+    // Show mode-specific hint
+    if (mode === 'validate') {
+        const h = document.getElementById('install-hint');
+        if (h) h.style.display = 'block';
+    } else if (mode === 'settings') {
+        const h = document.getElementById('settings-hint');
+        if (h) h.style.display = 'block';
+    }
+    // calibrate hint is shown by the digit picker flow, not here
 }
 
 // === Image mode switching (Full / ROI) ===
