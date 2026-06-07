@@ -32,7 +32,6 @@ async function stopConnection() {
             const el = document.getElementById(id); if (el) el.style.display = 'none';
         });
         hideOverlayPickers();
-        dom.connectScreen.style.display = 'flex';
         dom.cam.style.display = 'none';
         dom.stats.className = '';
         dom.stats.textContent = 'Disconnected';
@@ -40,6 +39,29 @@ async function stopConnection() {
         try { await state.device.close(); } catch (e) {}
         state.device = null;
         state.epOutNum = null;
+
+        /* Show USB end-session panel */
+        const chooser = document.getElementById('connect-chooser');
+        const usbEnd = document.getElementById('usb-end-panel');
+        const usbHint = document.getElementById('usb-hint');
+        if (chooser) chooser.style.display = 'none';
+        if (usbHint) usbHint.style.display = 'none';
+        if (usbEnd) usbEnd.style.display = 'flex';
+        dom.connectScreen.style.display = 'flex';
+
+        document.getElementById('usb-end-copy').onclick = () => {
+            const logEl = document.getElementById('log');
+            const text = Array.from(logEl.children).map(l => l.textContent).join('\n');
+            navigator.clipboard.writeText(text).then(() => {
+                const btn = document.getElementById('usb-end-copy');
+                btn.textContent = 'Copied!';
+                setTimeout(() => btn.textContent = 'Copy logs', 1500);
+            });
+        };
+        document.getElementById('usb-end-back').onclick = () => {
+            if (usbEnd) usbEnd.style.display = 'none';
+            if (chooser) chooser.style.display = 'flex';
+        };
     }
 
     // Reset to validate mode

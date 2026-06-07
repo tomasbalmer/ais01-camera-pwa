@@ -136,6 +136,23 @@
                 <p id="message" style="display:none;"></p>
             </div>
 
+            <!-- USB session ended screen -->
+            <div id="usb-end-panel" style="display:none; width:100%; max-width:500px; padding:0 20px; flex-direction:column; align-items:center;">
+                <div style="text-align:center; padding:28px 0 16px;">
+                    <div style="width:72px; height:72px; border-radius:50%; border:2.5px solid rgba(100,116,139,0.3); margin:0 auto 16px; display:flex; align-items:center; justify-content:center;">
+                        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#64748b" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M18.36 6.64a9 9 0 1 1-12.73 0"/><line x1="12" y1="2" x2="12" y2="12"/>
+                        </svg>
+                    </div>
+                    <div style="font-size:17px; font-weight:700; color:#e2e8f0;">Session Ended</div>
+                    <div style="font-size:12px; color:#64748b; margin-top:6px;">USB disconnected</div>
+                </div>
+                <div id="usb-end-actions" style="display:flex; gap:8px; width:100%; padding:12px 0;">
+                    <button id="usb-end-copy" style="flex:1;padding:12px 0;font-size:14px;font-weight:500;border-radius:10px;border:1px solid #475569;background:transparent;color:#94a3b8;cursor:pointer;">Copy logs</button>
+                    <button id="usb-end-back" style="flex:1;padding:12px 0;font-size:14px;font-weight:600;border-radius:10px;border:1px solid #334155;background:#1e293b;color:#e2e8f0;cursor:pointer;">Back to main</button>
+                </div>
+            </div>
+
             <!-- Phase 1.5b: USB connect hint (shown before USB device chooser) -->
             <div id="usb-hint" style="display:none; text-align:center; padding:0 12px;">
                 <div style="display:flex; justify-content:center; margin-bottom:20px;">
