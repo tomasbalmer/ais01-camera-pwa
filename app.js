@@ -173,6 +173,9 @@ document.addEventListener('click', () => {
         const el = document.getElementById(id);
         if (el && el.style.display !== 'none') el.style.display = 'none';
     });
+    highlightBtn('btn-digit-picker', false);
+    highlightBtn('btn-coords-picker', false);
+    highlightBtn('btn-calibrate', false);
 });
 // Stop picker clicks from bubbling to the document listener
 ['digit-picker', 'coords-picker', 'confirm-picker'].forEach(id => {
@@ -184,14 +187,14 @@ window.showCalibConfirm = function(e) {
     if (e) e.stopPropagation();
     const picker = document.getElementById('confirm-picker');
     if (!picker) return;
-    // Hide digit picker if open
-    const dp = document.getElementById('digit-picker');
-    if (dp) dp.style.display = 'none';
+    hideOverlayPickers();
 
     picker.style.display = 'block';
-    document.getElementById('confirm-no').onclick = () => { picker.style.display = 'none'; };
+    highlightBtn('btn-calibrate', true);
+    document.getElementById('confirm-no').onclick = () => { picker.style.display = 'none'; highlightBtn('btn-calibrate', false); };
     document.getElementById('confirm-yes').onclick = () => {
         picker.style.display = 'none';
+        highlightBtn('btn-calibrate', false);
         computeAndSendRoi();
     };
 };

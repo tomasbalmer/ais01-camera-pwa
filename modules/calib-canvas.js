@@ -7,7 +7,7 @@
  */
 
 const HANDLE_R = 4;       // handle radius (px) — visual
-const STEM_LEN = 12;      // stem length extending outward from rect
+const STEM_LEN = 36;      // stem length extending outward from rect
 const HIT_R = 20;         // hit-test radius (px) — touch-friendly (on stem tip)
 const ROT_OFFSET = 24;    // rotation handle distance above top edge
 const MIN_W = 30;

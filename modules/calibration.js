@@ -69,7 +69,13 @@ function unlockCalibrate() {
     if (state.calibRectTouched) return;
     state.calibRectTouched = true;
     const btn = document.getElementById('btn-calibrate');
-    if (btn) btn.disabled = false;
+    if (btn) {
+        btn.disabled = false;
+        btn.style.background = '#38bdf8';
+        btn.style.color = '#000';
+        btn.style.borderColor = '#38bdf8';
+        btn.style.fontWeight = '700';
+    }
 }
 
 // Slow interval for AI reading update only — canvas position is fixed at entry
@@ -164,7 +170,13 @@ export async function enterCalibMode() {
     // Lock calibrate button until user positions the rect
     state.calibRectTouched = false;
     const calibBtn = document.getElementById('btn-calibrate');
-    if (calibBtn) { calibBtn.disabled = true; calibBtn.textContent = 'Calibrate'; }
+    if (calibBtn) {
+        calibBtn.disabled = true;
+        calibBtn.style.background = 'rgba(255,255,255,0.03)';
+        calibBtn.style.color = '#94a3b8';
+        calibBtn.style.borderColor = 'rgba(255,255,255,0.1)';
+        calibBtn.style.fontWeight = '500';
+    }
 
     drawDimOverlay();
     updateCalibCoords();
