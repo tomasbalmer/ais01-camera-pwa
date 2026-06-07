@@ -12,6 +12,11 @@ import { aiReading } from './helpers.js';
 const DISPLAY_INTERVAL_MS = 1500;
 const ACC_MAX = 256 * 1024;
 
+// Pending frame for async validation
+let pendingBlob = null;
+let pendingIsFirst = false;
+let validating = false;
+
 // Full image: 640x480 JPEG ~8-35KB. ROI: 160x64 ~1-8KB.
 const JPEG_MIN_SIZE = 500;
 const JPEG_MAX_SIZE = 60000;
@@ -102,24 +107,10 @@ function extractFrames() {
             // Extract AI from bytes before SOI
             if (soi > 0) extractAiResult(soi);
 
-            // Pre-validate: decode in a temporary Image before showing.
-            // Only frames that decode successfully get displayed.
+            // Queue frame for async validation (only keep latest)
             const jpeg = acc.slice(soi, jpegEnd);
-            const blob = new Blob([jpeg], { type: 'image/jpeg' });
-            const url = URL.createObjectURL(blob);
-            const tmp = new Image();
-            const isFirst = state.frameCount === 1;
-            tmp.onload = () => {
-                const prev = dom.cam.src;
-                dom.cam.src = url;
-                if (prev && prev.startsWith('blob:')) URL.revokeObjectURL(prev);
-                syncImageModeFromFrame();
-                if (isFirst) log(`First frame: ${jpegSize} bytes`);
-            };
-            tmp.onerror = () => {
-                URL.revokeObjectURL(url);
-            };
-            tmp.src = url;
+            pendingBlob = new Blob([jpeg], { type: 'image/jpeg' });
+            pendingIsFirst = state.frameCount === 1;
             state.lastDisplayTime = now;
         }
 
@@ -172,6 +163,25 @@ export async function readStream(epIn) {
 
             totalBytes += len;
             extractFrames();
+
+            // Async validate + display pending frame
+            if (pendingBlob && !validating) {
+                validating = true;
+                const blob = pendingBlob;
+                const isFirst = pendingIsFirst;
+                pendingBlob = null;
+                createImageBitmap(blob).then(() => {
+                    const url = URL.createObjectURL(blob);
+                    const prev = dom.cam.src;
+                    dom.cam.src = url;
+                    if (prev && prev.startsWith('blob:')) URL.revokeObjectURL(prev);
+                    syncImageModeFromFrame();
+                    if (isFirst) log(`First frame`);
+                    validating = false;
+                }).catch(() => {
+                    validating = false;
+                });
+            }
 
             const now = performance.now();
             if (now - state.lastFpsTime >= FPS_INTERVAL_MS) {
