@@ -90,7 +90,11 @@ function stopCalibInterval() {
 
 function updateCalibReading() {
     const reading = aiReading(state.lastAiResult);
-    dom.calibAiValue.textContent = reading !== null ? reading.toFixed(2) : '--';
+    const text = reading !== null ? reading.toFixed(2) : '--';
+    dom.calibAiValue.textContent = text;
+    /* Also update installation panel AI reading */
+    const installAi = document.getElementById('install-ai-value');
+    if (installAi) installAi.textContent = text;
 }
 
 function updateCalibCoords() {

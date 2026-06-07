@@ -86,6 +86,8 @@
     flex-shrink: 0;
     background: var(--bg);
     z-index: 10;
+    height: 120px;
+    overflow: hidden;
 }
 #mode-area.visible { display: block; }
 

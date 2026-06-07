@@ -71,7 +71,7 @@
             <!-- Phase 1.5: Device reset hint (shown before BLE scan dialog) -->
             <div id="reset-hint" style="display:none; text-align:center; padding:0 12px;">
                 <div style="display:flex; justify-content:center; margin-bottom:20px;">
-                    <svg width="140" height="320" viewBox="0 0 140 320" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="iot-reset-title">
+                    <svg width="140" height="340" viewBox="0 0 140 340" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="iot-reset-title">
                         <title id="iot-reset-title">IoT sensor node — press RESET</title>
                         <style>
                             .dv{stroke:#334155;stroke-width:1.5;fill:none;stroke-linecap:round;stroke-linejoin:round}
@@ -87,38 +87,37 @@
                             @media(prefers-reduced-motion:reduce){#reset-btn-svg,.rp,.pi{animation:none}}
                         </style>
                         <g aria-hidden="true">
-                            <!-- Antenna — long, slightly angled, centered top -->
-                            <g transform="rotate(-5 70 50)">
-                                <rect class="dv" x="66" y="4" width="8" height="90" rx="4" ry="4"/>
-                                <line class="dt" x1="66" y1="20" x2="74" y2="20"/>
-                                <line class="dt" x1="66" y1="35" x2="74" y2="35"/>
-                            </g>
+                            <!-- Antenna — long, straight, centered top -->
+                            <rect class="dv" x="64" y="4" width="12" height="100" rx="6" ry="6"/>
+                            <line class="dt" x1="64" y1="25" x2="76" y2="25"/>
+                            <line class="dt" x1="64" y1="45" x2="76" y2="45"/>
+                            <line class="dt" x1="64" y1="65" x2="76" y2="65"/>
                             <!-- Antenna base -->
-                            <rect class="dv" x="60" y="88" width="20" height="10" rx="3" ry="3"/>
+                            <rect class="dv" x="58" y="100" width="24" height="12" rx="4" ry="4"/>
                             <!-- Enclosure — tall rectangle, rounded corners -->
-                            <rect class="dv" x="20" y="98" width="100" height="160" rx="12" ry="12"/>
+                            <rect class="dv" x="20" y="112" width="100" height="168" rx="12" ry="12"/>
                             <!-- Screws (4 corners) -->
-                            <circle class="dv" cx="34" cy="112" r="5"/><circle class="dt" cx="34" cy="112" r="1.5"/>
-                            <circle class="dv" cx="106" cy="112" r="5"/><circle class="dt" cx="106" cy="112" r="1.5"/>
-                            <circle class="dv" cx="34" cy="244" r="5"/><circle class="dt" cx="34" cy="244" r="1.5"/>
-                            <circle class="dv" cx="106" cy="244" r="5"/><circle class="dt" cx="106" cy="244" r="1.5"/>
+                            <circle class="dv" cx="34" cy="126" r="5"/><circle class="dt" cx="34" cy="126" r="1.5"/>
+                            <circle class="dv" cx="106" cy="126" r="5"/><circle class="dt" cx="106" cy="126" r="1.5"/>
+                            <circle class="dv" cx="34" cy="266" r="5"/><circle class="dt" cx="34" cy="266" r="1.5"/>
+                            <circle class="dv" cx="106" cy="266" r="5"/><circle class="dt" cx="106" cy="266" r="1.5"/>
                             <!-- Internal line (lid seam) -->
-                            <rect class="dt" x="30" y="120" width="80" height="130" rx="4" ry="4"/>
+                            <rect class="dt" x="30" y="134" width="80" height="138" rx="4" ry="4"/>
                             <!-- Push button (RESET) — animated -->
-                            <circle class="rp" cx="70" cy="160" r="7"/>
-                            <circle id="reset-btn-svg" cx="70" cy="160" r="7"/>
-                            <path class="pi" d="M70 142V150"/><path class="pi" d="M66 147L70 151L74 147"/>
-                            <text class="rl" x="82" y="163">RST</text>
+                            <circle class="rp" cx="70" cy="178" r="7"/>
+                            <circle id="reset-btn-svg" cx="70" cy="178" r="7"/>
+                            <path class="pi" d="M70 160V168"/><path class="pi" d="M66 165L70 169L74 165"/>
+                            <text class="rl" x="82" y="181">RST</text>
                             <!-- LED indicator -->
-                            <circle class="hi" cx="70" cy="185" r="3"/>
+                            <circle class="hi" cx="70" cy="203" r="3"/>
                             <!-- Bottom piece (valve/connector) -->
-                            <rect class="dv" x="45" y="258" width="50" height="28" rx="4" ry="4"/>
-                            <line class="dv" x1="55" y1="258" x2="55" y2="286"/>
-                            <line class="dv" x1="85" y1="258" x2="85" y2="286"/>
-                            <circle class="dt" cx="70" cy="272" r="4"/>
+                            <rect class="dv" x="45" y="280" width="50" height="28" rx="4" ry="4"/>
+                            <line class="dv" x1="55" y1="280" x2="55" y2="308"/>
+                            <line class="dv" x1="85" y1="280" x2="85" y2="308"/>
+                            <circle class="dt" cx="70" cy="294" r="4"/>
                             <!-- Side mounting tabs -->
-                            <path class="dv" d="M20 165H14C11 165 9 163 9 160C9 157 11 155 14 155H20"/>
-                            <path class="dv" d="M120 165H126C129 165 131 163 131 160C131 157 129 155 126 155H120"/>
+                            <path class="dv" d="M20 180H14C11 180 9 178 9 175C9 172 11 170 14 170H20"/>
+                            <path class="dv" d="M120 180H126C129 180 131 178 131 175C131 172 129 170 126 170H120"/>
                         </g>
                     </svg>
                 </div>
@@ -188,8 +187,19 @@
 
     <!-- Mode-specific content area (visible when connected) -->
     <div id="mode-area">
-        <!-- Validate panel (default — live view, no controls) -->
-        <div id="panel-validate" class="mode-panel active"></div>
+        <!-- Installation panel (default — image mode toggle + AI reading) -->
+        <div id="panel-validate" class="mode-panel active" style="padding:8px 12px; border-top:1px solid var(--border); height:100%; overflow-y:auto;">
+            <div style="display:flex; align-items:center; justify-content:space-between;">
+                <div style="display:flex; gap:4px;">
+                    <button class="seg-btn active" id="btnFullPanel" onclick="switchImageMode('FULL')" style="padding:6px 16px; border-radius:6px; border:1px solid var(--border); background:var(--elevated);">Full</button>
+                    <button class="seg-btn" id="btnROIPanel" onclick="switchImageMode('ROI')" style="padding:6px 16px; border-radius:6px; border:1px solid var(--border);">ROI</button>
+                </div>
+                <div style="text-align:right;">
+                    <div style="font-size:9px; color:var(--muted); text-transform:uppercase; letter-spacing:.5px;">AI Reading</div>
+                    <div id="install-ai-value" style="font-family:'SF Mono',Monaco,monospace; font-size:20px; font-weight:700; color:var(--accent);">--</div>
+                </div>
+            </div>
+        </div>
         <!-- Calibrate panel -->
         <div id="panel-calibrate" class="mode-panel">
             <div id="calib-reading">
