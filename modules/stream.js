@@ -196,10 +196,19 @@ export async function readStream(epIn) {
                 dom.stats.textContent = `#${state.frameCount} | ${state.currentFps.toFixed(1)} fps${aiText}`;
             }
         } catch (err) {
-            if (state.running) {
-                log(`Read err: ${err.message}`);
-                await new Promise(r => setTimeout(r, 100));
+            if (!state.running) break;
+            const msg = err.message || '';
+            if (msg.includes('disconnected') || msg.includes('transfer error')) {
+                log('USB device disconnected');
+                state.running = false;
+                /* Auto-disconnect UI */
+                if (typeof window.stopConnection === 'function') {
+                    window.stopConnection();
+                }
+                break;
             }
+            log(`Read err: ${msg}`);
+            await new Promise(r => setTimeout(r, 100));
         }
     }
 }
