@@ -100,6 +100,18 @@
                 <div style="font-size:10px; color:#64748b; line-height:1.5; text-align:left;"><span style="color:#94a3b8;">Brightness</span> sets exposure target. <span style="color:#94a3b8;">Max Gain</span> limits amplification in low light. <span style="color:#94a3b8;">AE Speed</span> controls adaptation speed.</div>
             </div>
         </div>
+        <!-- Calibration in-progress overlay -->
+        <div id="calib-progress" style="display:none; position:absolute; bottom:0; left:0; right:0; z-index:7; height:140px; background:linear-gradient(transparent, rgba(0,0,0,0.85) 30%);">
+            <div style="position:absolute; bottom:0; left:0; right:0; padding:0 20px 16px; display:flex; flex-direction:column; align-items:center;">
+                <div style="font-size:13px; color:#38bdf8; margin-bottom:8px; font-weight:500;">Applying calibration...</div>
+                <div class="setup-ring-wrap" style="width:40px; height:40px; margin-bottom:6px;">
+                    <div style="width:40px; height:40px; border-radius:50%; border:2px solid rgba(56,189,248,0.12); position:relative;">
+                        <div style="position:absolute; inset:-2px; border-radius:50%; border:2px solid transparent; border-top-color:#38bdf8; animation:setup-spin 1.2s linear infinite;"></div>
+                    </div>
+                </div>
+                <div id="calib-progress-status" style="font-size:10px; color:#64748b;">Sending ROI data to device...</div>
+            </div>
+        </div>
         <!-- Coordinates overlay (absolute, no layout impact) -->
         <div id="coords-picker" style="display:none; position:absolute; bottom:0; left:0; right:0; z-index:6; padding:20px 12px 16px; text-align:center; background:linear-gradient(transparent, rgba(0,0,0,0.85) 30%);">
             <div style="font-size:13px; color:#38bdf8; margin-bottom:10px; font-weight:500;">Calibration Coordinates</div>

@@ -272,18 +272,33 @@ export async function computeAndSendRoi() {
 
     const { numDigits: n, digits, boundaryX, boundaryY, rotation } = coords;
 
+    /* Show progress overlay */
+    const progress = document.getElementById('calib-progress');
+    const progressStatus = document.getElementById('calib-progress-status');
+    if (progress) progress.style.display = 'block';
+    if (progressStatus) progressStatus.textContent = 'Sending ROI data to device...';
+
     const btn = document.getElementById('btn-calibrate');
-    if (btn) { btn.textContent = 'Sending...'; btn.disabled = true; }
+    if (btn) btn.disabled = true;
 
     log(`ROI from touch: ${n} digits, rot=${rotation.toFixed(1)}deg, boundary=${boundaryX}x${boundaryY}`);
     digits.forEach((d, i) => log(`  P${i+1}: (${d.x}, ${d.y})`));
 
     await sendRoiConfig({ numDigits: n, digits, boundaryX, boundaryY });
 
-    if (btn) {
-        btn.textContent = 'Sent!';
-        setTimeout(() => { btn.textContent = 'Calibrate'; btn.disabled = false; }, 1500);
+    /* Show success */
+    if (progressStatus) progressStatus.textContent = 'Calibration applied successfully';
+    if (progress) {
+        /* Replace spinner with checkmark */
+        const ring = progress.querySelector('.setup-ring-wrap');
+        if (ring) ring.innerHTML = '<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#22c55e" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>';
     }
+
+    /* Auto-hide after 2s */
+    setTimeout(() => {
+        if (progress) progress.style.display = 'none';
+        if (btn) btn.disabled = false;
+    }, 2000);
 }
 
 registerCalibCallbacks(enterCalibMode, exitCalibMode);
