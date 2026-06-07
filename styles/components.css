@@ -421,7 +421,7 @@
 
 /* ─── Log ─── */
 #log {
-    max-height: 180px;
+    max-height: 360px;
     overflow-y: auto;
     -webkit-overflow-scrolling: touch;
     font-family: monospace;
@@ -430,5 +430,6 @@
     background: rgba(0,0,0,0.4);
     border-radius: 6px;
     padding: 6px;
+    margin: 0 8px;
     line-height: 1.5;
 }

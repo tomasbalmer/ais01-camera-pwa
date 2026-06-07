@@ -249,21 +249,32 @@ window.copySetupLogs = function() {
         if (btn) { btn.textContent = 'Copied!'; setTimeout(() => btn.textContent = 'Copy', 1500); }
     });
 };
-window.copyLogs = function() {
+window.toggleLogPanel = function() {
+    const logEl = document.getElementById('log');
+    const btn = document.getElementById('btn-minimize-log');
+    if (!logEl) return;
+    if (logEl.style.maxHeight === '45px') {
+        logEl.style.maxHeight = '360px';
+        if (btn) btn.textContent = '▾';
+    } else {
+        logEl.style.maxHeight = '45px';
+        if (btn) btn.textContent = '▸';
+    }
+};
+window.copyLogs = function(e) {
     const logEl = document.getElementById('log');
     const text = Array.from(logEl.children).map(l => l.textContent).join('\n');
+    const btn = e && e.target ? e.target : null;
     navigator.clipboard.writeText(text).then(() => {
-        const btn = event.target;
-        btn.textContent = 'Copied!';
-        setTimeout(() => btn.textContent = 'Copy', 1500);
+        if (btn) { btn.textContent = 'Copied!'; btn.style.background = '#22c55e'; btn.style.color = '#000'; setTimeout(() => { btn.textContent = 'Copy'; btn.style.background = '#374151'; btn.style.color = '#fff'; }, 1500); }
     }).catch(() => {
-        // Fallback for older browsers
         const ta = document.createElement('textarea');
         ta.value = text;
         document.body.appendChild(ta);
         ta.select();
         document.execCommand('copy');
         document.body.removeChild(ta);
+        if (btn) { btn.textContent = 'Copied!'; setTimeout(() => btn.textContent = 'Copy', 1500); }
     });
 };
 
@@ -274,8 +285,45 @@ window.addEventListener('beforeunload', () => {
     }
 });
 
-// === Mock mode: skip BLE, show camera view with test image ===
-if (new URLSearchParams(location.search).has('mock')) {
+// === Mock setup mode: show BLE setup/connection flow ===
+if (new URLSearchParams(location.search).get('mock') === 'setup') {
+    state.running = true;
+    state.bleMode = true;
+    state.bleCalibMode = true;
+    document.getElementById('connect-chooser').style.display = 'none';
+    const panel = document.getElementById('setup-panel');
+    if (panel) panel.style.display = 'flex';
+    dom.statusDot.classList.add('connected');
+    dom.btnStop.classList.add('visible');
+    dom.stats.className = 'active';
+    dom.stats.textContent = 'Mock setup';
+
+    // Simulate setup steps with delays
+    const { setStep, setAnim, setTitle, setInstruction } = await import('./modules/ble.js').then(() => import('./modules/ui.js')).catch(() => ({}));
+    const ss = (id, s) => { const el = document.getElementById(id); if (el) { el.classList.remove('active','done'); if (s==='done') { el.classList.add('done'); el.querySelector('.step-icon').textContent='✓'; } else if (s==='active') { el.classList.add('active'); el.querySelector('.step-icon').textContent='●'; } } };
+    const title = (t) => { const el = document.getElementById('setup-title'); if (el) el.textContent = t; };
+    const instr = (t) => { const el = document.getElementById('setup-instruction'); if (el) el.textContent = t; };
+    const anim = document.getElementById('setup-anim');
+
+    // Simulate the flow
+    ss('step-ble', 'done');
+    ss('step-reconnect', 'active');
+    title('Waiting for Device');
+    instr('Press RESET on the device');
+    if (anim) { anim.style.fontSize='24px'; anim.style.letterSpacing='8px'; anim.style.color='#38bdf8'; anim.innerHTML='<span class="dot">●</span><span class="dot">●</span><span class="dot">●</span>'; }
+
+    const mockLog = (msg) => log(msg);
+    mockLog('BLE connected');
+    setTimeout(() => { mockLog('GATT disconnected — reconnecting in 1s...'); }, 1000);
+    setTimeout(() => { mockLog('GATT connected'); ss('step-reconnect', 'done'); ss('step-firmware', 'active'); title('Device Connected'); instr('Waiting for firmware...'); }, 2500);
+    setTimeout(() => { mockLog('[device] ========================================'); mockLog('[device] AIS01-CB Custom Firmware v0.9.0'); mockLog('[device] ========================================'); }, 4000);
+    setTimeout(() => { mockLog('[device] [MAIN] AT command window (30s)...'); ss('step-firmware', 'done'); ss('step-install', 'active'); title('Firmware Ready'); instr('Sending install command...'); if(anim){anim.textContent='●';anim.style.fontSize='32px';anim.style.letterSpacing='0';anim.style.color='#22c55e';} }, 5000);
+    setTimeout(() => { mockLog('Sent: AT+INSTALL'); mockLog('[device] Entering installation mode...'); ss('step-install', 'done'); ss('step-camera-init', 'active'); title('Calibration Mode'); instr('Powering on camera...'); }, 6500);
+    setTimeout(() => { mockLog('[device] [CAM] Power ON complete'); ss('step-camera-init', 'done'); ss('step-camera', 'active'); instr('Waiting for first frame...'); }, 8000);
+    setTimeout(() => { mockLog('First BLE frame: 2930 bytes'); mockLog('Camera streaming'); ss('step-camera', 'done'); title('Camera Active'); instr('Streaming'); }, 9500);
+
+    log('Mock setup mode — simulating BLE connection flow');
+} else if (new URLSearchParams(location.search).has('mock')) {
     state.running = true;
     state.bleMode = true;
     state.bleCalibMode = true;
