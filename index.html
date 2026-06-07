@@ -26,8 +26,8 @@
     <header id="topbar">
         <div id="status-dot"></div>
         <div id="stats">Disconnected</div>
-        <button id="btn-stop" class="icon-btn" onclick="stopConnection()" aria-label="Stop">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><rect x="6" y="6" width="12" height="12" rx="1"/></svg>
+        <button id="btn-stop" onclick="stopConnection()" aria-label="Disconnect">
+            <svg width="13" height="13" viewBox="0 0 16 16" fill="none" style="vertical-align:-1px;margin-right:4px;"><path d="M1.138.195a.667.667 0 1 0-.943.943l14.667 14.667a.667.667 0 1 0 .943-.943l-4.637-4.636a4 4 0 0 0 .997-.728l2-2 .008-.008a4 4 0 0 0-5.656-5.656l-.007.007-1.147 1.14a.667.667 0 0 0 .94.945L9.446 2.79a2.667 2.667 0 0 1 3.772 3.77l-1.996 1.995a2.7 2.7 0 0 1-1.07.654L3.635 2.693l-.02-.021zm2.145 6.859a.667.667 0 1 1 .943.943L2.782 9.44a2.667 2.667 0 0 0 3.77 3.77l1.137-1.135a.667.667 0 0 1 .942.943l-1.14 1.14-.008.008A4 4 0 0 1 1.827 8.51z" fill="currentColor"/></svg>Disconnect
         </button>
         <button id="btn-menu" class="icon-btn" onclick="toggleDrawer()" aria-label="Menu">
             <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
@@ -202,8 +202,8 @@
         <!-- Installation panel -->
         <div id="panel-validate" class="mode-panel active">
             <div style="display:flex; gap:6px; align-items:stretch; height:44px;">
-                <button class="seg-btn active" id="btnFullPanel" onclick="switchImageMode('FULL')" style="flex:1; display:flex; align-items:center; justify-content:center; padding:4px 0; background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.1); border-radius:8px; cursor:pointer; touch-action:manipulation; font-size:13px; color:var(--text2);">Full Image</button>
-                <button class="seg-btn" id="btnROIPanel" onclick="switchImageMode('ROI')" style="flex:1; display:flex; align-items:center; justify-content:center; padding:4px 0; background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.1); border-radius:8px; cursor:pointer; touch-action:manipulation; font-size:13px; color:var(--text2);">ROI Image</button>
+                <button class="seg-btn active" id="btnFullPanel" onclick="switchImageMode('FULL')" style="flex:1; display:flex; align-items:center; justify-content:center; padding:4px 0; background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.1); border-radius:8px; cursor:pointer; touch-action:manipulation; font-size:13px; font-weight:500; color:#94a3b8;">Select Full Image</button>
+                <button class="seg-btn" id="btnROIPanel" onclick="switchImageMode('ROI')" style="flex:1; display:flex; align-items:center; justify-content:center; padding:4px 0; background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.1); border-radius:8px; cursor:pointer; touch-action:manipulation; font-size:13px; font-weight:500; color:#94a3b8;">Select ROI Image</button>
             </div>
         </div>
         <!-- Calibrate panel -->
@@ -215,16 +215,16 @@
             <div id="calib-controls" style="display:flex; gap:6px; align-items:stretch; height:44px;">
                 <button id="btn-digit-picker" onclick="cycleDigits(event)" style="flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; padding:4px 0; background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.1); border-radius:8px; cursor:pointer; touch-action:manipulation; -webkit-tap-highlight-color:transparent; color:#94a3b8;">
                     <span id="digit-boxes" style="display:none;">▪▪▪▪▪▪</span>
-                    <span style="font-size:11px; font-weight:500; line-height:1.2;">Select Number</span>
-                    <span id="digit-label" style="font-size:11px; font-weight:500; line-height:1.2;">of Digits</span>
+                    <span style="font-size:13px; font-weight:500; line-height:1.2;">Select Number</span>
+                    <span id="digit-label" style="font-size:13px; font-weight:500; line-height:1.2;">of Digits</span>
                 </button>
                 <button id="btn-coords-picker" onclick="toggleCoordsPicker(event)" style="flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; padding:4px 0; background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.1); border-radius:8px; cursor:pointer; touch-action:manipulation; -webkit-tap-highlight-color:transparent; color:#94a3b8;">
-                    <span style="font-size:11px; font-weight:500; line-height:1.2;">View</span>
-                    <span style="font-size:11px; font-weight:500; line-height:1.2;">Coordinates</span>
+                    <span style="font-size:13px; font-weight:500; line-height:1.2;">View</span>
+                    <span style="font-size:13px; font-weight:500; line-height:1.2;">Coordinates</span>
                 </button>
                 <button id="btn-calibrate" onclick="showCalibConfirm(event)" disabled style="flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; padding:4px 0; background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.1); border-radius:8px; cursor:pointer; touch-action:manipulation; -webkit-tap-highlight-color:transparent; color:#94a3b8;">
-                    <span style="font-size:11px; font-weight:500; line-height:1.2;">Apply</span>
-                    <span style="font-size:11px; font-weight:500; line-height:1.2;">Calibration</span>
+                    <span style="font-size:13px; font-weight:500; line-height:1.2;">Apply</span>
+                    <span style="font-size:13px; font-weight:500; line-height:1.2;">Calibration</span>
                 </button>
             </div>
         </div>

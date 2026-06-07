@@ -14,10 +14,19 @@
 /* ─── Stop button in topbar (hidden when disconnected) ─── */
 #btn-stop {
     display: none;
-    width: 28px;
-    height: 28px;
+    align-items: center;
+    padding: 4px 10px;
+    border-radius: 6px;
+    border: 1px solid rgba(239, 68, 68, 0.25);
+    background: rgba(239, 68, 68, 0.08);
     color: var(--danger);
+    font-size: 12px;
+    font-weight: 500;
+    cursor: pointer;
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
 }
+#btn-stop:active { opacity: 0.7; }
 #btn-stop.visible { display: flex; }
 
 /* ─── Viewer (fills all space between bars) ─── */

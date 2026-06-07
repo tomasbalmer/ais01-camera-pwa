@@ -146,10 +146,16 @@ export function switchMode(mode) {
         const meterIcon = '<svg width="20" height="18" viewBox="0 0 24 20" fill="none"><circle cx="12" cy="10" r="9" stroke="currentColor" stroke-width="1.2" fill="none"/><rect x="5" y="7" width="3" height="6" rx="0.5" stroke="currentColor" stroke-width="0.8" fill="none"/><rect x="9" y="7" width="3" height="6" rx="0.5" stroke="currentColor" stroke-width="0.8" fill="none"/><rect x="13" y="7" width="3" height="6" rx="0.5" stroke="currentColor" stroke-width="0.8" fill="none"/><rect x="17" y="7" width="3" height="6" rx="0.5" stroke="currentColor" stroke-width="0.8" fill="none"/></svg>';
         const installDesc = `<div style="display:flex;align-items:flex-start;margin-top:10px;">
             ${arStep(mountIcon,'Position Mount<br>over Meter')}${arArrow}${arStep(meterIcon,'Align Camera<br>with Display')}</div>`;
+        /* Settings icons */
+        const brightnessIcon = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="4" stroke="currentColor" stroke-width="1.2" fill="none"/><line x1="12" y1="1" x2="12" y2="4" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/><line x1="12" y1="20" x2="12" y2="23" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/><line x1="4.22" y1="4.22" x2="6.34" y2="6.34" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/><line x1="17.66" y1="17.66" x2="19.78" y2="19.78" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/><line x1="1" y1="12" x2="4" y2="12" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/><line x1="20" y1="12" x2="23" y2="12" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/><line x1="4.22" y1="19.78" x2="6.34" y2="17.66" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/><line x1="17.66" y1="6.34" x2="19.78" y2="4.22" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>';
+        const gainIcon = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M2 20L8 14M8 14V18.5M8 14H3.5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/><path d="M22 4L16 10M16 10V5.5M16 10H20.5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+        const speedIcon = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="13" r="9" stroke="currentColor" stroke-width="1.2" fill="none"/><path d="M12 13L16 9" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><circle cx="12" cy="13" r="1.5" fill="currentColor"/><line x1="12" y1="2" x2="12" y2="4" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>';
+        const settingsDesc = `<div style="display:flex;align-items:flex-start;margin-top:10px;">
+            ${arStep(brightnessIcon,'Brightness')}${arArrow}${arStep(gainIcon,'Max<br>Gain')}${arArrow}${arStep(speedIcon,'AE<br>Speed')}</div>`;
         const info = {
             validate:  ['Installation Mode', installDesc],
             calibrate: ['Calibration Mode', calibDesc],
-            settings:  ['Settings', 'Device configuration and advanced options'],
+            settings:  ['Adjust Camera Settings', settingsDesc],
         };
         const [title, desc] = info[mode] || ['', ''];
         modeTitleEl.textContent = title;
