@@ -102,20 +102,33 @@ function extractFrames() {
             // Extract AI from bytes before SOI
             if (soi > 0) extractAiResult(soi);
 
-            // Display this frame
-            const jpeg = acc.slice(soi, jpegEnd);
-            const blob = new Blob([jpeg], { type: 'image/jpeg' });
-            const url = URL.createObjectURL(blob);
-            const prev = dom.cam.src;
-            dom.cam.onload = () => {
-                if (prev && prev.startsWith('blob:')) URL.revokeObjectURL(prev);
-                syncImageModeFromFrame();
-            };
-            dom.cam.src = url;
-            state.lastDisplayTime = now;
+            // Quick JPEG sanity check: must start with FF D8 FF (SOI + marker)
+            // and not contain another SOI between this SOI and EOI (corruption)
+            let dupSoi = false;
+            for (let k = soi + 2; k < jpegEnd - 1; k++) {
+                if (acc[k] === 0xFF && acc[k+1] === 0xD8) { dupSoi = true; break; }
+            }
+            const valid = acc[soi+2] === 0xFF && !dupSoi;
 
-            if (state.frameCount === 1) {
-                log(`First frame: ${jpegSize} bytes`);
+            if (valid) {
+                const jpeg = acc.slice(soi, jpegEnd);
+                const blob = new Blob([jpeg], { type: 'image/jpeg' });
+                const url = URL.createObjectURL(blob);
+                const prev = dom.cam.src;
+                dom.cam.onload = () => {
+                    if (prev && prev.startsWith('blob:')) URL.revokeObjectURL(prev);
+                    syncImageModeFromFrame();
+                };
+                dom.cam.onerror = () => {
+                    /* Browser couldn't decode — revoke and skip */
+                    URL.revokeObjectURL(url);
+                };
+                dom.cam.src = url;
+                state.lastDisplayTime = now;
+
+                if (state.frameCount === 1) {
+                    log(`First frame: ${jpegSize} bytes`);
+                }
             }
         }
 
