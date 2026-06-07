@@ -45,6 +45,21 @@
         <img id="cam" />
         <canvas id="overlay-canvas"></canvas>
         <canvas id="calib-canvas"></canvas>
+        <!-- Digit picker overlay (absolute, no layout impact) -->
+        <div id="digit-picker" style="display:none; position:absolute; bottom:0; left:0; right:0; z-index:6; padding:20px 0 16px; text-align:center; background:linear-gradient(transparent, rgba(0,0,0,0.85) 30%);">
+            <div style="font-size:13px; color:#38bdf8; margin-bottom:14px; font-weight:500;">How many digits on the meter?</div>
+            <div id="digit-options" style="display:flex; justify-content:center; gap:16px; margin-bottom:10px;"></div>
+            <div id="digit-preview" style="font-family:'SF Mono',Monaco,monospace; font-size:16px; letter-spacing:3px; color:rgba(56,189,248,0.5);"></div>
+        </div>
+        <!-- Calibration confirm overlay (absolute, no layout impact) -->
+        <div id="confirm-picker" style="display:none; position:absolute; bottom:0; left:0; right:0; z-index:6; padding:20px 0 16px; text-align:center; background:linear-gradient(transparent, rgba(0,0,0,0.85) 30%);">
+            <div style="font-size:13px; color:#38bdf8; margin-bottom:14px; font-weight:500;">Apply calibration to device?</div>
+            <div style="font-size:11px; color:#64748b; margin-bottom:16px;">This will update the camera ROI settings</div>
+            <div style="display:flex; justify-content:center; gap:16px;">
+                <button id="confirm-no" style="width:100px;height:36px;border-radius:6px;border:2px solid #334155;background:transparent;color:#64748b;font-size:14px;font-weight:600;cursor:pointer;">Cancel</button>
+                <button id="confirm-yes" style="width:100px;height:36px;border-radius:6px;border:2px solid #22c55e;background:rgba(34,197,94,0.15);color:#22c55e;font-size:14px;font-weight:700;cursor:pointer;">Confirm</button>
+            </div>
+        </div>
         <div id="connect-screen">
             <!-- Phase 1: Choose connection method -->
             <div id="connect-chooser">
@@ -53,26 +68,65 @@
                 <p id="message" style="display:none;"></p>
             </div>
 
+            <!-- Phase 1.5: Device reset hint (shown before BLE scan dialog) -->
+            <div id="reset-hint" style="display:none; text-align:center; padding:0 12px;">
+                <div id="device-art" style="font-family:'SF Mono',Monaco,monospace; font-size:10px; line-height:1.45; white-space:pre; margin-bottom:20px; user-select:none;"><span style="color:#334155">                  │</span>
+<span style="color:#334155">                 ╱│╲</span>        <span style="color:#475569">antenna</span>
+<span style="color:#334155">                ╱ │ ╲</span>
+<span style="color:#334155">               ╱  │  ╲</span>
+<span style="color:#334155">              ────┴────</span>
+<span style="color:#334155">        ╔═══════════════════╗</span>
+<span style="color:#334155">        ║</span>  <span style="color:#475569">╭─────────────╮</span>  <span style="color:#334155">║</span>
+<span style="color:#334155">        ║</span>  <span style="color:#475569">│</span> <span style="color:#38bdf8">AIS01-CB</span>    <span style="color:#475569">│</span>  <span style="color:#334155">║</span>
+<span style="color:#334155">        ║</span>  <span style="color:#475569">│</span>             <span style="color:#475569">│</span>  <span style="color:#334155">║</span>
+<span style="color:#334155">        ║</span>  <span style="color:#475569">│</span> <span style="color:#1e293b">┌───┐ ┌───┐</span><span style="color:#475569">│</span>  <span style="color:#334155">║</span>
+<span style="color:#334155">        ║</span>  <span style="color:#475569">│</span> <span style="color:#1e293b">│CAM│ │LTE│</span><span style="color:#475569">│</span>  <span style="color:#334155">║</span>
+<span style="color:#334155">        ║</span>  <span style="color:#475569">│</span> <span style="color:#1e293b">└───┘ └───┘</span><span style="color:#475569">│</span>  <span style="color:#334155">║</span>
+<span style="color:#334155">        ║</span>  <span style="color:#475569">│</span>             <span style="color:#475569">│</span>  <span style="color:#334155">║</span>
+<span style="color:#334155">        ║</span>  <span style="color:#475569">│</span> <span id="reset-btn-hint" style="color:#ef4444;font-weight:700;text-shadow:0 0 10px rgba(239,68,68,0.5)">◉ RST</span>  <span style="color:#334155">○ ISP</span><span style="color:#475569">│</span>  <span style="color:#334155">║</span>  <span style="color:#ef4444">← press</span>
+<span style="color:#334155">        ║</span>  <span style="color:#475569">│</span>             <span style="color:#475569">│</span>  <span style="color:#334155">║</span>
+<span style="color:#334155">        ║</span>  <span style="color:#475569">╰─────────────╯</span>  <span style="color:#334155">║</span>
+<span style="color:#334155">        ║</span>   <span style="color:#1e293b">▪ ▪ ▪  BLE</span>      <span style="color:#334155">║</span>
+<span style="color:#334155">        ╚═══════════════════╝</span></div>
+                <div style="font-size:15px; font-weight:600; color:#e2e8f0; margin-bottom:6px;">Press the RESET button</div>
+                <div style="font-size:12px; color:#64748b; margin-bottom:20px;">The device will appear in the scan dialog</div>
+                <div style="display:flex; justify-content:center;">
+                    <div style="width:6px; height:6px; border-radius:50%; background:#38bdf8; animation:pulse-dot 1.5s ease-in-out infinite;"></div>
+                </div>
+                <style>@keyframes pulse-dot { 0%,100% { opacity:0.3; transform:scale(1); } 50% { opacity:1; transform:scale(1.5); } }</style>
+            </div>
+
             <!-- Phase 2: BLE setup progress (shown after clicking Connect via Bluetooth) -->
-            <div id="setup-panel" style="display:none; width:100%; max-width:500px; padding:0 20px;">
-                <div style="text-align:center; margin-bottom:20px;">
-                    <div style="font-size:16px; font-weight:600; color:#e2e8f0;">Connecting to Device</div>
-                    <div id="setup-instruction" style="font-size:13px; color:#94a3b8; margin-top:4px;">Reset the device and wait...</div>
+            <div id="setup-panel" style="display:none; width:100%; max-width:500px; padding:0 20px; display:none; flex-direction:column; height:100%;">
+
+                <!-- Status header with animated icon -->
+                <div style="text-align:center; padding:24px 0 16px;">
+                    <div id="setup-anim" style="font-size:32px; line-height:1; margin-bottom:12px; font-family:'SF Mono',Monaco,monospace; color:#38bdf8;">◉</div>
+                    <div id="setup-title" style="font-size:18px; font-weight:700; color:#e2e8f0;">Connecting to Device</div>
+                    <div id="setup-instruction" style="font-size:13px; color:#94a3b8; margin-top:6px;">Reset the device and wait...</div>
                 </div>
 
                 <!-- Step checklist -->
                 <div id="setup-steps" style="margin-bottom:16px;">
-                    <div class="setup-step" id="step-connecting">
+                    <div class="setup-step" id="step-ble">
                         <span class="step-icon">○</span>
-                        <span class="step-text">Connecting to device</span>
+                        <span class="step-text">BLE paired</span>
+                    </div>
+                    <div class="setup-step" id="step-reconnect">
+                        <span class="step-icon">○</span>
+                        <span class="step-text">GATT connection</span>
                     </div>
                     <div class="setup-step" id="step-firmware">
                         <span class="step-icon">○</span>
-                        <span class="step-text">Waiting for firmware</span>
+                        <span class="step-text">Firmware ready</span>
                     </div>
                     <div class="setup-step" id="step-install">
                         <span class="step-icon">○</span>
-                        <span class="step-text">Entering calibration mode</span>
+                        <span class="step-text">Calibration mode</span>
+                    </div>
+                    <div class="setup-step" id="step-camera-init">
+                        <span class="step-icon">○</span>
+                        <span class="step-text">Camera powering on</span>
                     </div>
                     <div class="setup-step" id="step-camera">
                         <span class="step-icon">○</span>
@@ -80,11 +134,20 @@
                     </div>
                 </div>
 
-                <!-- Device log -->
-                <div id="setup-log" style="background:rgba(0,0,0,0.5); border-radius:8px; border:1px solid rgba(255,255,255,0.08); overflow:hidden; max-height:200px; display:flex; flex-direction:column;">
-                    <div style="padding:6px 12px; font-size:11px; color:#64748b; border-bottom:1px solid rgba(255,255,255,0.06);">Device Log</div>
+                <!-- Device log (expandable) -->
+                <div id="setup-log" style="flex:1; background:rgba(0,0,0,0.5); border-radius:10px; border:1px solid rgba(255,255,255,0.08); overflow:hidden; display:flex; flex-direction:column; min-height:60px; margin:0 -8px;">
+                    <div style="padding:8px 12px; font-size:11px; color:#64748b; border-bottom:1px solid rgba(255,255,255,0.06); display:flex; justify-content:space-between; align-items:center;">
+                        <span>Device Log</span>
+                        <div style="display:flex; gap:8px;">
+                            <button id="btn-copy-log" onclick="copySetupLogs()" style="font-size:10px; padding:2px 8px; background:#374151; color:#94a3b8; border:1px solid #475569; border-radius:4px; cursor:pointer;">Copy</button>
+                            <button id="btn-toggle-log" onclick="toggleSetupLog()" style="font-size:10px; padding:2px 8px; background:#374151; color:#94a3b8; border:1px solid #475569; border-radius:4px; cursor:pointer;">▼</button>
+                        </div>
+                    </div>
                     <div id="setup-log-content" style="flex:1; overflow-y:auto; padding:8px 12px; font-family:'SF Mono',Monaco,monospace; font-size:11px; color:#94a3b8; line-height:1.7; user-select:text; -webkit-user-select:text;"></div>
                 </div>
+
+                <!-- Bottom actions (back to main, etc.) -->
+                <div id="setup-bottom-actions" style="padding:12px 0; display:none;"></div>
             </div>
         </div>
     </main>
@@ -99,22 +162,25 @@
                 <span id="calib-reading-label">AI Reading</span>
                 <span id="calib-ai-value">--</span>
             </div>
-            <div id="calib-coords"></div>
-            <div id="calib-controls">
-                <select id="calibDigitSelect" onchange="onCalibDigitChange(+this.value)">
-                    <option value="4">4 digits</option>
-                    <option value="5">5 digits</option>
-                    <option value="6" selected>6 digits</option>
-                    <option value="7">7 digits</option>
-                    <option value="8">8 digits</option>
-                </select>
-                <label class="calib-toggle"><input type="checkbox" id="calibShowCoords" onchange="toggleCalibCoords()"><span>Coords</span></label>
+            <div id="calib-controls" style="display:flex; gap:8px; align-items:stretch; height:44px;">
+                <button id="btn-digit-picker" onclick="cycleDigits()" style="flex:0 0 auto; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:2px; padding:4px 14px; background:var(--elevated); border:1px solid var(--border); border-radius:8px; color:var(--text); cursor:pointer; touch-action:manipulation; -webkit-tap-highlight-color:transparent;">
+                    <span id="digit-boxes" style="font-family:'SF Mono',Monaco,monospace; font-size:13px; letter-spacing:1px; color:var(--accent);">▪▪▪▪▪▪</span>
+                    <span id="digit-label" style="font-size:9px; color:var(--text2);">6 digits</span>
+                </button>
+                <button id="btn-calibrate" class="calib-commit" disabled onclick="showCalibConfirm()" style="flex:1; margin-top:0;">Calibrate</button>
             </div>
-            <button id="btn-calibrate" class="calib-commit" disabled onclick="computeAndSendRoi()">Calibrate</button>
         </div>
         <!-- Settings panel -->
         <div id="panel-settings" class="mode-panel">
             <div class="settings-body">
+                <!-- Calibration coordinates -->
+                <div style="margin-bottom:8px;">
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+                        <span style="font-size:12px; color:#64748b; font-weight:600;">Calibration Coordinates</span>
+                        <button onclick="copyCalibCoords()" style="font-size:10px; padding:2px 8px; background:#374151; color:#94a3b8; border:1px solid #475569; border-radius:4px; cursor:pointer;">Copy</button>
+                    </div>
+                    <div id="calib-coords" style="font-family:'SF Mono',Monaco,monospace; font-size:11px; color:#94a3b8; background:rgba(0,0,0,0.3); border-radius:6px; padding:6px 8px; min-height:20px; user-select:text; -webkit-user-select:text;"></div>
+                </div>
                 <div class="sensor-ctrl">
                     <span class="ctrl-label">Brightness</span>
                     <div class="ctrl-row">

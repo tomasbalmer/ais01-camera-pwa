@@ -82,15 +82,27 @@ async function toggleBLE() {
             await stopConnection();
             document.getElementById('ble-btn').textContent = 'BLE Connect';
         } else {
-            document.getElementById('ble-btn').disabled = true;
-            document.getElementById('ble-btn').textContent = 'Connecting...';
+            /* Show reset hint screen (behind Chrome's scan dialog) */
+            document.getElementById('connect-chooser').style.display = 'none';
+            const hint = document.getElementById('reset-hint');
+            if (hint) hint.style.display = 'block';
+
+            /* Blink the reset button hint */
+            let blinkId = setInterval(() => {
+                const el = document.getElementById('reset-btn-hint');
+                if (el) el.style.opacity = el.style.opacity === '0.3' ? '1' : '0.3';
+            }, 600);
+
             const ok = await connectBLE();
-            document.getElementById('ble-btn').disabled = false;
+            clearInterval(blinkId);
+
             if (ok) {
-                document.getElementById('ble-btn').textContent = 'BLE Connect';
+                if (hint) hint.style.display = 'none';
                 await startBleSession();
             } else {
-                document.getElementById('ble-btn').textContent = 'BLE Connect';
+                /* User cancelled scan — go back */
+                if (hint) hint.style.display = 'none';
+                document.getElementById('connect-chooser').style.display = 'flex';
             }
         }
     } catch (err) {
@@ -118,6 +130,82 @@ window.exitCalibMode = exitCalibMode;
 window.computeAndSendRoi = computeAndSendRoi;
 window.onCalibDigitChange = onCalibDigitChange;
 window.toggleCalibCoords = toggleCalibCoords;
+window.cycleDigits = function() {
+    const picker = document.getElementById('digit-picker');
+    if (!picker) return;
+    if (picker.style.display !== 'none') { picker.style.display = 'none'; return; }
+
+    const current = parseInt(document.getElementById('digit-label').textContent) || 6;
+    const options = document.getElementById('digit-options');
+    const preview = document.getElementById('digit-preview');
+    options.innerHTML = '';
+
+    [4, 5, 6, 7, 8].forEach(n => {
+        const btn = document.createElement('button');
+        btn.textContent = n;
+        const isActive = n === current;
+        btn.style.cssText = `width:36px;height:36px;border-radius:6px;border:2px solid ${isActive ? '#38bdf8' : '#334155'};background:${isActive ? 'rgba(56,189,248,0.15)' : 'transparent'};color:${isActive ? '#38bdf8' : '#64748b'};font-size:16px;font-weight:700;cursor:pointer;touch-action:manipulation;-webkit-tap-highlight-color:transparent;`;
+        btn.onclick = () => {
+            document.getElementById('digit-boxes').textContent = '▪'.repeat(n);
+            document.getElementById('digit-label').textContent = n + ' digits';
+            onCalibDigitChange(n);
+            picker.style.display = 'none';
+        };
+        options.appendChild(btn);
+    });
+
+    preview.textContent = '▪'.repeat(current);
+    picker.style.display = 'block';
+};
+window.showCalibConfirm = function() {
+    const picker = document.getElementById('confirm-picker');
+    if (!picker) return;
+    // Hide digit picker if open
+    const dp = document.getElementById('digit-picker');
+    if (dp) dp.style.display = 'none';
+
+    picker.style.display = 'block';
+    document.getElementById('confirm-no').onclick = () => { picker.style.display = 'none'; };
+    document.getElementById('confirm-yes').onclick = () => {
+        picker.style.display = 'none';
+        computeAndSendRoi();
+    };
+};
+window.hideOverlayPickers = function() {
+    const dp = document.getElementById('digit-picker');
+    const cp = document.getElementById('confirm-picker');
+    if (dp) dp.style.display = 'none';
+    if (cp) cp.style.display = 'none';
+};
+window.toggleSetupLog = function() {
+    const content = document.getElementById('setup-log-content');
+    const btn = document.getElementById('btn-toggle-log');
+    if (!content) return;
+    if (content.style.display === 'none') {
+        content.style.display = 'block';
+        if (btn) btn.textContent = '▼';
+    } else {
+        content.style.display = 'none';
+        if (btn) btn.textContent = '▶';
+    }
+};
+window.copyCalibCoords = function() {
+    const el = document.getElementById('calib-coords');
+    const text = el ? el.innerText : '';
+    navigator.clipboard.writeText(text).then(() => {
+        const btn = event.target;
+        btn.textContent = 'Copied!';
+        setTimeout(() => btn.textContent = 'Copy', 1500);
+    });
+};
+window.copySetupLogs = function() {
+    const logEl = document.getElementById('setup-log-content');
+    const text = logEl ? logEl.innerText : '';
+    navigator.clipboard.writeText(text).then(() => {
+        const btn = document.getElementById('btn-copy-log');
+        if (btn) { btn.textContent = 'Copied!'; setTimeout(() => btn.textContent = 'Copy', 1500); }
+    });
+};
 window.copyLogs = function() {
     const logEl = document.getElementById('log');
     const text = Array.from(logEl.children).map(l => l.textContent).join('\n');

@@ -50,9 +50,10 @@ function onGattDisconnected() {
 
 async function gattConnect() {
     if (!bleDevice) return false;
+    if (bleRxChar) return true;
     try {
         const server = await bleDevice.gatt.connect();
-        log('GATT connected');
+        if (bleRxChar) return true; /* another concurrent call already finished */
         const service = await server.getPrimaryService(BLE_SERVICE_UUID);
         const char = await service.getCharacteristic(BLE_CHAR_UUID);
         await char.startNotifications();
@@ -60,6 +61,11 @@ async function gattConnect() {
         bleRxChar = char;
         bleTxChar = char;
         gattDisconnected = false;
+        reconnectAttempts = 0;
+        log('GATT connected');
+        setStep('step-reconnect', 'active');
+        setTitle('Device Connected');
+        setInstruction('Waiting for firmware...');
         return true;
     } catch (e) {
         log('GATT connect failed: ' + e.message);
@@ -82,6 +88,59 @@ function setStep(stepId, status) {
         el.querySelector('.step-icon').textContent = '✓';
     } else {
         el.querySelector('.step-icon').textContent = '○';
+    }
+}
+
+function setTitle(text) {
+    const el = document.getElementById('setup-title');
+    if (el) el.textContent = text;
+}
+
+/* Animated icon states */
+let animInterval = null;
+function setAnim(mode) {
+    if (animInterval) { clearInterval(animInterval); animInterval = null; }
+    const el = document.getElementById('setup-anim');
+    if (!el) return;
+    el.style.fontSize = '32px';
+    el.style.lineHeight = '1';
+    el.style.fontFamily = "'SF Mono',Monaco,monospace";
+    if (mode === 'waiting') {
+        /* Apple-style loading dots */
+        el.style.fontSize = '24px';
+        el.style.letterSpacing = '8px';
+        el.style.color = '#38bdf8';
+        el.style.whiteSpace = 'normal';
+        el.innerHTML = '<span class="dot">●</span><span class="dot">●</span><span class="dot">●</span>';
+        /* Inject animation style if not present */
+        if (!document.getElementById('dot-anim-style')) {
+            const style = document.createElement('style');
+            style.id = 'dot-anim-style';
+            style.textContent = '@keyframes dot-pulse{0%,80%,100%{opacity:0.15;transform:scale(0.8)}40%{opacity:1;transform:scale(1)}}.dot{display:inline-block;animation:dot-pulse 1.4s ease-in-out infinite}.dot:nth-child(2){animation-delay:0.2s}.dot:nth-child(3){animation-delay:0.4s}';
+            document.head.appendChild(style);
+        }
+    } else {
+        el.style.whiteSpace = 'normal';
+        el.style.fontSize = '32px';
+        el.style.fontFamily = "'SF Mono',Monaco,monospace";
+        el.innerHTML = '';
+        if (mode === 'connected') {
+            el.textContent = '●';
+            el.style.color = '#22c55e';
+            el.style.animation = 'none';
+        } else if (mode === 'streaming') {
+            el.textContent = '●';
+            el.style.color = '#22c55e';
+            el.style.animation = 'none';
+        } else if (mode === 'ended') {
+            el.textContent = '○';
+            el.style.color = '#64748b';
+            el.style.animation = 'none';
+        } else if (mode === 'error') {
+            el.textContent = '✕';
+            el.style.color = '#ef4444';
+            el.style.animation = 'none';
+        }
     }
 }
 
@@ -139,11 +198,19 @@ export async function connectBLE() {
     }
 }
 
+let reconnectAttempts = 0;
+
 /* ── Send string command via BLE ── */
 async function bleSend(cmd) {
     /* v4: reconnect if disconnected */
     if (bleDevice && !bleDevice.gatt.connected) {
-        log('Reconnecting...');
+        reconnectAttempts++;
+        if (reconnectAttempts === 1) log('Reconnecting...');
+        if (reconnectAttempts === 4) {
+            setTitle('Connection Lost');
+            setInstruction('Press RESET on the device again');
+            setAnim('waiting');
+        }
         if (!await gattConnect()) return;
     }
     if (!bleRxChar) return;
@@ -222,20 +289,43 @@ function onBleData(event) {
                 /* Filter noise: skip AT ping responses and bootloader AT commands */
                 const isNoise = line === 'OK' || line === 'ERROR' || line === 'AT_ERROR'
                     || line.startsWith('AT+BAUD') || line.startsWith('AT+PWRM')
-                    || line.startsWith('AT+NAME') || line === 'AT';
+                    || line.startsWith('AT+NAME') || line.startsWith('AT+RESET')
+                    || line === 'AT';
                 if (!isNoise) log(`[device] ${line}`);
                 if (line.includes('AT command window')) {
                     firmwareReady = true;
+                    setStep('step-reconnect', 'done');
                     setStep('step-firmware', 'done');
                     setStep('step-install', 'active');
+                    setTitle('Firmware Ready');
+                    setAnim('connected');
                     setInstruction('Sending install command...');
+                    if (!installAcked) {
+                        log('Firmware ready — sending AT+INSTALL');
+                        bleSend('AT+INSTALL').catch(() => {});
+                    }
                 }
                 if (line.includes('Entering installation mode') || line.includes('INSTALLATION MODE')) {
                     installAcked = true;
                     setStep('step-install', 'done');
+                    setStep('step-camera-init', 'active');
+                    setTitle('Calibration Mode');
+                    setInstruction('Powering on camera...');
+                }
+                if (line.includes('[CAM] Power ON')) {
+                    setStep('step-camera-init', 'active');
+                    setInstruction('Camera initializing...');
+                }
+                if (line.includes('[CAM] Power ON complete')) {
+                    setStep('step-camera-init', 'done');
+                    setStep('step-camera', 'active');
+                    setInstruction('Waiting for first frame...');
                 }
                 if (line.includes('Window closed') || line.includes('duty cycle start') || line.includes('Duty cycle start')) {
                     dutyCycleStarted = true;
+                    setTitle('Missed Window');
+                    setAnim('error');
+                    setInstruction('Device started duty cycle — press RESET to try again');
                 }
             }
         }
@@ -343,7 +433,9 @@ export async function startBleSession() {
     const chooser = document.getElementById('connect-chooser');
     const panel = document.getElementById('setup-panel');
     if (chooser) chooser.style.display = 'none';
-    if (panel) panel.style.display = 'block';
+    if (panel) panel.style.display = 'flex';
+    const bottomActions = document.getElementById('setup-bottom-actions');
+    if (bottomActions) { bottomActions.style.display = 'none'; bottomActions.innerHTML = ''; }
 
     dom.statusDot.classList.add('connected');
     dom.btnStop.classList.add('visible');
@@ -359,11 +451,14 @@ export async function startBleSession() {
     textLineBuf = '';
     gattDisconnected = false;
 
-    setStep('step-connecting', 'done');
-    setInstruction('Reset the device and wait...');
+    setStep('step-ble', 'done');
+    setTitle('Waiting for Device');
+    setAnim('waiting');
+    setInstruction('Press RESET on the device');
+    setStep('step-reconnect', 'active');
     dom.stats.textContent = 'Waiting for device...';
 
-    /* v4 approach: AT+INSTALL every 3s. Stops on ACK or frames. */
+    /* v4 approach: AT ping → AT+INSTALL when firmware detected. Stops on ACK or frames. */
     let retryCount = 0;
     const MAX_RETRIES = 30;
     let installInterval = null;
@@ -380,6 +475,8 @@ export async function startBleSession() {
             clearInterval(installInterval);
             installInterval = null;
             log('Stopped after ' + MAX_RETRIES + ' attempts');
+            setTitle('Connection Failed');
+            setAnim('error');
             setInstruction('No response — reset device and try again');
             dom.stats.textContent = 'No response';
             return;
@@ -387,9 +484,11 @@ export async function startBleSession() {
 
         if (firmwareReady) {
             /* Firmware detected — send AT+INSTALL */
+            setTitle('Starting Calibration');
+            setAnim('connected');
             setStep('step-firmware', 'done');
             setStep('step-install', 'active');
-            setInstruction('Entering calibration mode...');
+            setInstruction('Sending install command...');
             log(`AT+INSTALL #${retryCount}/${MAX_RETRIES}`);
             try { await bleSend('AT+INSTALL'); } catch (e) {}
         } else {
@@ -412,6 +511,8 @@ export async function startBleSession() {
     if (frameCount > 0) {
         setStep('step-install', 'done');
         setStep('step-camera', 'done');
+        setAnim('streaming');
+        setTitle('Camera Active');
         setInstruction('Streaming');
         log('Camera streaming');
         dom.connectScreen.style.display = 'none';
@@ -437,8 +538,11 @@ export async function stopBleSession() {
     state.bleMode = false;
     state.bleCalibMode = false;
 
+    /* Hide any overlay pickers */
+    if (typeof hideOverlayPickers === 'function') hideOverlayPickers();
+    else { try { window.hideOverlayPickers(); } catch(_) {} }
+
     dom.cam.style.display = 'none';
-    dom.connectScreen.style.display = 'flex';
     dom.modeToggle.classList.remove('visible');
     dom.modeArea.classList.remove('visible');
     dom.modeSelector.classList.remove('visible');
@@ -446,6 +550,51 @@ export async function stopBleSession() {
     dom.stats.className = '';
     dom.stats.textContent = 'Disconnected';
     dom.statusDot.classList.remove('connected');
+
+    /* Show setup panel with session logs + bottom actions */
+    const panel = document.getElementById('setup-panel');
+    const chooser = document.getElementById('connect-chooser');
+    if (panel) {
+        dom.connectScreen.style.display = 'flex';
+        if (chooser) chooser.style.display = 'none';
+        panel.style.display = 'flex';
+        setTitle('Session Ended');
+        setAnim('ended');
+        setInstruction('Device disconnected');
+
+        const bottomActions = document.getElementById('setup-bottom-actions');
+        if (bottomActions) {
+            bottomActions.style.cssText = 'padding:12px 0; display:flex; flex-direction:row; gap:8px;';
+            bottomActions.innerHTML = '';
+
+            const btnCopy = document.createElement('button');
+            btnCopy.textContent = 'Copy logs';
+            btnCopy.style.cssText = 'flex:1;padding:12px 0;font-size:14px;font-weight:500;border-radius:10px;border:1px solid #475569;background:transparent;color:#94a3b8;cursor:pointer;';
+            btnCopy.onclick = () => {
+                const logEl = document.getElementById('setup-log-content');
+                const text = logEl ? logEl.innerText : '';
+                navigator.clipboard.writeText(text).then(() => {
+                    btnCopy.textContent = 'Copied!';
+                    setTimeout(() => btnCopy.textContent = 'Copy logs', 1500);
+                });
+            };
+
+            const btnBack = document.createElement('button');
+            btnBack.textContent = 'Back to main';
+            btnBack.style.cssText = 'flex:1;padding:12px 0;font-size:14px;font-weight:600;border-radius:10px;border:1px solid #334155;background:#1e293b;color:#e2e8f0;cursor:pointer;';
+            btnBack.onclick = () => {
+                panel.style.display = 'none';
+                bottomActions.style.display = 'none';
+                if (chooser) chooser.style.display = 'flex';
+                setAnim(null);
+            };
+
+            bottomActions.appendChild(btnCopy);
+            bottomActions.appendChild(btnBack);
+        }
+    } else {
+        dom.connectScreen.style.display = 'flex';
+    }
 
     if (bleTxChar) {
         try {

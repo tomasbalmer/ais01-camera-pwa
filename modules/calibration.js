@@ -9,6 +9,7 @@ import { createCalibOverlay } from './calib-canvas.js';
 // === Calibration overlay (native canvas) ===
 
 let calib = null;  // createCalibOverlay() instance
+let calibResizeObserver = null;
 
 function initCalib() {
     const r = getImageRect();
@@ -149,11 +150,16 @@ export async function enterCalibMode() {
     dom.overlayCanvas.classList.add('active');
     calibCanvas.classList.add('active');
 
-    // Reset coords visibility
-    const coordsCheckbox = document.getElementById('calibShowCoords');
-    if (coordsCheckbox) coordsCheckbox.checked = false;
-    const coordsEl = document.getElementById('calib-coords');
-    if (coordsEl) coordsEl.style.display = 'none';
+    // Sync canvas position on any layout change (panel resize, keyboard, etc.)
+    if (!calibResizeObserver) {
+        calibResizeObserver = new ResizeObserver(() => {
+            if (state.calibMode) syncCalibPosition();
+        });
+        calibResizeObserver.observe(document.getElementById('viewer'));
+    }
+
+    // Coords always visible in settings panel
+    updateCalibCoords();
 
     // Lock calibrate button until user positions the rect
     state.calibRectTouched = false;
