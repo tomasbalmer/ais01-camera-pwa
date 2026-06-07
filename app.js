@@ -12,7 +12,6 @@ import {
     connectBLE, startBleSession, stopBleSession, hasBluetooth,
     isBleConnected,
 } from './modules/ble.js';
-import { SETUP_STEPS } from './modules/constants.js';
 
 // === Stop any active connection (USB or BLE) ===
 async function stopConnection() {
@@ -412,158 +411,14 @@ window.addEventListener('beforeunload', () => {
     }
 });
 
-// === Mock setup mode: show BLE setup/connection flow ===
-if (new URLSearchParams(location.search).get('mock') === 'setup') {
-    state.running = true;
-    state.bleMode = true;
-    state.bleCalibMode = true;
-    document.getElementById('connect-chooser').style.display = 'none';
-    const panel = document.getElementById('setup-panel');
-    if (panel) panel.style.display = 'flex';
-    dom.statusDot.classList.add('connected');
-    dom.btnStop.classList.add('visible');
-    dom.stats.className = 'active';
-    dom.stats.textContent = 'Mock setup';
-
-    // ── Mock helpers ──
-    const checkSvg = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#22c55e" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>';
-    const ss = (id, s) => { const el = document.getElementById(id); if (el) { el.classList.remove('active','done'); const icon = el.querySelector('.step-icon'); if (s==='done') { el.classList.add('done'); icon.innerHTML=checkSvg; } else if (s==='active') { el.classList.add('active'); icon.innerHTML=''; } else { icon.innerHTML=''; } } };
-    const title = (t) => { const el = document.getElementById('setup-title'); if (el) el.textContent = t; };
-    const instr = (t) => { const el = document.getElementById('setup-instruction'); if (el) el.textContent = t; };
-    const ring = document.getElementById('setup-ring');
-    const setRing = (s) => { if (ring) ring.setAttribute('data-state', s); };
-    const mockLog = (msg) => log(msg);
-
-    // Helper: apply step config from SETUP_STEPS
-    const step = (idx, status) => {
-        const s = SETUP_STEPS[idx];
-        ss(s.id, status);
-        const cfg = status === 'done' ? s.onDone : s.onActive;
-        if (cfg) {
-            if (cfg.title) title(cfg.title);
-            if (cfg.instruction) instr(cfg.instruction);
-            if (cfg.anim) setRing(cfg.anim);
-        }
-    };
-
-    // Reconnect hint helpers
-    const hintEl = document.getElementById('reconnect-hint');
-    const hintAttempts = document.getElementById('reconnect-hint-attempts');
-    const showHint = () => { if (hintEl) hintEl.style.display = 'flex'; };
-    const hideHint = () => { if (hintEl) hintEl.style.display = 'none'; };
-
-    // ── Simulate realistic device boot sequence ──
-
-    // 0s — Step 1 done (BLE paired), Step 2 active (GATT connecting)
-    step(0, 'done');
-    step(1, 'active');
-    mockLog('BLE connected');
-
-    // 1-7s — GATT fails repeatedly, reconnect hint appears after attempt 4
-    setTimeout(() => { mockLog('GATT connect failed (attempt 1)'); }, 1000);
-    setTimeout(() => { mockLog('GATT connect failed (attempt 2)'); }, 3000);
-    setTimeout(() => { mockLog('GATT connect failed (attempt 3)'); }, 5000);
-    setTimeout(() => { mockLog('GATT connect failed (attempt 4)'); showHint(); }, 7000);
-    setTimeout(() => { mockLog('GATT connect failed (attempt 5)'); showHint(); }, 9000);
-
-    // 10s — GATT finally connects, hint disappears
-    setTimeout(() => { mockLog('GATT connected'); hideHint(); }, 10000);
-
-    // 11s — Step 2 done (first notification), Step 3 active (firmware booting)
-    setTimeout(() => { mockLog('Device responding'); step(1, 'done'); step(2, 'active'); }, 11000);
-
-    // 12s — Firmware banner
-    setTimeout(() => {
-        mockLog('[device] ========================================');
-        mockLog('[device]   AIS01-CB Custom Firmware v0.9.0');
-        mockLog('[device] ========================================');
-    }, 12000);
-
-    // 12.8s — Config loaded
-    setTimeout(() => { mockLog('[device] [MAIN] Config loaded from EEPROM'); }, 12800);
-
-    // 13.5s — Step 3 done (AT window), Step 4 active (calibration command)
-    setTimeout(() => {
-        mockLog('[device] [MAIN] AT command window (30s)...');
-        step(2, 'done');
-        step(3, 'active');
-    }, 13500);
-
-    // 14s — AT+INSTALL sent
-    setTimeout(() => { mockLog('Firmware ready — sending AT+INSTALL'); mockLog('Sent: AT+INSTALL'); }, 14000);
-
-    // 15s — Step 4 done (install ack), Step 5 active (camera powering on)
-    setTimeout(() => {
-        mockLog('[device] Entering installation mode...');
-        mockLog('[device] ========================================');
-        mockLog('[device]   INSTALLATION MODE');
-        mockLog('[device] ========================================');
-        step(3, 'done');
-        step(4, 'active');
-    }, 15000);
-
-    // 15.5-16.3s — Camera init logs
-    setTimeout(() => { mockLog('[device] [CAM] Power ON — init UART...'); }, 15500);
-    setTimeout(() => { mockLog('[device] [CAM] UART OK — 5V on...'); }, 16000);
-    setTimeout(() => { mockLog('[device] [CAM] 5V OK — delay 2s...'); }, 16300);
-
-    // 18.3s — Step 5 done, Step 6 active (waiting for frame)
-    setTimeout(() => {
-        mockLog('[device] [CAM] Power ON complete');
-        step(4, 'done');
-        step(5, 'active');
-    }, 18300);
-
-    // 20s — Step 6 done (first frame = streaming)
-    setTimeout(() => {
-        mockLog('First BLE frame: 2930 bytes');
-        mockLog('Camera streaming');
-        step(5, 'done');
-    }, 20000);
-
-    // 20.5s — Skeleton transition
-    setTimeout(() => {
-        const setupPanel = document.getElementById('setup-panel');
-        const skeleton = document.getElementById('skeleton-transition');
-        if (setupPanel) setupPanel.style.display = 'none';
-        if (skeleton) skeleton.style.display = 'flex';
-    }, 20500);
-
-    // 23s — Show camera UI
-    setTimeout(() => {
-        const skeleton = document.getElementById('skeleton-transition');
-        if (skeleton) skeleton.style.display = 'none';
-        dom.connectScreen.style.display = 'none';
-        dom.cam.style.display = 'block';
-        dom.cam.src = 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="640" height="480" viewBox="0 0 640 480"><rect fill="#1a1a2e" width="640" height="480"/><circle cx="320" cy="200" r="120" fill="none" stroke="#334155" stroke-width="2"/><text x="320" y="190" text-anchor="middle" fill="#38bdf8" font-family="monospace" font-size="28">00000.00</text><text x="320" y="220" text-anchor="middle" fill="#475569" font-family="monospace" font-size="12">m³</text></svg>');
-        dom.modeArea.classList.add('visible');
-        dom.modeSelector.classList.add('visible');
-        const mt = document.getElementById('mode-title');
-        if (mt) mt.style.display = 'block';
-        state.activeMode = null;
-        switchMode('validate');
-        dom.stats.textContent = 'Streaming';
-    }, 23000);
-
-    log('Mock setup mode — simulating BLE connection flow');
-} else if (new URLSearchParams(location.search).has('mock')) {
-    state.running = true;
-    state.bleMode = true;
-    state.bleCalibMode = true;
-    dom.connectScreen.style.display = 'none';
-    dom.cam.style.display = 'block';
-    dom.cam.src = 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="640" height="480" viewBox="0 0 640 480"><rect fill="#1a1a2e" width="640" height="480"/><circle cx="320" cy="200" r="120" fill="none" stroke="#334155" stroke-width="2"/><text x="320" y="190" text-anchor="middle" fill="#38bdf8" font-family="monospace" font-size="28">00000.00</text><text x="320" y="220" text-anchor="middle" fill="#475569" font-family="monospace" font-size="12">m³</text><text x="320" y="400" text-anchor="middle" fill="#334155" font-size="14">Mock — water meter</text></svg>');
-    dom.statusDot.classList.add('connected');
-    dom.btnStop.classList.add('visible');
-    dom.modeArea.classList.add('visible');
-    dom.modeSelector.classList.add('visible');
-    const mt = document.getElementById('mode-title');
-    if (mt) mt.style.display = 'block';
-    state.activeMode = null;
-    switchMode('validate');
-    dom.stats.className = 'active';
-    dom.stats.textContent = 'Mock mode';
-    log('Mock mode — no BLE connection');
+// === Mock modes (loaded only when ?mock is present) ===
+{
+    const params = new URLSearchParams(location.search);
+    if (params.has('mock')) {
+        const { runMockSetup, runMockCamera } = await import('./modules/mock.js');
+        if (params.get('mock') === 'setup') runMockSetup();
+        else runMockCamera();
+    }
 }
 
 // === Init check ===
