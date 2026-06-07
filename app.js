@@ -65,19 +65,27 @@ async function toggleConnection() {
         if (state.running) {
             await stopConnection();
         } else {
-            document.getElementById('big-btn').disabled = true;
-            document.getElementById('big-btn').textContent = 'Connecting...';
+            /* Show USB hint behind Chrome's device chooser */
+            document.getElementById('connect-chooser').style.display = 'none';
+            const usbHint = document.getElementById('usb-hint');
+            if (usbHint) usbHint.style.display = 'block';
+
             const epIn = await connectDevice();
-            document.getElementById('big-btn').disabled = false;
-            document.getElementById('big-btn').textContent = 'USB Camera';
+
             if (epIn) {
+                if (usbHint) usbHint.style.display = 'none';
                 readStream(epIn);
+            } else {
+                /* User cancelled or error — go back */
+                if (usbHint) usbHint.style.display = 'none';
+                document.getElementById('connect-chooser').style.display = 'flex';
             }
         }
     } catch (err) {
         log('Error: ' + err.message);
-        document.getElementById('big-btn').disabled = false;
-        document.getElementById('big-btn').textContent = 'USB Camera';
+        const usbHint = document.getElementById('usb-hint');
+        if (usbHint) usbHint.style.display = 'none';
+        document.getElementById('connect-chooser').style.display = 'flex';
     }
 }
 

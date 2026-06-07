@@ -136,6 +136,47 @@
                 <p id="message" style="display:none;"></p>
             </div>
 
+            <!-- Phase 1.5b: USB connect hint (shown before USB device chooser) -->
+            <div id="usb-hint" style="display:none; text-align:center; padding:0 12px;">
+                <div style="display:flex; justify-content:center; margin-bottom:20px;">
+                    <svg width="140" height="280" viewBox="0 0 140 280" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Connect USB cable">
+                        <style>
+                            .uv{stroke:#334155;stroke-width:1.5;fill:none;stroke-linecap:round;stroke-linejoin:round}
+                            .ut{stroke:#475569;stroke-width:.75;fill:none;opacity:.5;stroke-linecap:round;stroke-linejoin:round}
+                            .uh{stroke:#38bdf8;stroke-width:1.2;fill:none;opacity:.6;stroke-linecap:round}
+                            .up{stroke:#38bdf8;stroke-width:1;fill:none;opacity:0;transform-box:fill-box;transform-origin:center;animation:uPulse 1.5s ease-out infinite}
+                            @keyframes uPulse{0%{opacity:.4;transform:scale(.9)}50%{opacity:.8;transform:scale(1.05)}100%{opacity:.4;transform:scale(.9)}}
+                        </style>
+                        <!-- Device enclosure (top) -->
+                        <rect class="uv" x="30" y="8" width="80" height="130" rx="10" ry="10"/>
+                        <rect class="ut" x="40" y="18" width="60" height="110" rx="4" ry="4"/>
+                        <!-- Camera lens -->
+                        <circle class="ut" cx="70" cy="55" r="12"/>
+                        <circle class="uv" cx="70" cy="55" r="6"/>
+                        <!-- USB port on device -->
+                        <rect class="uh" x="56" y="130" width="28" height="10" rx="2" ry="2"/>
+                        <!-- Cable -->
+                        <path class="uh" d="M70 140 L70 180" stroke-dasharray="4 3"/>
+                        <!-- USB connector (animated) -->
+                        <g>
+                            <rect class="up" x="54" y="178" width="32" height="16" rx="3" ry="3"/>
+                            <rect x="54" y="178" width="32" height="16" rx="3" ry="3" stroke="#38bdf8" stroke-width="1.2" fill="rgba(56,189,248,0.08)"/>
+                            <rect x="60" y="182" width="6" height="8" rx="1" fill="rgba(56,189,248,0.3)"/>
+                            <rect x="74" y="182" width="6" height="8" rx="1" fill="rgba(56,189,248,0.3)"/>
+                        </g>
+                        <!-- Arrow pointing up (plug in) -->
+                        <path d="M70 210 L70 198" stroke="#38bdf8" stroke-width="1" stroke-linecap="round" opacity="0.5"/>
+                        <path d="M65 203 L70 197 L75 203" stroke="#38bdf8" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" fill="none" opacity="0.5"/>
+                        <!-- Label -->
+                        <text x="70" y="235" text-anchor="middle" fill="#94a3b8" font-family="-apple-system,sans-serif" font-size="11" font-weight="500">Connect USB probe</text>
+                        <text x="70" y="252" text-anchor="middle" fill="#64748b" font-family="-apple-system,sans-serif" font-size="9">to camera FTDI port</text>
+                    </svg>
+                </div>
+                <div style="display:flex; justify-content:center;">
+                    <div style="width:6px; height:6px; border-radius:50%; background:#38bdf8; animation:pulse-dot 1.5s ease-in-out infinite;"></div>
+                </div>
+            </div>
+
             <!-- Phase 1.5: Device reset hint (shown before BLE scan dialog) -->
             <div id="reset-hint" style="display:none; text-align:center; padding:0 12px;">
                 <div style="display:flex; justify-content:center; margin-bottom:20px;">
