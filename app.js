@@ -509,11 +509,6 @@ if (new URLSearchParams(location.search).get('mock') === 'setup') {
         dom.stats.textContent = 'Streaming';
     }, 23000);
 
-    // 24.5s — Auto-switch to calibration mode to show the full calib flow
-    setTimeout(() => {
-        switchMode('calibrate');
-    }, 24500);
-
     log('Mock setup mode — simulating BLE connection flow');
 } else if (new URLSearchParams(location.search).has('mock')) {
     state.running = true;
