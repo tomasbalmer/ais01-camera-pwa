@@ -70,30 +70,64 @@
 
             <!-- Phase 1.5: Device reset hint (shown before BLE scan dialog) -->
             <div id="reset-hint" style="display:none; text-align:center; padding:0 12px;">
-                <div id="device-art" style="font-family:'SF Mono',Monaco,monospace; font-size:10px; line-height:1.45; white-space:pre; margin-bottom:20px; user-select:none;"><span style="color:#334155">                  │</span>
-<span style="color:#334155">                 ╱│╲</span>        <span style="color:#475569">antenna</span>
-<span style="color:#334155">                ╱ │ ╲</span>
-<span style="color:#334155">               ╱  │  ╲</span>
-<span style="color:#334155">              ────┴────</span>
-<span style="color:#334155">        ╔═══════════════════╗</span>
-<span style="color:#334155">        ║</span>  <span style="color:#475569">╭─────────────╮</span>  <span style="color:#334155">║</span>
-<span style="color:#334155">        ║</span>  <span style="color:#475569">│</span> <span style="color:#38bdf8">AIS01-CB</span>    <span style="color:#475569">│</span>  <span style="color:#334155">║</span>
-<span style="color:#334155">        ║</span>  <span style="color:#475569">│</span>             <span style="color:#475569">│</span>  <span style="color:#334155">║</span>
-<span style="color:#334155">        ║</span>  <span style="color:#475569">│</span> <span style="color:#1e293b">┌───┐ ┌───┐</span><span style="color:#475569">│</span>  <span style="color:#334155">║</span>
-<span style="color:#334155">        ║</span>  <span style="color:#475569">│</span> <span style="color:#1e293b">│CAM│ │LTE│</span><span style="color:#475569">│</span>  <span style="color:#334155">║</span>
-<span style="color:#334155">        ║</span>  <span style="color:#475569">│</span> <span style="color:#1e293b">└───┘ └───┘</span><span style="color:#475569">│</span>  <span style="color:#334155">║</span>
-<span style="color:#334155">        ║</span>  <span style="color:#475569">│</span>             <span style="color:#475569">│</span>  <span style="color:#334155">║</span>
-<span style="color:#334155">        ║</span>  <span style="color:#475569">│</span> <span id="reset-btn-hint" style="color:#ef4444;font-weight:700;text-shadow:0 0 10px rgba(239,68,68,0.5)">◉ RST</span>  <span style="color:#334155">○ ISP</span><span style="color:#475569">│</span>  <span style="color:#334155">║</span>  <span style="color:#ef4444">← press</span>
-<span style="color:#334155">        ║</span>  <span style="color:#475569">│</span>             <span style="color:#475569">│</span>  <span style="color:#334155">║</span>
-<span style="color:#334155">        ║</span>  <span style="color:#475569">╰─────────────╯</span>  <span style="color:#334155">║</span>
-<span style="color:#334155">        ║</span>   <span style="color:#1e293b">▪ ▪ ▪  BLE</span>      <span style="color:#334155">║</span>
-<span style="color:#334155">        ╚═══════════════════╝</span></div>
+                <div style="display:flex; justify-content:center; margin-bottom:20px;">
+                    <svg width="140" height="320" viewBox="0 0 140 320" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="iot-reset-title">
+                        <title id="iot-reset-title">IoT sensor node — press RESET</title>
+                        <style>
+                            .dv{stroke:#334155;stroke-width:1.5;fill:none;stroke-linecap:round;stroke-linejoin:round}
+                            .dt{stroke:#475569;stroke-width:.75;fill:none;opacity:.5;stroke-linecap:round;stroke-linejoin:round}
+                            .hi{stroke:#38bdf8;stroke-width:1;fill:none;opacity:.5;stroke-linecap:round;stroke-linejoin:round}
+                            .rl{fill:#ef4444;opacity:.9;font-family:-apple-system,sans-serif;font-size:8px;font-weight:600;letter-spacing:.5px}
+                            #reset-btn-svg{stroke:#ef4444;stroke-width:1.2;fill:rgba(239,68,68,.18);transform-box:fill-box;transform-origin:center;animation:rB 1.2s ease-in-out infinite}
+                            .rp{stroke:#ef4444;stroke-width:1;fill:none;opacity:0;transform-box:fill-box;transform-origin:center;animation:rP 1.2s ease-out infinite}
+                            .pi{stroke:#ef4444;stroke-width:1;fill:none;opacity:.75;stroke-linecap:round;animation:pI 1.2s ease-in-out infinite}
+                            @keyframes rB{0%,100%{opacity:.6;transform:scale(1)}50%{opacity:1;transform:scale(1.1)}}
+                            @keyframes rP{0%{opacity:.5;transform:scale(.8)}70%,100%{opacity:0;transform:scale(2)}}
+                            @keyframes pI{0%,100%{opacity:.3;transform:translateY(-1px)}50%{opacity:.9;transform:translateY(2px)}}
+                            @media(prefers-reduced-motion:reduce){#reset-btn-svg,.rp,.pi{animation:none}}
+                        </style>
+                        <g aria-hidden="true">
+                            <!-- Antenna — long, slightly angled, centered top -->
+                            <g transform="rotate(-5 70 50)">
+                                <rect class="dv" x="66" y="4" width="8" height="90" rx="4" ry="4"/>
+                                <line class="dt" x1="66" y1="20" x2="74" y2="20"/>
+                                <line class="dt" x1="66" y1="35" x2="74" y2="35"/>
+                            </g>
+                            <!-- Antenna base -->
+                            <rect class="dv" x="60" y="88" width="20" height="10" rx="3" ry="3"/>
+                            <!-- Enclosure — tall rectangle, rounded corners -->
+                            <rect class="dv" x="20" y="98" width="100" height="160" rx="12" ry="12"/>
+                            <!-- Screws (4 corners) -->
+                            <circle class="dv" cx="34" cy="112" r="5"/><circle class="dt" cx="34" cy="112" r="1.5"/>
+                            <circle class="dv" cx="106" cy="112" r="5"/><circle class="dt" cx="106" cy="112" r="1.5"/>
+                            <circle class="dv" cx="34" cy="244" r="5"/><circle class="dt" cx="34" cy="244" r="1.5"/>
+                            <circle class="dv" cx="106" cy="244" r="5"/><circle class="dt" cx="106" cy="244" r="1.5"/>
+                            <!-- Internal line (lid seam) -->
+                            <rect class="dt" x="30" y="120" width="80" height="130" rx="4" ry="4"/>
+                            <!-- Push button (RESET) — animated -->
+                            <circle class="rp" cx="70" cy="160" r="7"/>
+                            <circle id="reset-btn-svg" cx="70" cy="160" r="7"/>
+                            <path class="pi" d="M70 142V150"/><path class="pi" d="M66 147L70 151L74 147"/>
+                            <text class="rl" x="82" y="163">RST</text>
+                            <!-- LED indicator -->
+                            <circle class="hi" cx="70" cy="185" r="3"/>
+                            <!-- Bottom piece (valve/connector) -->
+                            <rect class="dv" x="45" y="258" width="50" height="28" rx="4" ry="4"/>
+                            <line class="dv" x1="55" y1="258" x2="55" y2="286"/>
+                            <line class="dv" x1="85" y1="258" x2="85" y2="286"/>
+                            <circle class="dt" cx="70" cy="272" r="4"/>
+                            <!-- Side mounting tabs -->
+                            <path class="dv" d="M20 165H14C11 165 9 163 9 160C9 157 11 155 14 155H20"/>
+                            <path class="dv" d="M120 165H126C129 165 131 163 131 160C131 157 129 155 126 155H120"/>
+                        </g>
+                    </svg>
+                </div>
                 <div style="font-size:15px; font-weight:600; color:#e2e8f0; margin-bottom:6px;">Press the RESET button</div>
                 <div style="font-size:12px; color:#64748b; margin-bottom:20px;">The device will appear in the scan dialog</div>
                 <div style="display:flex; justify-content:center;">
                     <div style="width:6px; height:6px; border-radius:50%; background:#38bdf8; animation:pulse-dot 1.5s ease-in-out infinite;"></div>
                 </div>
-                <style>@keyframes pulse-dot { 0%,100% { opacity:0.3; transform:scale(1); } 50% { opacity:1; transform:scale(1.5); } }</style>
+                <style>@keyframes pulse-dot{0%,100%{opacity:.3;transform:scale(1)}50%{opacity:1;transform:scale(1.5)}}</style>
             </div>
 
             <!-- Phase 2: BLE setup progress (shown after clicking Connect via Bluetooth) -->

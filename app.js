@@ -82,19 +82,12 @@ async function toggleBLE() {
             await stopConnection();
             document.getElementById('ble-btn').textContent = 'BLE Connect';
         } else {
-            /* Show reset hint screen (behind Chrome's scan dialog) */
+            /* Show reset hint screen with SVG (behind Chrome's scan dialog) */
             document.getElementById('connect-chooser').style.display = 'none';
             const hint = document.getElementById('reset-hint');
             if (hint) hint.style.display = 'block';
 
-            /* Blink the reset button hint */
-            let blinkId = setInterval(() => {
-                const el = document.getElementById('reset-btn-hint');
-                if (el) el.style.opacity = el.style.opacity === '0.3' ? '1' : '0.3';
-            }, 600);
-
             const ok = await connectBLE();
-            clearInterval(blinkId);
 
             if (ok) {
                 if (hint) hint.style.display = 'none';
