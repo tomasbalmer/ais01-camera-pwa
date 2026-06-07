@@ -25,7 +25,10 @@ async function stopConnection() {
         dom.modeArea.classList.remove('visible');
         dom.modeSelector.classList.remove('visible');
         dom.btnStop.classList.remove('visible');
-        dom.modeHint.style.display = 'none';
+        const mt = document.getElementById('mode-title');
+        if (mt) mt.style.display = 'none';
+        if (typeof window.hideCalibHint === 'function') window.hideCalibHint();
+        hideOverlayPickers();
         dom.connectScreen.style.display = 'flex';
         dom.cam.style.display = 'none';
         dom.stats.className = '';
