@@ -83,31 +83,7 @@
 .connect-btn-secondary:active { background: rgba(255,255,255,0.05); }
 
 /* ─── Setup steps checklist ─── */
-.setup-step {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    padding: 6px 0;
-    font-size: 13px;
-    color: #475569;
-}
-.setup-step.active {
-    color: #e2e8f0;
-}
-.setup-step.active .step-icon {
-    color: #4af;
-}
-.setup-step.done {
-    color: #94a3b8;
-}
-.setup-step.done .step-icon {
-    color: #22c55e;
-}
-.step-icon {
-    font-size: 14px;
-    width: 18px;
-    text-align: center;
-}
+/* Main step styles are in index.html <style> block for setup-panel */
 
 #message {
     text-align: center;

@@ -53,10 +53,20 @@
         <canvas id="overlay-canvas"></canvas>
         <canvas id="calib-canvas"></canvas>
         <!-- Digit picker overlay (absolute, no layout impact) -->
-        <div id="digit-picker" style="display:none; position:absolute; bottom:0; left:0; right:0; z-index:6; padding:20px 0 16px; text-align:center; background:linear-gradient(transparent, rgba(0,0,0,0.85) 30%);">
-            <div style="font-size:13px; color:#38bdf8; margin-bottom:14px; font-weight:500;">How many digits on the meter?</div>
-            <div id="digit-options" style="display:flex; justify-content:center; gap:16px; margin-bottom:10px;"></div>
-            <div id="digit-preview" style="font-family:'SF Mono',Monaco,monospace; font-size:16px; letter-spacing:3px; color:rgba(56,189,248,0.5);"></div>
+        <div id="digit-picker" style="display:none; position:absolute; bottom:0; left:0; right:0; z-index:6; height:140px; text-align:center; background:linear-gradient(transparent, rgba(0,0,0,0.85) 30%);">
+            <div style="position:absolute; bottom:0; left:0; right:0; padding:0 0 13px;">
+                <div style="font-size:13px; color:#38bdf8; margin-bottom:4px; font-weight:500; text-align:left; padding-left:16px;">1. Select number of digits</div>
+                <div style="font-size:10px; color:#64748b; margin-bottom:8px; text-align:left; padding-left:28px;">How many digit windows does the meter have?</div>
+                <div id="digit-options" style="display:flex; justify-content:center; gap:16px;"></div>
+            </div>
+        </div>
+        <!-- Calibration positioning hint (same style as digit picker) -->
+        <div id="calib-hint" style="display:none; position:absolute; bottom:0; left:0; right:0; z-index:6; height:140px; text-align:center; background:linear-gradient(transparent, rgba(0,0,0,0.85) 30%);">
+            <div style="position:absolute; bottom:0; left:0; right:0; padding:0 0 13px;">
+                <div style="font-size:13px; color:#38bdf8; margin-bottom:4px; font-weight:500; text-align:left; padding-left:16px;">2. Align ROI with meter digits and apply calibration</div>
+                <div style="font-size:10px; color:#64748b; margin-bottom:8px; text-align:left; padding-left:28px;">Match the selector edges tightly to the digit borders</div>
+                <div id="calib-hint-svg" style="display:flex; justify-content:center;"></div>
+            </div>
         </div>
         <!-- Coordinates overlay (absolute, no layout impact) -->
         <div id="coords-picker" style="display:none; position:absolute; bottom:0; left:0; right:0; z-index:6; padding:20px 12px 16px; text-align:center; background:linear-gradient(transparent, rgba(0,0,0,0.85) 30%);">
@@ -67,11 +77,13 @@
         <div id="confirm-picker" style="display:none; position:absolute; bottom:0; left:0; right:0; z-index:6; padding:20px 0 16px; text-align:center; background:linear-gradient(transparent, rgba(0,0,0,0.85) 30%);">
             <div style="font-size:13px; color:#38bdf8; margin-bottom:14px; font-weight:500;">Apply calibration to device?</div>
             <div style="font-size:11px; color:#64748b; margin-bottom:16px;">This will update the camera ROI settings</div>
-            <div style="display:flex; justify-content:center; gap:16px;">
+            <div style="display:flex; justify-content:center; gap:12px; align-items:center;">
+                <button id="confirm-help" onclick="showCalibHintFromConfirm()" style="width:36px;height:36px;border-radius:50%;border:1.5px solid rgba(56,189,248,0.3);background:rgba(56,189,248,0.08);color:#38bdf8;font-size:16px;font-weight:700;cursor:pointer;touch-action:manipulation;-webkit-tap-highlight-color:transparent;display:flex;align-items:center;justify-content:center;">?</button>
                 <button id="confirm-no" style="width:100px;height:36px;border-radius:6px;border:2px solid rgba(239,68,68,0.3);background:rgba(239,68,68,0.08);color:#ef4444;font-size:14px;font-weight:600;cursor:pointer;">Cancel</button>
                 <button id="confirm-yes" style="width:100px;height:36px;border-radius:6px;border:2px solid #22c55e;background:rgba(34,197,94,0.15);color:#22c55e;font-size:14px;font-weight:700;cursor:pointer;">Confirm</button>
             </div>
         </div>
+        <!-- Calibration positioning hint (shown on first rect move) -->
         <div id="connect-screen">
             <!-- Phase 1: Choose connection method -->
             <div id="connect-chooser">
@@ -142,45 +154,216 @@
             </div>
 
             <!-- Phase 2: BLE setup progress (shown after clicking Connect via Bluetooth) -->
-            <div id="setup-panel" style="display:none; width:100%; max-width:500px; padding:0 20px; display:none; flex-direction:column; height:100%;">
+            <div id="setup-panel" style="display:none; width:100%; max-width:500px; padding:0 20px; flex-direction:column; height:100%;">
 
-                <!-- Status header with animated icon -->
-                <div style="text-align:center; padding:24px 0 16px;">
-                    <div id="setup-anim" style="font-size:32px; line-height:1; margin-bottom:12px; font-family:'SF Mono',Monaco,monospace; color:#38bdf8;">◉</div>
-                    <div id="setup-title" style="font-size:18px; font-weight:700; color:#e2e8f0;">Connecting to Device</div>
-                    <div id="setup-instruction" style="font-size:13px; color:#94a3b8; margin-top:6px;">Reset the device and wait...</div>
+                <style>
+                    /* ── Setup panel: Apple-style animated ring ── */
+                    .setup-ring-wrap {
+                        position:relative; width:72px; height:72px; margin:0 auto 16px;
+                    }
+                    .setup-ring {
+                        width:72px; height:72px; border-radius:50%;
+                        border:2.5px solid rgba(56,189,248,0.12);
+                        position:relative;
+                    }
+                    .setup-ring::before {
+                        content:''; position:absolute; inset:-2.5px; border-radius:50%;
+                        border:2.5px solid transparent; border-top-color:#38bdf8;
+                        animation:setup-spin 1.2s linear infinite;
+                    }
+                    .setup-ring[data-state="connected"]::before { border-top-color:#22c55e; animation:none; border-color:#22c55e; }
+                    .setup-ring[data-state="streaming"]::before { border-top-color:#22c55e; animation:none; border-color:#22c55e; }
+                    .setup-ring[data-state="error"]::before { border-top-color:#ef4444; animation:none; border-color:rgba(239,68,68,0.3); }
+                    .setup-ring[data-state="ended"]::before { border-top-color:#64748b; animation:none; border-color:rgba(100,116,139,0.3); }
+                    @keyframes setup-spin { to { transform:rotate(360deg); } }
+
+                    .setup-ring-icon {
+                        position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
+                        color:#38bdf8; transition:color 0.4s, opacity 0.4s;
+                    }
+                    .setup-ring[data-state="connected"] .setup-ring-icon,
+                    .setup-ring[data-state="streaming"] .setup-ring-icon { color:#22c55e; }
+                    .setup-ring[data-state="error"] .setup-ring-icon { color:#ef4444; }
+                    .setup-ring[data-state="ended"] .setup-ring-icon { color:#64748b; }
+
+                    #setup-title {
+                        font-size:17px; font-weight:700; color:#e2e8f0; text-align:center;
+                        transition:color 0.3s;
+                    }
+                    #setup-instruction {
+                        font-size:12px; color:#64748b; margin-top:6px; text-align:center;
+                        transition:color 0.3s;
+                    }
+
+                    /* ── Steps: refined checklist ── */
+                    #setup-steps {
+                        margin:20px 0 16px; padding:0 4px;
+                    }
+                    .setup-step {
+                        display:flex; align-items:center; gap:12px;
+                        padding:9px 0; font-size:13px; color:#334155;
+                        border-bottom:1px solid rgba(51,65,85,0.25);
+                        transition:color 0.35s, opacity 0.35s;
+                    }
+                    .setup-step:last-child { border-bottom:none; }
+                    .setup-step .step-icon {
+                        width:22px; height:22px; border-radius:50%; font-size:0;
+                        display:flex; align-items:center; justify-content:center;
+                        flex-shrink:0; transition:all 0.35s;
+                        border:1.5px solid #1e293b; background:transparent;
+                    }
+                    .setup-step.active { color:#e2e8f0; }
+                    .setup-step.active .step-icon {
+                        border-color:#38bdf8; background:rgba(56,189,248,0.1);
+                        box-shadow:0 0 8px rgba(56,189,248,0.2);
+                    }
+                    .setup-step.active .step-icon::after {
+                        content:''; width:6px; height:6px; border-radius:50%;
+                        background:#38bdf8; animation:step-pulse 1.4s ease-in-out infinite;
+                    }
+                    .setup-step.done { color:#94a3b8; }
+                    .setup-step.done .step-icon {
+                        border-color:#22c55e; background:rgba(34,197,94,0.12);
+                    }
+                    .setup-step.done .step-icon::after {
+                        content:''; display:block; width:10px; height:10px;
+                        /* CSS checkmark */
+                        background:none;
+                    }
+                    /* SVG checkmark injected via JS — fallback is the ✓ text */
+
+                    @keyframes step-pulse {
+                        0%,100% { opacity:0.4; transform:scale(0.8); }
+                        50% { opacity:1; transform:scale(1.1); }
+                    }
+                </style>
+
+                <!-- Status header with animated ring -->
+                <div style="text-align:center; padding:28px 0 8px;">
+                    <div class="setup-ring-wrap">
+                        <div class="setup-ring" id="setup-ring" data-state="waiting">
+                            <div class="setup-ring-icon" id="setup-ring-icon">
+                                <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                                    <path d="M6.5 6.5c3-3 8-3 11 0s3 8 0 11-8 3-11 0"/>
+                                    <path d="M6.5 6.5L3 3"/>
+                                    <path d="M6.5 6.5V3"/>
+                                    <path d="M6.5 6.5H3"/>
+                                </svg>
+                            </div>
+                        </div>
+                    </div>
+                    <div id="setup-title">Connecting to Device</div>
+                    <div id="setup-instruction">Reset the device and wait...</div>
                 </div>
 
                 <!-- Step checklist -->
-                <div id="setup-steps" style="margin-bottom:16px;">
+                <div id="setup-steps">
                     <div class="setup-step" id="step-ble">
-                        <span class="step-icon">○</span>
-                        <span class="step-text">BLE paired</span>
+                        <span class="step-icon"></span>
+                        <span class="step-text">BLE paired successfully</span>
                     </div>
                     <div class="setup-step" id="step-reconnect">
-                        <span class="step-icon">○</span>
-                        <span class="step-text">GATT connection</span>
+                        <span class="step-icon"></span>
+                        <span class="step-text">GATT connection established</span>
                     </div>
                     <div class="setup-step" id="step-firmware">
-                        <span class="step-icon">○</span>
-                        <span class="step-text">Firmware ready</span>
+                        <span class="step-icon"></span>
+                        <span class="step-text">Firmware boot sequence</span>
                     </div>
                     <div class="setup-step" id="step-install">
-                        <span class="step-icon">○</span>
-                        <span class="step-text">Calibration mode</span>
+                        <span class="step-icon"></span>
+                        <span class="step-text">Calibration mode active</span>
                     </div>
                     <div class="setup-step" id="step-camera-init">
-                        <span class="step-icon">○</span>
+                        <span class="step-icon"></span>
                         <span class="step-text">Camera powering on</span>
                     </div>
                     <div class="setup-step" id="step-camera">
-                        <span class="step-icon">○</span>
+                        <span class="step-icon"></span>
                         <span class="step-text">Camera streaming</span>
+                    </div>
+                </div>
+
+                <!-- Reconnect hint card (shown after repeated GATT failures) -->
+                <div id="reconnect-hint" style="display:none; position:absolute; inset:0; z-index:20; background:rgba(15,23,42,0.6); backdrop-filter:blur(4px); -webkit-backdrop-filter:blur(4px); flex-direction:column; align-items:center; justify-content:center;">
+                    <div style="width:70%; max-width:280px; background:var(--bg); border:1px solid var(--border); border-radius:16px; padding:28px 20px 24px; display:flex; flex-direction:column; align-items:center; box-shadow:0 12px 40px rgba(0,0,0,0.6);">
+                        <div style="display:flex; justify-content:center; margin-bottom:18px;">
+                            <svg width="70" height="170" viewBox="0 0 140 340" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Press RESET on the device">
+                                <style>
+                                    .dv2{stroke:var(--border);stroke-width:1.5;fill:none;stroke-linecap:round;stroke-linejoin:round}
+                                    .dt2{stroke:var(--muted);stroke-width:.75;fill:none;opacity:.5;stroke-linecap:round;stroke-linejoin:round}
+                                    #reset-btn-hint{stroke:var(--danger);stroke-width:1.2;fill:rgba(239,68,68,.18);transform-box:fill-box;transform-origin:center;animation:rBh 1.2s ease-in-out infinite}
+                                    .rph{stroke:var(--danger);stroke-width:1;fill:none;opacity:0;transform-box:fill-box;transform-origin:center;animation:rPh 1.2s ease-out infinite}
+                                    .pih{stroke:var(--danger);stroke-width:1;fill:none;opacity:.75;stroke-linecap:round;animation:pIh 1.2s ease-in-out infinite}
+                                    .rlh{fill:var(--danger);opacity:.9;font-family:-apple-system,sans-serif;font-size:8px;font-weight:600;letter-spacing:.5px}
+                                    @keyframes rBh{0%,100%{opacity:.6;transform:scale(1)}50%{opacity:1;transform:scale(1.1)}}
+                                    @keyframes rPh{0%{opacity:.5;transform:scale(.8)}70%,100%{opacity:0;transform:scale(2)}}
+                                    @keyframes pIh{0%,100%{opacity:.3;transform:translateY(-1px)}50%{opacity:.9;transform:translateY(2px)}}
+                                </style>
+                                <rect class="dv2" x="64" y="4" width="12" height="100" rx="6" ry="6"/>
+                                <line class="dt2" x1="64" y1="25" x2="76" y2="25"/>
+                                <line class="dt2" x1="64" y1="45" x2="76" y2="45"/>
+                                <line class="dt2" x1="64" y1="65" x2="76" y2="65"/>
+                                <rect class="dv2" x="58" y="100" width="24" height="12" rx="4" ry="4"/>
+                                <rect class="dv2" x="20" y="112" width="100" height="168" rx="12" ry="12"/>
+                                <circle class="dv2" cx="34" cy="126" r="5"/><circle class="dt2" cx="34" cy="126" r="1.5"/>
+                                <circle class="dv2" cx="106" cy="126" r="5"/><circle class="dt2" cx="106" cy="126" r="1.5"/>
+                                <circle class="dv2" cx="34" cy="266" r="5"/><circle class="dt2" cx="34" cy="266" r="1.5"/>
+                                <circle class="dv2" cx="106" cy="266" r="5"/><circle class="dt2" cx="106" cy="266" r="1.5"/>
+                                <rect class="dt2" x="30" y="134" width="80" height="138" rx="4" ry="4"/>
+                                <circle class="rph" cx="70" cy="178" r="7"/>
+                                <circle id="reset-btn-hint" cx="70" cy="178" r="7"/>
+                                <path class="pih" d="M70 160V168"/><path class="pih" d="M66 165L70 169L74 165"/>
+                                <text class="rlh" x="82" y="181">RST</text>
+                                <circle class="dv2" cx="70" cy="203" r="3" stroke="var(--accent)" opacity=".5"/>
+                                <rect class="dv2" x="45" y="280" width="50" height="28" rx="4" ry="4"/>
+                                <line class="dv2" x1="55" y1="280" x2="55" y2="308"/>
+                                <line class="dv2" x1="85" y1="280" x2="85" y2="308"/>
+                                <circle class="dt2" cx="70" cy="294" r="4"/>
+                                <path class="dv2" d="M20 180H14C11 180 9 178 9 175C9 172 11 170 14 170H20"/>
+                                <path class="dv2" d="M120 180H126C129 180 131 178 131 175C131 172 129 170 126 170H120"/>
+                            </svg>
+                        </div>
+                        <div style="font-size:15px; font-weight:700; color:var(--text); margin-bottom:6px;">Connection lost</div>
+                        <div style="font-size:12px; color:var(--text2); line-height:1.5; text-align:center;">Press the <span style="color:var(--danger); font-weight:600;">RESET</span> button<br>on the device</div>
                     </div>
                 </div>
 
                 <!-- Bottom actions (back to main, etc.) -->
                 <div id="setup-bottom-actions" style="padding:12px 0; display:none;"></div>
+            </div>
+
+            <!-- Skeleton transition (shown briefly before camera UI) -->
+            <div id="skeleton-transition" style="display:none; width:100%; height:100%; flex-direction:column;">
+                <style>
+                    @keyframes skel-shimmer {
+                        0% { background-position: -200% 0; }
+                        100% { background-position: 200% 0; }
+                    }
+                    .skel-bar {
+                        border-radius: 6px;
+                        background: linear-gradient(90deg, var(--elevated) 25%, rgba(71,85,105,0.4) 50%, var(--elevated) 75%);
+                        background-size: 200% 100%;
+                        animation: skel-shimmer 1.5s ease-in-out infinite;
+                    }
+                </style>
+                <!-- Fake camera area -->
+                <div style="flex:1; display:flex; align-items:center; justify-content:center; padding:12px;">
+                    <div class="skel-bar" style="width:100%; height:100%; border-radius:8px;"></div>
+                </div>
+                <!-- Fake bottom controls -->
+                <div style="padding:8px 12px 4px;">
+                    <div style="display:flex; gap:6px; height:44px;">
+                        <div class="skel-bar" style="flex:1;"></div>
+                        <div class="skel-bar" style="flex:1;"></div>
+                    </div>
+                </div>
+                <!-- Fake mode selector tabs -->
+                <div style="display:flex; border-top:1px solid var(--border); padding:10px 0; padding-bottom:env(safe-area-inset-bottom, 0px);">
+                    <div style="flex:1; display:flex; justify-content:center;"><div class="skel-bar" style="width:22px; height:22px; border-radius:50%;"></div></div>
+                    <div style="flex:1; display:flex; justify-content:center;"><div class="skel-bar" style="width:22px; height:22px; border-radius:50%;"></div></div>
+                    <div style="flex:1; display:flex; justify-content:center;"><div class="skel-bar" style="width:22px; height:22px; border-radius:50%;"></div></div>
+                </div>
             </div>
         </div>
     </main>
@@ -202,9 +385,7 @@
             </div>
             <div id="calib-controls" style="display:flex; gap:6px; align-items:stretch; height:44px;">
                 <button id="btn-digit-picker" onclick="cycleDigits(event)" style="flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; padding:4px 0; background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.1); border-radius:8px; cursor:pointer; touch-action:manipulation; -webkit-tap-highlight-color:transparent; color:#94a3b8;">
-                    <span id="digit-boxes" style="display:none;">▪▪▪▪▪▪</span>
-                    <span style="font-size:13px; font-weight:500; line-height:1.2;">Select Number</span>
-                    <span id="digit-label" style="font-size:13px; font-weight:500; line-height:1.2;">of Digits</span>
+                    <span id="digit-btn-label" style="font-size:13px; font-weight:500; line-height:1.2;">6 Digits</span>
                 </button>
                 <button id="btn-coords-picker" onclick="toggleCoordsPicker(event)" style="flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; padding:4px 0; background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.1); border-radius:8px; cursor:pointer; touch-action:manipulation; -webkit-tap-highlight-color:transparent; color:#94a3b8;">
                     <span style="font-size:13px; font-weight:500; line-height:1.2;">View</span>

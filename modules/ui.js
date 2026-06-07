@@ -101,7 +101,8 @@ export function switchMode(mode) {
     // Exit calibrate if leaving that mode
     if (prev === 'calibrate' && _exitCalibMode) {
         _exitCalibMode();
-        /* modeToggle removed — Full/ROI now in Installation panel */
+        if (typeof window.hideCalibHint === 'function') window.hideCalibHint();
+        if (typeof window.hideOverlayPickers === 'function') window.hideOverlayPickers();
     }
 
     state.activeMode = mode;

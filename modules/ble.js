@@ -13,7 +13,7 @@
 import { state } from './state.js';
 import { dom, log, syncImageModeFromFrame } from './ui.js';
 import { findMarker, readU32LE } from './helpers.js';
-import { JPEG_SOI, JPEG_EOI, AI_HEADER, AI_RESULT_OFFSET, AI_RESULT_DATA_SIZE } from './constants.js';
+import { JPEG_SOI, JPEG_EOI, AI_HEADER, AI_RESULT_OFFSET, AI_RESULT_DATA_SIZE, SETUP_STEPS, SETUP_ERRORS } from './constants.js';
 
 /* BT24 typically uses FFE0/FFE1 for transparent UART */
 const BLE_SERVICE_UUID = 0xFFE0;
@@ -37,22 +37,90 @@ let gattDisconnected = false;
 /* Known BT24 passwords — tried in order on reconnect */
 const BT24_PASSWORDS = ['123456', '000000', '0000'];
 
-/* Auto-reconnect on ANY disconnect (v4 approach — simple, always on) */
+/* ── Reconnect hint (card overlay) ── */
+
+function showReconnectHint() {
+    const hint = document.getElementById('reconnect-hint');
+    if (hint) hint.style.display = 'flex';
+}
+
+function hideReconnectHint() {
+    const hint = document.getElementById('reconnect-hint');
+    if (hint) hint.style.display = 'none';
+}
+
+const MAX_RECONNECT_ATTEMPTS = 15;
+
+/* Errors that mean the device is gone — no point retrying */
+const FATAL_ERRORS = [
+    'no longer in range',
+    'removed',
+    'not found',
+];
+
+/* Single place that evaluates reconnect state and shows/hides hint */
+function onReconnectFailed(reason) {
+    reconnectAttempts++;
+    log('GATT reconnect failed #' + reconnectAttempts + (reason ? ': ' + reason : ''));
+    setStep('step-reconnect', 'active');
+
+    const isFatal = reason && FATAL_ERRORS.some(e => reason.toLowerCase().includes(e));
+
+    if (isFatal || reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
+        log('Connection lost — device unreachable');
+        setTitle('Device Lost');
+        setAnim('error');
+        setInstruction(isFatal ? 'Device out of range' : 'Too many failed attempts');
+        showReconnectHint();
+        /* Stop retrying — clear bleMode so the retry chain stops */
+        state.bleMode = false;
+        state.bleCalibMode = false;
+        return;
+    }
+
+    if (reconnectAttempts >= 4) {
+        showReconnectHint();
+    }
+}
+
+function onReconnectSuccess() {
+    reconnectAttempts = 0;
+    gattDisconnected = false;
+    hideReconnectHint();
+    log('GATT connected');
+    /* Don't mark step-reconnect done yet — wait for actual device data */
+    setStep('step-reconnect', 'active');
+}
+
+/* ── Auto-reconnect on ANY disconnect (v4 approach — simple, always on) ── */
+
 function onGattDisconnected() {
     gattDisconnected = true;
     log('GATT disconnected — reconnecting in 1s...');
     bleRxChar = null;
     bleTxChar = null;
     if (state.bleMode || state.bleCalibMode) {
+        applyStep('step-reconnect', 'active', SETUP_STEPS[1].onActive);
         setTimeout(() => gattConnect(), 1000);
     }
 }
 
+const GATT_CONNECT_TIMEOUT = 8000;
+
+function withTimeout(promise, ms) {
+    return Promise.race([
+        promise,
+        new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), ms)),
+    ]);
+}
+
 async function gattConnect() {
-    if (!bleDevice) return false;
+    if (!bleDevice) { log('gattConnect: no device'); return false; }
     if (bleRxChar) return true;
+    if (!(state.bleMode || state.bleCalibMode)) return false;
+    log('GATT reconnecting...');
     try {
-        const server = await bleDevice.gatt.connect();
+        const server = await withTimeout(bleDevice.gatt.connect(), GATT_CONNECT_TIMEOUT);
         if (bleRxChar) return true; /* another concurrent call already finished */
         const service = await server.getPrimaryService(BLE_SERVICE_UUID);
         const char = await service.getCharacteristic(BLE_CHAR_UUID);
@@ -60,17 +128,16 @@ async function gattConnect() {
         char.addEventListener('characteristicvaluechanged', onBleData);
         bleRxChar = char;
         bleTxChar = char;
-        gattDisconnected = false;
-        reconnectAttempts = 0;
-        log('GATT connected');
-        setStep('step-reconnect', 'active');
-        setTitle('Device Connected');
-        setInstruction('Waiting for firmware...');
+        onReconnectSuccess();
         return true;
     } catch (e) {
-        log('GATT connect failed: ' + e.message);
         bleRxChar = null;
         bleTxChar = null;
+        onReconnectFailed(e.message);
+        /* Keep retrying unless onReconnectFailed stopped the session */
+        if (state.bleMode || state.bleCalibMode) {
+            setTimeout(() => gattConnect(), 2000);
+        }
         return false;
     }
 }
@@ -80,14 +147,15 @@ function setStep(stepId, status) {
     const el = document.getElementById(stepId);
     if (!el) return;
     el.classList.remove('active', 'done');
+    const icon = el.querySelector('.step-icon');
     if (status === 'active') {
         el.classList.add('active');
-        el.querySelector('.step-icon').textContent = '●';
+        icon.innerHTML = '';  /* CSS ::after creates the pulsing dot */
     } else if (status === 'done') {
         el.classList.add('done');
-        el.querySelector('.step-icon').textContent = '✓';
+        icon.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#22c55e" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>';
     } else {
-        el.querySelector('.step-icon').textContent = '○';
+        icon.innerHTML = '';
     }
 }
 
@@ -96,57 +164,58 @@ function setTitle(text) {
     if (el) el.textContent = text;
 }
 
-/* Animated icon states */
-let animInterval = null;
+/* Animated ring states — drives the CSS ring + inner icon */
 function setAnim(mode) {
-    if (animInterval) { clearInterval(animInterval); animInterval = null; }
-    const el = document.getElementById('setup-anim');
-    if (!el) return;
-    el.style.fontSize = '32px';
-    el.style.lineHeight = '1';
-    el.style.fontFamily = "'SF Mono',Monaco,monospace";
+    const ring = document.getElementById('setup-ring');
+    const icon = document.getElementById('setup-ring-icon');
+    if (!ring || !icon) return;
+
+    ring.setAttribute('data-state', mode || 'waiting');
+
+    const svgAttrs = 'width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"';
+
     if (mode === 'waiting') {
-        /* Apple-style loading dots */
-        el.style.fontSize = '24px';
-        el.style.letterSpacing = '8px';
-        el.style.color = '#38bdf8';
-        el.style.whiteSpace = 'normal';
-        el.innerHTML = '<span class="dot">●</span><span class="dot">●</span><span class="dot">●</span>';
-        /* Inject animation style if not present */
-        if (!document.getElementById('dot-anim-style')) {
-            const style = document.createElement('style');
-            style.id = 'dot-anim-style';
-            style.textContent = '@keyframes dot-pulse{0%,80%,100%{opacity:0.15;transform:scale(0.8)}40%{opacity:1;transform:scale(1)}}.dot{display:inline-block;animation:dot-pulse 1.4s ease-in-out infinite}.dot:nth-child(2){animation-delay:0.2s}.dot:nth-child(3){animation-delay:0.4s}';
-            document.head.appendChild(style);
-        }
-    } else {
-        el.style.whiteSpace = 'normal';
-        el.style.fontSize = '32px';
-        el.style.fontFamily = "'SF Mono',Monaco,monospace";
-        el.innerHTML = '';
-        if (mode === 'connected') {
-            el.textContent = '●';
-            el.style.color = '#22c55e';
-            el.style.animation = 'none';
-        } else if (mode === 'streaming') {
-            el.textContent = '●';
-            el.style.color = '#22c55e';
-            el.style.animation = 'none';
-        } else if (mode === 'ended') {
-            el.textContent = '○';
-            el.style.color = '#64748b';
-            el.style.animation = 'none';
-        } else if (mode === 'error') {
-            el.textContent = '✕';
-            el.style.color = '#ef4444';
-            el.style.animation = 'none';
-        }
+        /* Spinning ring + retry icon */
+        icon.innerHTML = `<svg ${svgAttrs}><path d="M6.5 6.5c3-3 8-3 11 0s3 8 0 11-8 3-11 0"/><path d="M6.5 6.5L3 3"/><path d="M6.5 6.5V3"/><path d="M6.5 6.5H3"/></svg>`;
+    } else if (mode === 'connected') {
+        /* Solid checkmark */
+        icon.innerHTML = `<svg ${svgAttrs}><path d="M20 6L9 17l-5-5"/></svg>`;
+    } else if (mode === 'streaming') {
+        /* Wifi/signal icon */
+        icon.innerHTML = `<svg ${svgAttrs}><path d="M12 20h.01"/><path d="M8.5 16.5a5 5 0 0 1 7 0"/><path d="M5 12.5a10 10 0 0 1 14 0"/></svg>`;
+    } else if (mode === 'error') {
+        /* X icon */
+        icon.innerHTML = `<svg ${svgAttrs} stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>`;
+    } else if (mode === 'ended') {
+        /* Power off icon */
+        icon.innerHTML = `<svg ${svgAttrs}><path d="M18.36 6.64a9 9 0 1 1-12.73 0"/><line x1="12" y1="2" x2="12" y2="12"/></svg>`;
     }
 }
 
 function setInstruction(text) {
     const el = document.getElementById('setup-instruction');
     if (el) el.textContent = text;
+}
+
+/* Apply step state + update header from SETUP_STEPS config.
+ * When marking a step 'done', ensure all prior steps are also 'done'
+ * so we never have a completed step with an incomplete one above it. */
+function applyStep(stepId, status, config) {
+    if (status === 'done') {
+        const idx = SETUP_STEPS.findIndex(s => s.id === stepId);
+        for (let i = 0; i < idx; i++) {
+            const el = document.getElementById(SETUP_STEPS[i].id);
+            if (el && !el.classList.contains('done')) {
+                setStep(SETUP_STEPS[i].id, 'done');
+            }
+        }
+    }
+    setStep(stepId, status);
+    if (config) {
+        if (config.title) setTitle(config.title);
+        if (config.instruction) setInstruction(config.instruction);
+        if (config.anim) setAnim(config.anim);
+    }
 }
 
 /* ── Setup GATT connection: discover service, subscribe to notifications ── */
@@ -204,13 +273,6 @@ let reconnectAttempts = 0;
 async function bleSend(cmd) {
     /* v4: reconnect if disconnected */
     if (bleDevice && !bleDevice.gatt.connected) {
-        reconnectAttempts++;
-        if (reconnectAttempts === 1) log('Reconnecting...');
-        if (reconnectAttempts === 4) {
-            setTitle('Connection Lost');
-            setInstruction('Press RESET on the device again');
-            setAnim('waiting');
-        }
         if (!await gattConnect()) return;
     }
     if (!bleRxChar) return;
@@ -240,8 +302,10 @@ async function bleWriteRaw(char, data) {
 /* ── Handle incoming BLE data (notifications) ── */
 let totalBleBytes = 0;
 let notifyCount = 0;
-let firmwareReady = false;
-let installAcked = false;
+let firstNotification = false;  /* any BLE data received = device alive */
+let firmwareBannerSeen = false; /* "AIS01-CB Custom Firmware" seen */
+let firmwareReady = false;      /* "AT command window" seen */
+let installAcked = false;       /* "Entering installation mode" seen */
 let bootloaderSeen = false;
 let dutyCycleStarted = false;
 let textLineBuf = '';
@@ -261,6 +325,14 @@ function onBleData(event) {
     const value = new Uint8Array(event.target.value.buffer);
     totalBleBytes += value.length;
     notifyCount++;
+
+    /* First notification = device is alive, GATT is stable */
+    if (!firstNotification) {
+        firstNotification = true;
+        applyStep('step-reconnect', 'done', SETUP_STEPS[1].onDone);
+        hideReconnectHint();
+        log('Device responding');
+    }
 
     /* Periodic log so we know notifications are flowing */
     if (notifyCount % 100 === 0) {
@@ -292,40 +364,62 @@ function onBleData(event) {
                     || line.startsWith('AT+NAME') || line.startsWith('AT+RESET')
                     || line === 'AT';
                 if (!isNoise) log(`[device] ${line}`);
+
+                /* ── Step detection from SETUP_STEPS config ── */
+                for (const step of SETUP_STEPS) {
+                    if (!step.detect) continue;
+
+                    /* Check 'active' triggers */
+                    if (step.detect.active) {
+                        const match = step.detect.active.some(s => line.includes(s));
+                        if (match && !document.getElementById(step.id)?.classList.contains('done')) {
+                            applyStep(step.id, 'active', step.onActive);
+                        }
+                    }
+
+                    /* Check 'done' triggers */
+                    if (step.detect.done) {
+                        const match = step.detect.done.some(s => line.includes(s));
+                        if (match) {
+                            applyStep(step.id, 'done', step.onDone);
+
+                            /* Activate next step */
+                            const idx = SETUP_STEPS.indexOf(step);
+                            if (idx < SETUP_STEPS.length - 1) {
+                                const next = SETUP_STEPS[idx + 1];
+                                if (next.onActive) applyStep(next.id, 'active', next.onActive);
+                            }
+                        }
+                    }
+                }
+
+                /* Special: firmware ready → send AT+INSTALL */
                 if (line.includes('AT command window')) {
                     firmwareReady = true;
-                    setStep('step-reconnect', 'done');
-                    setStep('step-firmware', 'done');
-                    setStep('step-install', 'active');
-                    setTitle('Firmware Ready');
-                    setAnim('connected');
-                    setInstruction('Sending install command...');
                     if (!installAcked) {
                         log('Firmware ready — sending AT+INSTALL');
                         bleSend('AT+INSTALL').catch(() => {});
                     }
                 }
+
+                /* Special: install acknowledged */
                 if (line.includes('Entering installation mode') || line.includes('INSTALLATION MODE')) {
                     installAcked = true;
-                    setStep('step-install', 'done');
-                    setStep('step-camera-init', 'active');
-                    setTitle('Calibration Mode');
-                    setInstruction('Powering on camera...');
                 }
-                if (line.includes('[CAM] Power ON')) {
-                    setStep('step-camera-init', 'active');
-                    setInstruction('Camera initializing...');
-                }
-                if (line.includes('[CAM] Power ON complete')) {
-                    setStep('step-camera-init', 'done');
-                    setStep('step-camera', 'active');
-                    setInstruction('Waiting for first frame...');
-                }
+
+                /* Special: duty cycle = missed window */
                 if (line.includes('Window closed') || line.includes('duty cycle start') || line.includes('Duty cycle start')) {
                     dutyCycleStarted = true;
-                    setTitle('Missed Window');
-                    setAnim('error');
-                    setInstruction('Device started duty cycle — press RESET to try again');
+                }
+
+                /* ── Error detection from SETUP_ERRORS config ── */
+                for (const err of SETUP_ERRORS) {
+                    if (err.detect.some(s => line.includes(s))) {
+                        setTitle(err.title);
+                        setAnim(err.anim);
+                        setInstruction(err.instruction);
+                        if (err.showReconnectHint) showReconnectHint();
+                    }
                 }
             }
         }
@@ -445,17 +539,18 @@ export async function startBleSession() {
     state.running = true;
     state.bleMode = true;
     state.bleCalibMode = true;
+    firstNotification = false;
+    firmwareBannerSeen = false;
     firmwareReady = false;
     installAcked = false;
     dutyCycleStarted = false;
     textLineBuf = '';
     gattDisconnected = false;
+    reconnectAttempts = 0;
+    hideReconnectHint();
 
-    setStep('step-ble', 'done');
-    setTitle('Waiting for Device');
-    setAnim('waiting');
-    setInstruction('Press RESET on the device');
-    setStep('step-reconnect', 'active');
+    applyStep('step-ble', 'done', SETUP_STEPS[0].onDone);
+    applyStep('step-reconnect', 'active', SETUP_STEPS[1].onActive);
     dom.stats.textContent = 'Waiting for device...';
 
     /* v4 approach: AT ping → AT+INSTALL when firmware detected. Stops on ACK or frames. */
@@ -509,12 +604,24 @@ export async function startBleSession() {
     if (installInterval) { clearInterval(installInterval); installInterval = null; }
 
     if (frameCount > 0) {
-        setStep('step-install', 'done');
-        setStep('step-camera', 'done');
-        setAnim('streaming');
-        setTitle('Camera Active');
-        setInstruction('Streaming');
+        /* Ensure all prior steps are marked done */
+        for (const step of SETUP_STEPS) {
+            setStep(step.id, 'done');
+        }
+        hideReconnectHint();
+        const lastStep = SETUP_STEPS[SETUP_STEPS.length - 1];
+        applyStep(lastStep.id, 'done', lastStep.onDone);
         log('Camera streaming');
+
+        /* ── Skeleton transition: setup panel → shimmer → camera UI ── */
+        const setupPanel = document.getElementById('setup-panel');
+        const skeleton = document.getElementById('skeleton-transition');
+        if (setupPanel) setupPanel.style.display = 'none';
+        if (skeleton) skeleton.style.display = 'flex';
+
+        await new Promise(r => setTimeout(r, 2500));
+
+        if (skeleton) skeleton.style.display = 'none';
         dom.connectScreen.style.display = 'none';
         dom.cam.style.display = 'block';
         dom.modeArea.classList.add('visible');
@@ -566,7 +673,7 @@ export async function stopBleSession() {
         panel.style.display = 'flex';
         setTitle('Session Ended');
         setAnim('ended');
-        setInstruction('Device disconnected');
+        setInstruction('Disconnected');
 
         const bottomActions = document.getElementById('setup-bottom-actions');
         if (bottomActions) {

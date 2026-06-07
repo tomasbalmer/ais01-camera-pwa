@@ -20,5 +20,6 @@ export const state = {
     calibDigits: 6,
     calibInterval: null,
     calibRectTouched: false,
+    calibFirstEntry: true,    // true until user enters calibration mode once
 
 };

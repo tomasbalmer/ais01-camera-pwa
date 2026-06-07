@@ -6,33 +6,47 @@
  * Works with both mouse and touch (via pointer events).
  */
 
-const HANDLE_R = 4;       // handle radius (px) — visual
-const STEM_LEN = 36;      // stem length extending outward from rect
-const HIT_R = 20;         // hit-test radius (px) — touch-friendly (on stem tip)
+const CORNER_DOT_R = 4;   // corner coordinate dot radius (px)
+const DIGIT_DOT_R = 2;    // center dot in each digit cell
+const BRACKET_LEN = 18;   // bracket arm length (px)
+const BRACKET_GAP = 28;   // gap between rect edge and bracket (touch target)
+const HIT_R = 24;         // hit-test radius (px) — touch-friendly
 const ROT_OFFSET = 24;    // rotation handle distance above top edge
 const MIN_W = 30;
 const MIN_H = 20;
 const STYLE = {
     fill: 'rgba(56, 189, 248, 0.04)',
     stroke: 'rgba(56, 189, 248, 0.7)',
-    divider: 'rgba(56, 189, 248, 0.4)',
+    divider: 'rgba(56, 189, 248, 0.25)',
+    cornerDot: '#38bdf8',
+    cornerDotCenter: '#ffffff',
+    bracketStroke: 'rgba(56, 189, 248, 0.6)',
+    digitDot: 'rgba(56, 189, 248, 0.35)',
     handleFill: 'rgba(15, 23, 42, 0.9)',
     handleStroke: '#38bdf8',
-    rotLine: 'rgba(56, 189, 248, 0.6)',
+    rotLine: 'rgba(56, 189, 248, 0.4)',
 };
 
-// 8 handle positions relative to rect center + outward direction for stems
-const S = 0.707; // sin(45°) for diagonal normalization
-function localHandles(hw, hh) {
+// 4 corner handles — positioned outside the rect by BRACKET_GAP
+// Each corner has an outward direction for placing the bracket
+function cornerHandles(hw, hh) {
+    const g = BRACKET_GAP;
     return [
-        { x: -hw, y: -hh, dx: -S, dy: -S }, // 0 top-left
-        { x:   0, y: -hh, dx:  0, dy: -1 }, // 1 top-center
-        { x:  hw, y: -hh, dx:  S, dy: -S }, // 2 top-right
-        { x:  hw, y:   0, dx:  1, dy:  0 }, // 3 middle-right
-        { x:  hw, y:  hh, dx:  S, dy:  S }, // 4 bottom-right
-        { x:   0, y:  hh, dx:  0, dy:  1 }, // 5 bottom-center
-        { x: -hw, y:  hh, dx: -S, dy:  S }, // 6 bottom-left
-        { x: -hw, y:   0, dx: -1, dy:  0 }, // 7 middle-left
+        { x: -hw, y: -hh, ox: -hw - g, oy: -hh - g }, // 0 top-left
+        { x:  hw, y: -hh, ox:  hw + g, oy: -hh - g }, // 1 top-right
+        { x:  hw, y:  hh, ox:  hw + g, oy:  hh + g }, // 2 bottom-right
+        { x: -hw, y:  hh, ox: -hw - g, oy:  hh + g }, // 3 bottom-left
+    ];
+}
+
+// Edge midpoint handles — positioned outside the rect
+function edgeHandles(hw, hh) {
+    const g = BRACKET_GAP;
+    return [
+        { x:   0, y: -hh, ox:   0, oy: -hh - g }, // 0 top-center
+        { x:  hw, y:   0, ox:  hw + g, oy:   0 }, // 1 middle-right
+        { x:   0, y:  hh, ox:   0, oy:  hh + g }, // 2 bottom-center
+        { x: -hw, y:   0, ox: -hw - g, oy:   0 }, // 3 middle-left
     ];
 }
 
@@ -76,26 +90,56 @@ export function createCalibOverlay(canvas, onChange) {
     }
 
     // --- Hit testing ---
+    // Maps corner handles (0-3) and edge handles (4-7) to the original
+    // 8-handle index system used by HANDLE_EDGES for resize logic:
+    //   corners: TL=0, TR=2, BR=4, BL=6
+    //   edges:   TC=1, MR=3, BC=5, ML=7
+    const CORNER_TO_IDX = [0, 2, 4, 6];
+    const EDGE_TO_IDX = [1, 3, 5, 7];
 
     function hitTest(px, py) {
         const loc = toLocal(px, py);
         const hw = rect.w / 2, hh = rect.h / 2;
 
         // Rotation handle
-        const ry = -hh - ROT_OFFSET;
+        const ry = -hh - BRACKET_GAP - ROT_OFFSET;
         if (loc.x * loc.x + (loc.y - ry) * (loc.y - ry) < HIT_R * HIT_R) return 'rotate';
 
-        // Resize handles (hit-test on stem tip, not rect edge)
-        const handles = localHandles(hw, hh);
-        for (let i = 0; i < 8; i++) {
-            const tipX = handles[i].x + handles[i].dx * STEM_LEN;
-            const tipY = handles[i].y + handles[i].dy * STEM_LEN;
-            const dx = loc.x - tipX, dy = loc.y - tipY;
-            if (dx * dx + dy * dy < HIT_R * HIT_R) return i;
+        // Corner bracket handles — large hit area covering bracket + nearby zone
+        const CORNER_HIT_R = HIT_R + 10;
+        const corners = cornerHandles(hw, hh);
+        for (let i = 0; i < 4; i++) {
+            const dx = loc.x - corners[i].ox, dy = loc.y - corners[i].oy;
+            if (dx * dx + dy * dy < CORNER_HIT_R * CORNER_HIT_R) return CORNER_TO_IDX[i];
         }
 
-        // Move (inside rect)
-        if (Math.abs(loc.x) <= hw && Math.abs(loc.y) <= hh) return 'move';
+        // Edge midpoint handles
+        const edges = edgeHandles(hw, hh);
+        for (let i = 0; i < 4; i++) {
+            const dx = loc.x - edges[i].ox, dy = loc.y - edges[i].oy;
+            if (dx * dx + dy * dy < HIT_R * HIT_R) return EDGE_TO_IDX[i];
+        }
+
+        // Near a rect edge (within edge zone)? → find closest resize handle
+        // This prevents accidental 'move' when touching near the border
+        const edgeZone = 16;
+        const nearLeft = Math.abs(loc.x + hw) < edgeZone;
+        const nearRight = Math.abs(loc.x - hw) < edgeZone;
+        const nearTop = Math.abs(loc.y + hh) < edgeZone;
+        const nearBottom = Math.abs(loc.y - hh) < edgeZone;
+        if (nearLeft || nearRight || nearTop || nearBottom) {
+            // Find nearest corner or edge handle
+            let bestDist = Infinity, bestIdx = null;
+            for (let i = 0; i < 4; i++) {
+                const dx = loc.x - corners[i].x, dy = loc.y - corners[i].y;
+                const d = dx * dx + dy * dy;
+                if (d < bestDist) { bestDist = d; bestIdx = CORNER_TO_IDX[i]; }
+            }
+            return bestIdx;
+        }
+
+        // Move — must be clearly inside the rect
+        if (Math.abs(loc.x) < hw && Math.abs(loc.y) < hh) return 'move';
 
         return null;
     }
@@ -128,12 +172,13 @@ export function createCalibOverlay(canvas, onChange) {
         // Fill + border
         ctx.fillStyle = STYLE.fill;
         ctx.strokeStyle = STYLE.stroke;
-        ctx.lineWidth = 1;
+        ctx.lineWidth = 1.5;
         ctx.fillRect(-hw, -hh, rect.w, rect.h);
         ctx.strokeRect(-hw, -hh, rect.w, rect.h);
 
         // Digit dividers
         ctx.strokeStyle = STYLE.divider;
+        ctx.lineWidth = 1;
         const dw = rect.w / digits;
         for (let i = 1; i < digits; i++) {
             const lx = -hw + dw * i;
@@ -143,38 +188,122 @@ export function createCalibOverlay(canvas, onChange) {
             ctx.stroke();
         }
 
-        // Resize handles with stems extending outward
-        const handles = localHandles(hw, hh);
-        for (const h of handles) {
-            const tipX = h.x + h.dx * STEM_LEN;
-            const tipY = h.y + h.dy * STEM_LEN;
-            // Stem line
+        // Digit center dots
+        ctx.fillStyle = STYLE.digitDot;
+        for (let i = 0; i < digits; i++) {
+            const dcx = -hw + dw * i + dw / 2;
             ctx.beginPath();
-            ctx.moveTo(h.x, h.y);
-            ctx.lineTo(tipX, tipY);
-            ctx.strokeStyle = STYLE.rotLine;
-            ctx.lineWidth = 1;
-            ctx.stroke();
-            // Handle circle at tip
-            ctx.beginPath();
-            ctx.arc(tipX, tipY, HANDLE_R, 0, Math.PI * 2);
-            ctx.fillStyle = STYLE.handleFill;
+            ctx.arc(dcx, 0, DIGIT_DOT_R, 0, Math.PI * 2);
             ctx.fill();
-            ctx.strokeStyle = STYLE.handleStroke;
-            ctx.lineWidth = 1.5;
-            ctx.stroke();
         }
 
-        // Rotation handle + stem
-        const ry = -hh - ROT_OFFSET;
+        // 8 ROI calibration points (4 references × top + bottom)
+        // Reference positions match computeRoiCoords(): [0, 2, N-2, N] digit boundaries
+        const refPositions = digits === 4
+            ? [0, 0, 2, 4]
+            : [0, 2, digits - 2, digits];
+
+        for (let ref = 0; ref < 4; ref++) {
+            const frac = refPositions[ref] / digits;
+            const lx = -hw + frac * rect.w;
+
+            // Top point and bottom point for this reference
+            const pts = [[lx, -hh], [lx, hh]];
+            for (const [px, py] of pts) {
+                // Outer dot
+                ctx.beginPath();
+                ctx.arc(px, py, CORNER_DOT_R, 0, Math.PI * 2);
+                ctx.fillStyle = STYLE.cornerDot;
+                ctx.fill();
+                // Center bright point
+                ctx.beginPath();
+                ctx.arc(px, py, 1.5, 0, Math.PI * 2);
+                ctx.fillStyle = STYLE.cornerDotCenter;
+                ctx.fill();
+            }
+
+            // Vertical reference line connecting top and bottom points (subtle)
+            if (ref > 0 || digits !== 4) {
+                ctx.beginPath();
+                ctx.moveTo(lx, -hh);
+                ctx.lineTo(lx, hh);
+                ctx.strokeStyle = 'rgba(56, 189, 248, 0.15)';
+                ctx.lineWidth = 0.5;
+                ctx.stroke();
+            }
+        }
+
+        // Corner bracket handles (┌ ┐ └ ┘) — outside the rect
+        const g = BRACKET_GAP;
+        const bLen = BRACKET_LEN;
+        ctx.strokeStyle = STYLE.bracketStroke;
+        ctx.lineWidth = 2;
+        ctx.lineCap = 'round';
+
+        // TL bracket ┌
         ctx.beginPath();
-        ctx.moveTo(0, -hh);
+        ctx.moveTo(-hw - g, -hh - g + bLen);
+        ctx.lineTo(-hw - g, -hh - g);
+        ctx.lineTo(-hw - g + bLen, -hh - g);
+        ctx.stroke();
+
+        // TR bracket ┐
+        ctx.beginPath();
+        ctx.moveTo(hw + g - bLen, -hh - g);
+        ctx.lineTo(hw + g, -hh - g);
+        ctx.lineTo(hw + g, -hh - g + bLen);
+        ctx.stroke();
+
+        // BR bracket ┘
+        ctx.beginPath();
+        ctx.moveTo(hw + g, hh + g - bLen);
+        ctx.lineTo(hw + g, hh + g);
+        ctx.lineTo(hw + g - bLen, hh + g);
+        ctx.stroke();
+
+        // BL bracket └
+        ctx.beginPath();
+        ctx.moveTo(-hw - g + bLen, hh + g);
+        ctx.lineTo(-hw - g, hh + g);
+        ctx.lineTo(-hw - g, hh + g - bLen);
+        ctx.stroke();
+
+        // Edge midpoint handles (small tick marks outside rect)
+        const edges = edgeHandles(hw, hh);
+        ctx.strokeStyle = STYLE.bracketStroke;
+        ctx.lineWidth = 1.5;
+        const tickLen = 8;
+        // Top center — horizontal tick
+        ctx.beginPath();
+        ctx.moveTo(-tickLen, -hh - g);
+        ctx.lineTo(tickLen, -hh - g);
+        ctx.stroke();
+        // Bottom center — horizontal tick
+        ctx.beginPath();
+        ctx.moveTo(-tickLen, hh + g);
+        ctx.lineTo(tickLen, hh + g);
+        ctx.stroke();
+        // Middle right — vertical tick
+        ctx.beginPath();
+        ctx.moveTo(hw + g, -tickLen);
+        ctx.lineTo(hw + g, tickLen);
+        ctx.stroke();
+        // Middle left — vertical tick
+        ctx.beginPath();
+        ctx.moveTo(-hw - g, -tickLen);
+        ctx.lineTo(-hw - g, tickLen);
+        ctx.stroke();
+
+        // Rotation handle — small dot above top-center bracket
+        const ry = -hh - g - ROT_OFFSET;
+        ctx.beginPath();
+        ctx.moveTo(0, -hh - g);
         ctx.lineTo(0, ry);
         ctx.strokeStyle = STYLE.rotLine;
         ctx.lineWidth = 1;
         ctx.stroke();
         ctx.beginPath();
-        ctx.arc(0, ry, HANDLE_R, 0, Math.PI * 2);
+        ctx.arc(0, ry, 3, 0, Math.PI * 2);
         ctx.fillStyle = STYLE.handleFill;
         ctx.fill();
         ctx.strokeStyle = STYLE.handleStroke;
@@ -261,20 +390,20 @@ export function createCalibOverlay(canvas, onChange) {
         const r = -s.rot * Math.PI / 180;
         const cos = Math.cos(r), sin = Math.sin(r);
 
-        // Mouse in local (unrotated) space of the *original* rect
-        const dx = mx - sc.x, dy = my - sc.y;
-        const lx = dx * cos - dy * sin;
-        const ly = dx * sin + dy * cos;
+        // Delta from start position (relative drag — no snap to finger)
+        const dmx = mx - start.mx, dmy = my - start.my;
+        const dlx = dmx * cos - dmy * sin;
+        const dly = dmx * sin + dmy * cos;
 
         // Current edges in local space
         let left = -s.w / 2, right = s.w / 2;
         let top = -s.h / 2, bottom = s.h / 2;
 
         const edges = HANDLE_EDGES[idx];
-        if (edges[0]) left = Math.min(lx, right - MIN_W);
-        if (edges[2]) right = Math.max(lx, left + MIN_W);
-        if (edges[1]) top = Math.min(ly, bottom - MIN_H);
-        if (edges[3]) bottom = Math.max(ly, top + MIN_H);
+        if (edges[0]) left = Math.min(-s.w / 2 + dlx, right - MIN_W);
+        if (edges[2]) right = Math.max(s.w / 2 + dlx, left + MIN_W);
+        if (edges[1]) top = Math.min(-s.h / 2 + dly, bottom - MIN_H);
+        if (edges[3]) bottom = Math.max(s.h / 2 + dly, top + MIN_H);
 
         const nw = right - left;
         const nh = bottom - top;

@@ -140,3 +140,138 @@ export const VALIDATION = {
     EDGE_STRENGTH_MIN: 3,
     OVERLAY_DURATION_MS: 4000,
 };
+
+// ============================================================================
+// BLE Setup Steps — Device boot & calibration flow
+// ============================================================================
+// Single source of truth for the setup checklist shown during BLE connection.
+// Each step maps to a phase in the device boot sequence:
+//
+//   1. BLE pair (Web Bluetooth scan + GATT)
+//   2. Device connected (first BLE notification received = device alive)
+//   3. Firmware detected (MCU banner + AT command window)
+//   4. Calibration mode (AT+INSTALL acknowledged)
+//   5. Camera powering on (camera hardware init ~3s)
+//   6. Camera streaming (first JPEG frame received)
+//
+// `detect` lists the firmware log substrings that trigger each transition.
+// `onActive`/`onDone` define the header title + instruction at each phase.
+// ============================================================================
+
+export const SETUP_STEPS = [
+    {
+        id: 'step-ble',
+        label: 'BLE paired successfully',
+        onDone: {
+            title: 'Waiting for Device',
+            instruction: 'Press RESET on the device',
+            anim: 'waiting',
+        },
+    },
+    {
+        id: 'step-reconnect',
+        label: 'GATT connection established',
+        onActive: {
+            title: 'Establishing Connection',
+            instruction: 'Connecting to device...',
+            anim: 'waiting',
+        },
+        onDone: {
+            title: 'Device Connected',
+            instruction: 'Waiting for firmware...',
+        },
+        detect: null,  /* triggered by first BLE notification, not a log line */
+        errorHint: {
+            afterAttempts: 4,
+            message: 'Press RESET on the device',
+        },
+    },
+    {
+        id: 'step-firmware',
+        label: 'Firmware boot sequence',
+        onActive: {
+            title: 'Firmware Booting',
+            instruction: 'Waiting for firmware to start...',
+        },
+        onDone: {
+            title: 'Firmware Ready',
+            instruction: 'AT command window open',
+            anim: 'connected',
+        },
+        detect: {
+            active: ['AIS01-CB', 'Custom Firmware'],
+            done: ['AT command window'],
+        },
+    },
+    {
+        id: 'step-install',
+        label: 'Calibration mode active',
+        onActive: {
+            title: 'Starting Calibration',
+            instruction: 'Sending calibration command...',
+        },
+        onDone: {
+            title: 'Calibration Mode',
+            instruction: 'Powering on camera...',
+        },
+        detect: {
+            done: ['Entering installation mode', 'INSTALLATION MODE'],
+        },
+    },
+    {
+        id: 'step-camera-init',
+        label: 'Camera powering on',
+        onActive: {
+            title: 'Calibration Mode',
+            instruction: 'Camera initializing...',
+        },
+        onDone: {
+            title: 'Calibration Mode',
+            instruction: 'Waiting for first frame...',
+        },
+        detect: {
+            active: ['[CAM] Power ON'],
+            done: ['[CAM] Power ON complete'],
+        },
+    },
+    {
+        id: 'step-camera',
+        label: 'Camera streaming',
+        onActive: {
+            title: 'Calibration Mode',
+            instruction: 'Capturing first frame...',
+        },
+        onDone: {
+            title: 'Camera Active',
+            instruction: 'Streaming',
+            anim: 'streaming',
+        },
+        detect: {
+            active: ['Capturing first frame', 'Starting capture'],
+            done: null,  /* triggered by first JPEG frame, not a log line */
+        },
+    },
+];
+
+// Error conditions detected from device logs during setup
+export const SETUP_ERRORS = [
+    {
+        detect: ['Window closed', 'duty cycle start', 'Duty cycle start'],
+        title: 'Missed Window',
+        instruction: 'Device started duty cycle — press RESET to try again',
+        anim: 'error',
+        showReconnectHint: true,
+    },
+    {
+        detect: ['Camera probe not detected'],
+        title: 'Camera Error',
+        instruction: 'Camera probe not detected — check connection',
+        anim: 'error',
+    },
+    {
+        detect: ['JPEG timeout'],
+        title: 'Camera Error',
+        instruction: 'No image received — camera may need reset',
+        anim: 'error',
+    },
+];

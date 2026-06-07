@@ -71,10 +71,6 @@ function unlockCalibrate() {
     const btn = document.getElementById('btn-calibrate');
     if (btn) {
         btn.disabled = false;
-        btn.style.background = '#38bdf8';
-        btn.style.color = '#000';
-        btn.style.borderColor = '#38bdf8';
-        btn.style.fontWeight = '700';
     }
 }
 
@@ -172,17 +168,24 @@ export async function enterCalibMode() {
     const calibBtn = document.getElementById('btn-calibrate');
     if (calibBtn) {
         calibBtn.disabled = true;
-        calibBtn.style.background = 'rgba(255,255,255,0.03)';
-        calibBtn.style.color = '#94a3b8';
-        calibBtn.style.borderColor = 'rgba(255,255,255,0.1)';
-        calibBtn.style.fontWeight = '500';
     }
+    // Hide positioning hint (fresh start)
+    const calibHint = document.getElementById('calib-hint');
+    if (calibHint) calibHint.style.display = 'none';
 
     drawDimOverlay();
     updateCalibCoords();
     updateCalibReading();
     startCalibInterval();
     log('Calibration mode ON — image: ' + dom.cam.naturalWidth + 'x' + dom.cam.naturalHeight + ' — position rect over digits');
+
+    // First time entering calibration: auto-open digit picker
+    if (state.calibFirstEntry) {
+        state.calibFirstEntry = false;
+        setTimeout(() => {
+            if (typeof window.cycleDigits === 'function') window.cycleDigits(null);
+        }, 400);
+    }
 }
 
 export function exitCalibMode() {
