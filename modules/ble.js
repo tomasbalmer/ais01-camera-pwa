@@ -521,6 +521,10 @@ export async function startBleSession() {
         dom.modeSelector.classList.add('visible');
         const mt = document.getElementById('mode-title');
         if (mt) mt.style.display = 'block';
+        /* Initialize mode title */
+        state.activeMode = null;
+        const { switchMode } = await import('./ui.js');
+        switchMode('validate');
         dom.stats.textContent = 'Streaming';
     } else {
         log('No frames after 120s');

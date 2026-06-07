@@ -37,9 +37,17 @@
     <!-- Camera viewer (fills screen) -->
     <main id="viewer">
         <!-- Mode title (floating over viewer, top) -->
-        <div id="mode-title" style="display:none; position:absolute; top:0; left:0; right:0; z-index:5; text-align:center; pointer-events:none; padding:14px 0 20px; background:linear-gradient(rgba(0,0,0,0.7), transparent);">
-            <div id="mode-title-name" style="font-size:16px; font-weight:600; color:#38bdf8; display:flex; align-items:center; justify-content:center; gap:10px;">Installation Mode</div>
-            <div id="mode-title-desc" style="font-size:11px; color:#64748b; margin-top:6px;">Position the camera over the water meter display</div>
+        <style>
+            @keyframes ar-fade-in { from { opacity:0; transform:translateY(-4px); } to { opacity:1; transform:translateY(0); } }
+            .ar-glow { text-shadow: 0 0 12px rgba(56,189,248,0.4), 0 0 24px rgba(56,189,248,0.15); }
+            .ar-text { animation: ar-fade-in 0.4s ease-out; }
+            .ar-dim { text-shadow: 0 0 8px rgba(56,189,248,0.2); animation: ar-fade-in 0.5s ease-out; }
+            .ar-separator { background: linear-gradient(90deg, transparent, rgba(56,189,248,0.15), transparent); height:1px; margin:6px auto; width:60%; }
+        </style>
+        <div id="mode-title" style="display:none; position:absolute; top:0; left:0; right:0; z-index:5; text-align:center; pointer-events:none; padding:14px 16px 20px; background:linear-gradient(rgba(0,0,0,0.7), transparent);">
+            <div id="mode-title-name" style="font-size:14px; font-weight:500; color:rgba(56,189,248,0.6); letter-spacing:1.5px; text-transform:uppercase;" class="ar-glow ar-text"></div>
+            <div style="background:linear-gradient(90deg, transparent, rgba(56,189,248,0.12), transparent); height:1px; margin:10px auto 0; width:50%;"></div>
+            <div id="mode-title-desc" style="font-size:11px; color:rgba(56,189,248,0.5); margin-top:12px;" class="ar-dim"></div>
         </div>
         <img id="cam" />
         <canvas id="overlay-canvas"></canvas>
@@ -193,15 +201,9 @@
     <div id="mode-area">
         <!-- Installation panel -->
         <div id="panel-validate" class="mode-panel active">
-            <div style="display:flex; gap:6px; align-items:stretch; height:44px; padding:0 12px;">
-                <button class="seg-btn active" id="btnFullPanel" onclick="switchImageMode('FULL')" style="flex:1; display:flex; align-items:center; justify-content:center; gap:6px; padding:4px 0; background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.1); border-radius:8px; cursor:pointer; touch-action:manipulation;">
-                    <span style="font-size:14px; color:var(--accent);">▣</span>
-                    <span style="font-size:11px; color:var(--text2);">Full Image</span>
-                </button>
-                <button class="seg-btn" id="btnROIPanel" onclick="switchImageMode('ROI')" style="flex:1; display:flex; align-items:center; justify-content:center; gap:6px; padding:4px 0; background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.1); border-radius:8px; cursor:pointer; touch-action:manipulation;">
-                    <span style="font-size:14px; color:var(--accent);">⊡</span>
-                    <span style="font-size:11px; color:var(--text2);">ROI Image</span>
-                </button>
+            <div style="display:flex; gap:6px; align-items:stretch; height:44px;">
+                <button class="seg-btn active" id="btnFullPanel" onclick="switchImageMode('FULL')" style="flex:1; display:flex; align-items:center; justify-content:center; padding:4px 0; background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.1); border-radius:8px; cursor:pointer; touch-action:manipulation; font-size:13px; color:var(--text2);">Full Image</button>
+                <button class="seg-btn" id="btnROIPanel" onclick="switchImageMode('ROI')" style="flex:1; display:flex; align-items:center; justify-content:center; padding:4px 0; background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.1); border-radius:8px; cursor:pointer; touch-action:manipulation; font-size:13px; color:var(--text2);">ROI Image</button>
             </div>
         </div>
         <!-- Calibrate panel -->
@@ -211,17 +213,18 @@
                 <span id="calib-ai-value" style="font-size:28px;">--</span>
             </div>
             <div id="calib-controls" style="display:flex; gap:6px; align-items:stretch; height:44px;">
-                <button id="btn-digit-picker" onclick="cycleDigits(event)" style="flex:1; display:flex; align-items:center; justify-content:center; gap:6px; padding:4px 0; background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.1); border-radius:8px; color:var(--text); cursor:pointer; touch-action:manipulation; -webkit-tap-highlight-color:transparent;">
-                    <span id="digit-boxes" style="font-family:'SF Mono',Monaco,monospace; font-size:12px; letter-spacing:1px; color:var(--accent);">▪▪▪▪▪▪</span>
-                    <span id="digit-label" style="font-size:11px; color:var(--text2);">6 digits</span>
+                <button id="btn-digit-picker" onclick="cycleDigits(event)" style="flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; padding:4px 0; background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.1); border-radius:8px; cursor:pointer; touch-action:manipulation; -webkit-tap-highlight-color:transparent; color:#94a3b8;">
+                    <span id="digit-boxes" style="display:none;">▪▪▪▪▪▪</span>
+                    <span style="font-size:11px; font-weight:500; line-height:1.2;">Select Number</span>
+                    <span id="digit-label" style="font-size:11px; font-weight:500; line-height:1.2;">of Digits</span>
                 </button>
-                <button id="btn-coords-picker" onclick="toggleCoordsPicker(event)" style="flex:1; display:flex; align-items:center; justify-content:center; gap:6px; padding:4px 0; background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.1); border-radius:8px; color:var(--text); cursor:pointer; touch-action:manipulation; -webkit-tap-highlight-color:transparent;">
-                    <span style="font-size:14px; color:var(--accent);">⊞</span>
-                    <span style="font-size:11px; color:var(--text2);">Coords</span>
+                <button id="btn-coords-picker" onclick="toggleCoordsPicker(event)" style="flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; padding:4px 0; background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.1); border-radius:8px; cursor:pointer; touch-action:manipulation; -webkit-tap-highlight-color:transparent; color:#94a3b8;">
+                    <span style="font-size:11px; font-weight:500; line-height:1.2;">View</span>
+                    <span style="font-size:11px; font-weight:500; line-height:1.2;">Coordinates</span>
                 </button>
-                <button id="btn-calibrate" onclick="showCalibConfirm(event)" disabled style="flex:1; display:flex; align-items:center; justify-content:center; gap:6px; padding:4px 0; background:rgba(56,189,248,0.1); border:1px solid rgba(56,189,248,0.2); border-radius:8px; color:var(--accent); cursor:pointer; touch-action:manipulation; -webkit-tap-highlight-color:transparent;">
-                    <span style="font-size:14px;">▶</span>
-                    <span style="font-size:11px; font-weight:600;">Calibrate</span>
+                <button id="btn-calibrate" onclick="showCalibConfirm(event)" disabled style="flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; padding:4px 0; background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.1); border-radius:8px; cursor:pointer; touch-action:manipulation; -webkit-tap-highlight-color:transparent; color:#94a3b8;">
+                    <span style="font-size:11px; font-weight:500; line-height:1.2;">Apply</span>
+                    <span style="font-size:11px; font-weight:500; line-height:1.2;">Calibration</span>
                 </button>
             </div>
         </div>

@@ -123,11 +123,24 @@ window.exitCalibMode = exitCalibMode;
 window.computeAndSendRoi = computeAndSendRoi;
 window.onCalibDigitChange = onCalibDigitChange;
 window.toggleCalibCoords = toggleCalibCoords;
+function highlightBtn(id, on) {
+    const btn = document.getElementById(id);
+    if (!btn) return;
+    if (on) {
+        btn.style.borderColor = 'rgba(56,189,248,0.4)';
+        btn.style.background = 'rgba(56,189,248,0.1)';
+        btn.style.color = '#38bdf8';
+    } else {
+        btn.style.borderColor = 'rgba(255,255,255,0.1)';
+        btn.style.background = 'rgba(255,255,255,0.03)';
+        btn.style.color = '#94a3b8';
+    }
+}
 window.cycleDigits = function(e) {
     if (e) e.stopPropagation();
     const picker = document.getElementById('digit-picker');
     if (!picker) return;
-    if (picker.style.display !== 'none') { picker.style.display = 'none'; return; }
+    if (picker.style.display !== 'none') { picker.style.display = 'none'; highlightBtn('btn-digit-picker', false); return; }
     hideOverlayPickers();
 
     const current = parseInt(document.getElementById('digit-label').textContent) || 6;
@@ -142,15 +155,17 @@ window.cycleDigits = function(e) {
         btn.style.cssText = `width:36px;height:36px;border-radius:6px;border:2px solid ${isActive ? '#38bdf8' : '#334155'};background:${isActive ? 'rgba(56,189,248,0.15)' : 'transparent'};color:${isActive ? '#38bdf8' : '#64748b'};font-size:16px;font-weight:700;cursor:pointer;touch-action:manipulation;-webkit-tap-highlight-color:transparent;`;
         btn.onclick = () => {
             document.getElementById('digit-boxes').textContent = '▪'.repeat(n);
-            document.getElementById('digit-label').textContent = n + ' digits';
+            document.getElementById('digit-label').textContent = 'Select Number of Digits';
             onCalibDigitChange(n);
             picker.style.display = 'none';
+            highlightBtn('btn-digit-picker', false);
         };
         options.appendChild(btn);
     });
 
     preview.textContent = '▪'.repeat(current);
     picker.style.display = 'block';
+    highlightBtn('btn-digit-picker', true);
 };
 // === Close any open picker when tapping outside ===
 document.addEventListener('click', () => {
@@ -185,18 +200,13 @@ window.toggleCoordsPicker = function(e) {
     if (e) e.stopPropagation();
     const picker = document.getElementById('coords-picker');
     if (!picker) return;
-    if (picker.style.display !== 'none') { picker.style.display = 'none'; return; }
+    if (picker.style.display !== 'none') { picker.style.display = 'none'; highlightBtn('btn-coords-picker', false); return; }
     hideOverlayPickers();
-
-    if (picker.style.display !== 'none') {
-        picker.style.display = 'none';
-        return;
-    }
-    // Copy coords content from calib-coords to coords-display
     const src = document.getElementById('calib-coords');
     const dst = document.getElementById('coords-display');
     if (src && dst) dst.textContent = src.textContent || 'No coordinates yet';
     picker.style.display = 'block';
+    highlightBtn('btn-coords-picker', true);
 };
 window.hideOverlayPickers = function() {
     const dp = document.getElementById('digit-picker');
@@ -205,6 +215,8 @@ window.hideOverlayPickers = function() {
     if (dp) dp.style.display = 'none';
     if (cp) cp.style.display = 'none';
     if (co) co.style.display = 'none';
+    highlightBtn('btn-digit-picker', false);
+    highlightBtn('btn-coords-picker', false);
 };
 window.toggleSetupLog = function() {
     const content = document.getElementById('setup-log-content');
@@ -274,6 +286,8 @@ if (new URLSearchParams(location.search).has('mock')) {
     dom.modeSelector.classList.add('visible');
     const mt = document.getElementById('mode-title');
     if (mt) mt.style.display = 'block';
+    state.activeMode = null;
+    switchMode('validate');
     dom.stats.className = 'active';
     dom.stats.textContent = 'Mock mode';
     log('Mock mode — no BLE connection');

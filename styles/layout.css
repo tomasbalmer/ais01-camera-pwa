@@ -97,6 +97,9 @@
 .mode-panel.active {
     display: flex;
     flex-direction: column;
+    justify-content: flex-end;
+    height: 100%;
+    padding: 0 12px 8px;
 }
 
 /* ─── Mode selector strip ─── */
