@@ -98,13 +98,13 @@ function updateCalibCoords() {
     if (!el || !calib) { if (el) el.textContent = ''; return; }
     const coords = computeRoiCoords();
     if (!coords) { el.textContent = ''; return; }
-    const parts = [];
-    for (let i = 0; i < 4; i++) {
-        const p1 = coords.digits[i * 2];
-        const p2 = coords.digits[i * 2 + 1];
-        parts.push(`${i*2+1}:(${p1.x},${p1.y}) ${i*2+2}:(${p2.x},${p2.y})`);
+    const line1 = [], line2 = [];
+    for (let i = 0; i < 8; i++) {
+        const p = coords.digits[i];
+        const s = `${i+1}:(${p.x},${p.y})`;
+        if (i < 4) line1.push(s); else line2.push(s);
     }
-    el.textContent = parts.join(' ') + `\nB:${coords.boundaryX}x${coords.boundaryY}`;
+    el.textContent = line1.join(' ') + '\n' + line2.join(' ');
 }
 
 export async function enterCalibMode() {

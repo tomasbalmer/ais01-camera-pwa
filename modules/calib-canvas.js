@@ -6,8 +6,9 @@
  * Works with both mouse and touch (via pointer events).
  */
 
-const HANDLE_R = 6;       // handle radius (px) — visual
-const HIT_R = 16;         // hit-test radius (px) — touch-friendly
+const HANDLE_R = 4;       // handle radius (px) — visual
+const STEM_LEN = 12;      // stem length extending outward from rect
+const HIT_R = 20;         // hit-test radius (px) — touch-friendly (on stem tip)
 const ROT_OFFSET = 24;    // rotation handle distance above top edge
 const MIN_W = 30;
 const MIN_H = 20;
@@ -20,17 +21,18 @@ const STYLE = {
     rotLine: 'rgba(56, 189, 248, 0.6)',
 };
 
-// 8 handle positions relative to rect center
+// 8 handle positions relative to rect center + outward direction for stems
+const S = 0.707; // sin(45°) for diagonal normalization
 function localHandles(hw, hh) {
     return [
-        { x: -hw, y: -hh }, // 0 top-left
-        { x:   0, y: -hh }, // 1 top-center
-        { x:  hw, y: -hh }, // 2 top-right
-        { x:  hw, y:   0 }, // 3 middle-right
-        { x:  hw, y:  hh }, // 4 bottom-right
-        { x:   0, y:  hh }, // 5 bottom-center
-        { x: -hw, y:  hh }, // 6 bottom-left
-        { x: -hw, y:   0 }, // 7 middle-left
+        { x: -hw, y: -hh, dx: -S, dy: -S }, // 0 top-left
+        { x:   0, y: -hh, dx:  0, dy: -1 }, // 1 top-center
+        { x:  hw, y: -hh, dx:  S, dy: -S }, // 2 top-right
+        { x:  hw, y:   0, dx:  1, dy:  0 }, // 3 middle-right
+        { x:  hw, y:  hh, dx:  S, dy:  S }, // 4 bottom-right
+        { x:   0, y:  hh, dx:  0, dy:  1 }, // 5 bottom-center
+        { x: -hw, y:  hh, dx: -S, dy:  S }, // 6 bottom-left
+        { x: -hw, y:   0, dx: -1, dy:  0 }, // 7 middle-left
     ];
 }
 
@@ -83,10 +85,12 @@ export function createCalibOverlay(canvas, onChange) {
         const ry = -hh - ROT_OFFSET;
         if (loc.x * loc.x + (loc.y - ry) * (loc.y - ry) < HIT_R * HIT_R) return 'rotate';
 
-        // Resize handles
+        // Resize handles (hit-test on stem tip, not rect edge)
         const handles = localHandles(hw, hh);
         for (let i = 0; i < 8; i++) {
-            const dx = loc.x - handles[i].x, dy = loc.y - handles[i].y;
+            const tipX = handles[i].x + handles[i].dx * STEM_LEN;
+            const tipY = handles[i].y + handles[i].dy * STEM_LEN;
+            const dx = loc.x - tipX, dy = loc.y - tipY;
             if (dx * dx + dy * dy < HIT_R * HIT_R) return i;
         }
 
@@ -139,11 +143,21 @@ export function createCalibOverlay(canvas, onChange) {
             ctx.stroke();
         }
 
-        // Resize handles
+        // Resize handles with stems extending outward
         const handles = localHandles(hw, hh);
         for (const h of handles) {
+            const tipX = h.x + h.dx * STEM_LEN;
+            const tipY = h.y + h.dy * STEM_LEN;
+            // Stem line
             ctx.beginPath();
-            ctx.arc(h.x, h.y, HANDLE_R, 0, Math.PI * 2);
+            ctx.moveTo(h.x, h.y);
+            ctx.lineTo(tipX, tipY);
+            ctx.strokeStyle = STYLE.rotLine;
+            ctx.lineWidth = 1;
+            ctx.stroke();
+            // Handle circle at tip
+            ctx.beginPath();
+            ctx.arc(tipX, tipY, HANDLE_R, 0, Math.PI * 2);
             ctx.fillStyle = STYLE.handleFill;
             ctx.fill();
             ctx.strokeStyle = STYLE.handleStroke;

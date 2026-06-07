@@ -154,7 +154,7 @@ window.cycleDigits = function(e) {
         btn.style.cssText = `width:36px;height:36px;border-radius:6px;border:2px solid ${isActive ? '#38bdf8' : '#334155'};background:${isActive ? 'rgba(56,189,248,0.15)' : 'transparent'};color:${isActive ? '#38bdf8' : '#64748b'};font-size:16px;font-weight:700;cursor:pointer;touch-action:manipulation;-webkit-tap-highlight-color:transparent;`;
         btn.onclick = () => {
             document.getElementById('digit-boxes').textContent = '▪'.repeat(n);
-            document.getElementById('digit-label').textContent = 'Select Number of Digits';
+            document.getElementById('digit-label').textContent = 'of Digits';
             onCalibDigitChange(n);
             picker.style.display = 'none';
             highlightBtn('btn-digit-picker', false);
