@@ -21,7 +21,6 @@ async function stopConnection() {
         await stopBleSession();
     } else {
         state.running = false;
-        dom.modeToggle.classList.remove('visible');
         dom.modeArea.classList.remove('visible');
         dom.modeSelector.classList.remove('visible');
         dom.btnStop.classList.remove('visible');

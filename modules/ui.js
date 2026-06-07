@@ -22,8 +22,8 @@ export const dom = {
     panelValidate: document.getElementById('panel-validate'),
     panelCalibrate: document.getElementById('panel-calibrate'),
     panelSettings: document.getElementById('panel-settings'),
-    btnFull: document.getElementById('btnFull'),
-    btnROI: document.getElementById('btnROI'),
+    btnFull: document.getElementById('btnFullPanel'),
+    btnROI: document.getElementById('btnROIPanel'),
     btnStop: document.getElementById('btn-stop'),
     calibAiValue: document.getElementById('calib-ai-value'),
 };
@@ -168,12 +168,11 @@ export function switchMode(mode) {
         tab.classList.toggle('active', tab.dataset.mode === mode);
     });
 
-    // Enter calibrate: force Full image, hide toggle
+    // Enter calibrate: force Full image
     if (mode === 'calibrate') {
         if (state.imageMode !== 'full') {
             switchImageMode('FULL');
         }
-        dom.modeToggle.classList.remove('visible');
         if (_enterCalibMode) _enterCalibMode();
     }
 }
@@ -184,8 +183,15 @@ export function resetImageModeSelection() { userSelected = false; }
 
 export function switchImageMode(mode) {
     userSelected = true;
-    dom.btnFull.classList.toggle('active', mode === 'FULL');
-    dom.btnROI.classList.toggle('active', mode === 'ROI');
+    const fullActive = mode === 'FULL';
+    dom.btnFull.classList.toggle('active', fullActive);
+    dom.btnROI.classList.toggle('active', !fullActive);
+    dom.btnFull.style.borderColor = fullActive ? 'rgba(56,189,248,0.4)' : 'rgba(255,255,255,0.1)';
+    dom.btnFull.style.color = fullActive ? '#38bdf8' : '#94a3b8';
+    dom.btnFull.style.background = fullActive ? 'rgba(56,189,248,0.1)' : 'rgba(255,255,255,0.03)';
+    dom.btnROI.style.borderColor = !fullActive ? 'rgba(56,189,248,0.4)' : 'rgba(255,255,255,0.1)';
+    dom.btnROI.style.color = !fullActive ? '#38bdf8' : '#94a3b8';
+    dom.btnROI.style.background = !fullActive ? 'rgba(56,189,248,0.1)' : 'rgba(255,255,255,0.03)';
     state.imageMode = mode === 'FULL' ? 'full' : 'roi';
     sendCommand(mode === 'FULL' ? 'SHOW_FULL_IMAGE' : 'SHOW_ROI');
 }
@@ -194,12 +200,19 @@ export function switchImageMode(mode) {
 const FULL_WIDTH_THRESHOLD = 400;
 
 export function syncImageModeFromFrame() {
-    if (userSelected) return;
     const w = dom.cam.naturalWidth;
     if (!w) return;
     const detected = w >= FULL_WIDTH_THRESHOLD ? 'full' : 'roi';
+    if (userSelected) return;
     if (detected === state.imageMode) return;
     state.imageMode = detected;
-    dom.btnFull.classList.toggle('active', detected === 'full');
-    dom.btnROI.classList.toggle('active', detected === 'roi');
+    const fullActive = detected === 'full';
+    dom.btnFull.classList.toggle('active', fullActive);
+    dom.btnROI.classList.toggle('active', !fullActive);
+    dom.btnFull.style.borderColor = fullActive ? 'rgba(56,189,248,0.4)' : 'rgba(255,255,255,0.1)';
+    dom.btnFull.style.color = fullActive ? '#38bdf8' : '#94a3b8';
+    dom.btnFull.style.background = fullActive ? 'rgba(56,189,248,0.1)' : 'rgba(255,255,255,0.03)';
+    dom.btnROI.style.borderColor = !fullActive ? 'rgba(56,189,248,0.4)' : 'rgba(255,255,255,0.1)';
+    dom.btnROI.style.color = !fullActive ? '#38bdf8' : '#94a3b8';
+    dom.btnROI.style.background = !fullActive ? 'rgba(56,189,248,0.1)' : 'rgba(255,255,255,0.03)';
 }
