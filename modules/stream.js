@@ -140,7 +140,11 @@ export async function readStream(epIn) {
     dom.modeArea.classList.add('visible');
     dom.modeSelector.classList.add('visible');
     dom.btnStop.classList.add('visible');
-    if (dom.modeHint) dom.modeHint.style.display = 'none';
+    const mt = document.getElementById('mode-title');
+    if (mt) mt.style.display = 'block';
+    state.activeMode = null;
+    const { switchMode } = await import('./ui.js');
+    switchMode('validate');
     state.lastFpsTime = performance.now();
     state.fpsCount = 0;
 
