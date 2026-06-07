@@ -7,6 +7,7 @@ import {
 import { state } from './state.js';
 import { dom, log, syncImageModeFromFrame } from './ui.js';
 import { aiReading } from './helpers.js';
+import { sendCommand } from './protocol.js';
 
 // === Configuration ===
 const DISPLAY_INTERVAL_MS = 1500;
@@ -127,14 +128,28 @@ export async function readStream(epIn) {
 
     state.running = true;
     state.lastDisplayTime = performance.now();
-    dom.connectScreen.style.display = 'none';
-    dom.cam.style.display = 'block';
     dom.stats.className = 'active';
     dom.statusDot.classList.add('connected');
-    /* modeToggle removed — Full/ROI now in Installation panel */
+    dom.btnStop.classList.add('visible');
+
+    /* Show skeleton transition */
+    const skeleton = document.getElementById('skeleton-transition');
+    const chooser = document.getElementById('connect-chooser');
+    if (chooser) chooser.style.display = 'none';
+    if (skeleton) skeleton.style.display = 'flex';
+
+    /* Wait 1s then send SHOW_FULL_IMAGE for consistent initial state */
+    await new Promise(r => setTimeout(r, 1000));
+    await sendCommand('SHOW_FULL_IMAGE');
+    log('Sent SHOW_FULL_IMAGE');
+    await new Promise(r => setTimeout(r, 500));
+
+    /* Hide skeleton, show camera UI */
+    if (skeleton) skeleton.style.display = 'none';
+    dom.connectScreen.style.display = 'none';
+    dom.cam.style.display = 'block';
     dom.modeArea.classList.add('visible');
     dom.modeSelector.classList.add('visible');
-    dom.btnStop.classList.add('visible');
     const mt = document.getElementById('mode-title');
     if (mt) mt.style.display = 'block';
     state.activeMode = null;
