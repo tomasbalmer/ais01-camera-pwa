@@ -136,7 +136,7 @@ export async function readStream(epIn) {
     dom.cam.style.display = 'block';
     dom.stats.className = 'active';
     dom.statusDot.classList.add('connected');
-    dom.modeToggle.classList.add('visible');
+    /* modeToggle removed — Full/ROI now in Installation panel */
     dom.modeArea.classList.add('visible');
     dom.modeSelector.classList.add('visible');
     dom.btnStop.classList.add('visible');

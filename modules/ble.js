@@ -517,9 +517,10 @@ export async function startBleSession() {
         log('Camera streaming');
         dom.connectScreen.style.display = 'none';
         dom.cam.style.display = 'block';
-        dom.modeToggle.classList.add('visible');
         dom.modeArea.classList.add('visible');
         dom.modeSelector.classList.add('visible');
+        const mt = document.getElementById('mode-title');
+        if (mt) mt.style.display = 'block';
         dom.stats.textContent = 'Streaming';
     } else {
         log('No frames after 120s');
@@ -543,7 +544,8 @@ export async function stopBleSession() {
     else { try { window.hideOverlayPickers(); } catch(_) {} }
 
     dom.cam.style.display = 'none';
-    dom.modeToggle.classList.remove('visible');
+    const mt = document.getElementById('mode-title');
+    if (mt) mt.style.display = 'none';
     dom.modeArea.classList.remove('visible');
     dom.modeSelector.classList.remove('visible');
     dom.btnStop.classList.remove('visible');

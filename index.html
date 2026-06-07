@@ -36,12 +36,11 @@
 
     <!-- Camera viewer (fills screen) -->
     <main id="viewer">
-        <!-- Segmented Full/ROI toggle (floating over viewer) -->
-        <div id="mode-toggle">
-            <button id="btnFull" class="seg-btn" onclick="switchImageMode('FULL')">Full</button>
-            <button id="btnROI" class="seg-btn" onclick="switchImageMode('ROI')">ROI</button>
+        <!-- Mode title (floating over viewer, top) -->
+        <div id="mode-title" style="display:none; position:absolute; top:0; left:0; right:0; z-index:5; text-align:center; pointer-events:none; padding:14px 0 20px; background:linear-gradient(rgba(0,0,0,0.7), transparent);">
+            <div id="mode-title-name" style="font-size:16px; font-weight:600; color:#38bdf8; display:flex; align-items:center; justify-content:center; gap:10px;">Installation Mode</div>
+            <div id="mode-title-desc" style="font-size:11px; color:#64748b; margin-top:6px;">Position the camera over the water meter display</div>
         </div>
-        <div id="mode-hint"></div>
         <img id="cam" />
         <canvas id="overlay-canvas"></canvas>
         <canvas id="calib-canvas"></canvas>
@@ -50,6 +49,11 @@
             <div style="font-size:13px; color:#38bdf8; margin-bottom:14px; font-weight:500;">How many digits on the meter?</div>
             <div id="digit-options" style="display:flex; justify-content:center; gap:16px; margin-bottom:10px;"></div>
             <div id="digit-preview" style="font-family:'SF Mono',Monaco,monospace; font-size:16px; letter-spacing:3px; color:rgba(56,189,248,0.5);"></div>
+        </div>
+        <!-- Coordinates overlay (absolute, no layout impact) -->
+        <div id="coords-picker" style="display:none; position:absolute; bottom:0; left:0; right:0; z-index:6; padding:20px 12px 16px; text-align:center; background:linear-gradient(transparent, rgba(0,0,0,0.85) 30%);">
+            <div style="font-size:13px; color:#38bdf8; margin-bottom:10px; font-weight:500;">Calibration Coordinates</div>
+            <div id="coords-display" style="font-family:'SF Mono',Monaco,monospace; font-size:11px; color:rgba(56,189,248,0.7); line-height:1.6; text-align:left; max-width:320px; margin:0 auto; white-space:pre-wrap; word-break:break-all;"></div>
         </div>
         <!-- Calibration confirm overlay (absolute, no layout impact) -->
         <div id="confirm-picker" style="display:none; position:absolute; bottom:0; left:0; right:0; z-index:6; padding:20px 0 16px; text-align:center; background:linear-gradient(transparent, rgba(0,0,0,0.85) 30%);">
@@ -187,44 +191,44 @@
 
     <!-- Mode-specific content area (visible when connected) -->
     <div id="mode-area">
-        <!-- Installation panel (default — image mode toggle + AI reading) -->
-        <div id="panel-validate" class="mode-panel active" style="padding:8px 12px; border-top:1px solid var(--border); height:100%; overflow-y:auto;">
-            <div style="display:flex; align-items:center; justify-content:space-between;">
-                <div style="display:flex; gap:4px;">
-                    <button class="seg-btn active" id="btnFullPanel" onclick="switchImageMode('FULL')" style="padding:6px 16px; border-radius:6px; border:1px solid var(--border); background:var(--elevated);">Full</button>
-                    <button class="seg-btn" id="btnROIPanel" onclick="switchImageMode('ROI')" style="padding:6px 16px; border-radius:6px; border:1px solid var(--border);">ROI</button>
-                </div>
-                <div style="text-align:right;">
-                    <div style="font-size:9px; color:var(--muted); text-transform:uppercase; letter-spacing:.5px;">AI Reading</div>
-                    <div id="install-ai-value" style="font-family:'SF Mono',Monaco,monospace; font-size:20px; font-weight:700; color:var(--accent);">--</div>
-                </div>
+        <!-- Installation panel -->
+        <div id="panel-validate" class="mode-panel active">
+            <div style="display:flex; gap:6px; align-items:stretch; height:44px; padding:0 12px;">
+                <button class="seg-btn active" id="btnFullPanel" onclick="switchImageMode('FULL')" style="flex:1; display:flex; align-items:center; justify-content:center; gap:6px; padding:4px 0; background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.1); border-radius:8px; cursor:pointer; touch-action:manipulation;">
+                    <span style="font-size:14px; color:var(--accent);">▣</span>
+                    <span style="font-size:11px; color:var(--text2);">Full Image</span>
+                </button>
+                <button class="seg-btn" id="btnROIPanel" onclick="switchImageMode('ROI')" style="flex:1; display:flex; align-items:center; justify-content:center; gap:6px; padding:4px 0; background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.1); border-radius:8px; cursor:pointer; touch-action:manipulation;">
+                    <span style="font-size:14px; color:var(--accent);">⊡</span>
+                    <span style="font-size:11px; color:var(--text2);">ROI Image</span>
+                </button>
             </div>
         </div>
         <!-- Calibrate panel -->
         <div id="panel-calibrate" class="mode-panel">
-            <div id="calib-reading">
-                <span id="calib-reading-label">AI Reading</span>
-                <span id="calib-ai-value">--</span>
+            <div id="calib-reading" style="padding:4px 0 6px;">
+                <span id="calib-reading-label" style="font-size:9px; color:var(--muted); text-transform:uppercase; letter-spacing:.5px;">AI Reading</span>
+                <span id="calib-ai-value" style="font-size:28px;">--</span>
             </div>
-            <div id="calib-controls" style="display:flex; gap:8px; align-items:stretch; height:44px;">
-                <button id="btn-digit-picker" onclick="cycleDigits()" style="flex:0 0 auto; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:2px; padding:4px 14px; background:var(--elevated); border:1px solid var(--border); border-radius:8px; color:var(--text); cursor:pointer; touch-action:manipulation; -webkit-tap-highlight-color:transparent;">
-                    <span id="digit-boxes" style="font-family:'SF Mono',Monaco,monospace; font-size:13px; letter-spacing:1px; color:var(--accent);">▪▪▪▪▪▪</span>
-                    <span id="digit-label" style="font-size:9px; color:var(--text2);">6 digits</span>
+            <div id="calib-controls" style="display:flex; gap:6px; align-items:stretch; height:44px;">
+                <button id="btn-digit-picker" onclick="cycleDigits(event)" style="flex:1; display:flex; align-items:center; justify-content:center; gap:6px; padding:4px 0; background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.1); border-radius:8px; color:var(--text); cursor:pointer; touch-action:manipulation; -webkit-tap-highlight-color:transparent;">
+                    <span id="digit-boxes" style="font-family:'SF Mono',Monaco,monospace; font-size:12px; letter-spacing:1px; color:var(--accent);">▪▪▪▪▪▪</span>
+                    <span id="digit-label" style="font-size:11px; color:var(--text2);">6 digits</span>
                 </button>
-                <button id="btn-calibrate" class="calib-commit" disabled onclick="showCalibConfirm()" style="flex:1; margin-top:0;">Calibrate</button>
+                <button id="btn-coords-picker" onclick="toggleCoordsPicker(event)" style="flex:1; display:flex; align-items:center; justify-content:center; gap:6px; padding:4px 0; background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.1); border-radius:8px; color:var(--text); cursor:pointer; touch-action:manipulation; -webkit-tap-highlight-color:transparent;">
+                    <span style="font-size:14px; color:var(--accent);">⊞</span>
+                    <span style="font-size:11px; color:var(--text2);">Coords</span>
+                </button>
+                <button id="btn-calibrate" onclick="showCalibConfirm(event)" disabled style="flex:1; display:flex; align-items:center; justify-content:center; gap:6px; padding:4px 0; background:rgba(56,189,248,0.1); border:1px solid rgba(56,189,248,0.2); border-radius:8px; color:var(--accent); cursor:pointer; touch-action:manipulation; -webkit-tap-highlight-color:transparent;">
+                    <span style="font-size:14px;">▶</span>
+                    <span style="font-size:11px; font-weight:600;">Calibrate</span>
+                </button>
             </div>
         </div>
         <!-- Settings panel -->
         <div id="panel-settings" class="mode-panel">
             <div class="settings-body">
-                <!-- Calibration coordinates -->
-                <div style="margin-bottom:8px;">
-                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
-                        <span style="font-size:12px; color:#64748b; font-weight:600;">Calibration Coordinates</span>
-                        <button onclick="copyCalibCoords()" style="font-size:10px; padding:2px 8px; background:#374151; color:#94a3b8; border:1px solid #475569; border-radius:4px; cursor:pointer;">Copy</button>
-                    </div>
-                    <div id="calib-coords" style="font-family:'SF Mono',Monaco,monospace; font-size:11px; color:#94a3b8; background:rgba(0,0,0,0.3); border-radius:6px; padding:6px 8px; min-height:20px; user-select:text; -webkit-user-select:text;"></div>
-                </div>
+                <div id="calib-coords" style="display:none;"></div>
                 <div class="sensor-ctrl">
                     <span class="ctrl-label">Brightness</span>
                     <div class="ctrl-row">
@@ -274,11 +278,9 @@
 
     <!-- Mode selector strip (visible when connected) -->
     <nav id="mode-selector">
-        <button class="mode-tab active" data-mode="validate" onclick="switchMode('validate')">Installation</button>
-        <button class="mode-tab" data-mode="calibrate" onclick="switchMode('calibrate')">Calibration</button>
-        <button class="mode-tab mode-tab-icon" data-mode="settings" onclick="switchMode('settings')" aria-label="Settings">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
-        </button>
+        <button class="mode-tab active" data-mode="validate" onclick="switchMode('validate')" aria-label="Installation"><svg width="22" height="22" viewBox="0 0 24 24" fill="none"><path fill-rule="evenodd" clip-rule="evenodd" d="M8.168 2.445A1 1 0 0 1 9 2h6a1 1 0 0 1 .832.445L17.535 5H21a3 3 0 0 1 3 3v11a3 3 0 0 1-3 3H3a3 3 0 0 1-3-3V8a3 3 0 0 1 3-3h3.465zM9.535 4 7.832 6.555A1 1 0 0 1 7 7H3a1 1 0 0 0-1 1v11a1 1 0 0 0 1 1h18a1 1 0 0 0 1-1V8a1 1 0 0 0-1-1h-4a1 1 0 0 1-.832-.445L14.465 4zM12 10a3 3 0 1 0 0 6 3 3 0 0 0 0-6m-5 3a5 5 0 1 1 10 0 5 5 0 0 1-10 0" fill="currentColor"/></svg></button>
+        <button class="mode-tab" data-mode="calibrate" onclick="switchMode('calibrate')" aria-label="Calibration"><svg width="22" height="22" viewBox="0 0 24 24" fill="none"><path fill-rule="evenodd" clip-rule="evenodd" d="M3.055 11H6a1 1 0 1 1 0 2H3.055A9.004 9.004 0 0 0 11 20.945V18a1 1 0 1 1 2 0v2.945A9.004 9.004 0 0 0 20.945 13H18a1 1 0 1 1 0-2h2.945A9.004 9.004 0 0 0 13 3.055V6a1 1 0 1 1-2 0V3.055A9.004 9.004 0 0 0 3.055 11M1 12C1 5.925 5.925 1 12 1s11 4.925 11 11-4.925 11-11 11S1 18.075 1 12" fill="currentColor"/></svg></button>
+        <button class="mode-tab" data-mode="settings" onclick="switchMode('settings')" aria-label="Settings"><svg width="22" height="22" viewBox="0 0 24 24" fill="none"><path fill-rule="evenodd" clip-rule="evenodd" d="M12 2a1 1 0 0 0-1 1v.174a2.65 2.65 0 0 1-1.606 2.425 1 1 0 0 1-.264.073 2.65 2.65 0 0 1-2.73-.607l-.007-.008-.06-.06a1.003 1.003 0 0 0-1.415 0h-.001a1 1 0 0 0 0 1.415l.068.069a2.65 2.65 0 0 1 .542 2.894 2.65 2.65 0 0 1-2.414 1.705H3a1 1 0 0 0 0 2h.174a2.65 2.65 0 0 1 2.423 1.601 2.65 2.65 0 0 1-.532 2.918l-.008.008-.06.06a1.003 1.003 0 0 0-.217 1.09 1 1 0 0 0 .217.325v.001a.999.999 0 0 0 1.415 0l.069-.068a2.65 2.65 0 0 1 2.894-.543 2.65 2.65 0 0 1 1.705 2.415V21a1 1 0 0 0 2 0v-.174a2.65 2.65 0 0 1 1.601-2.423 2.65 2.65 0 0 1 2.918.532l.008.008.06.06a1.002 1.002 0 0 0 1.415 0h.001a1 1 0 0 0 0-1.416l-.068-.068a2.65 2.65 0 0 1-.532-2.918A2.65 2.65 0 0 1 20.906 13H21a1 1 0 0 0 0-2h-.174a2.65 2.65 0 0 1-2.425-1.606.999.999 0 0 1-.073-.264 2.65 2.65 0 0 1 .607-2.73l.008-.007.06-.06a1.002 1.002 0 0 0 0-1.415v-.001a1 1 0 0 0-1.416 0l-.068.068a2.65 2.65 0 0 1-2.918.532A2.65 2.65 0 0 1 13 3.094V3a1 1 0 0 0-1-1ZM12 10a2 2 0 1 0 0 4 2 2 0 0 0 0-4Zm-4 2a4 4 0 1 1 8 0 4 4 0 0 1-8 0Z" fill="currentColor"/></svg></button>
     </nav>
 
     <!-- Slide-out drawer -->

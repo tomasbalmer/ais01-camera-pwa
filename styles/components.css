@@ -137,33 +137,28 @@
 
 /* ─── Mode selector strip ─── */
 .mode-tab {
+    flex: 1;
     background: none;
     border: none;
-    border-bottom: 2px solid transparent;
-    font-size: 14px;
-    font-weight: 600;
-    color: var(--text2);
+    border-top: 2px solid transparent;
+    color: var(--muted);
     cursor: pointer;
     touch-action: manipulation;
     -webkit-tap-highlight-color: transparent;
-    padding: 8px 12px;
+    padding: 10px 0;
     transition: color 0.15s, border-color 0.15s;
-}
-.mode-tab.active {
-    font-weight: 700;
-    color: var(--accent);
-    border-bottom-color: var(--accent);
-}
-.mode-tab-icon {
-    padding: 8px 8px;
     display: flex;
     align-items: center;
+    justify-content: center;
+}
+.mode-tab.active {
+    color: var(--accent);
+    border-top-color: var(--accent);
 }
 
 /* ─── Calibrate panel ─── */
 #panel-calibrate {
     padding: 8px 12px;
-    border-top: 1px solid var(--border);
     height: 100%;
     overflow-y: auto;
 }
@@ -171,7 +166,6 @@
 /* ─── Settings panel ─── */
 #panel-settings {
     padding: 8px 12px;
-    border-top: 1px solid var(--border);
     height: 100%;
     overflow-y: auto;
 }

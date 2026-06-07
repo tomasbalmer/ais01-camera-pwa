@@ -84,7 +84,7 @@
 #mode-area {
     display: none;
     flex-shrink: 0;
-    background: var(--bg);
+    background: transparent;
     z-index: 10;
     height: 120px;
     overflow: hidden;
@@ -103,12 +103,12 @@
 #mode-selector {
     display: none;
     flex-shrink: 0;
-    justify-content: center;
-    align-items: baseline;
-    gap: 24px;
+    justify-content: stretch;
+    align-items: stretch;
+    gap: 0;
     border-top: 1px solid var(--border);
-    padding: 10px 0;
-    padding-bottom: calc(10px + env(safe-area-inset-bottom, 0px));
+    padding: 0;
+    padding-bottom: env(safe-area-inset-bottom, 0px);
     background: var(--bg);
     z-index: 10;
 }

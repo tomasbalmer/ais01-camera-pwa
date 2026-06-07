@@ -123,10 +123,12 @@ window.exitCalibMode = exitCalibMode;
 window.computeAndSendRoi = computeAndSendRoi;
 window.onCalibDigitChange = onCalibDigitChange;
 window.toggleCalibCoords = toggleCalibCoords;
-window.cycleDigits = function() {
+window.cycleDigits = function(e) {
+    if (e) e.stopPropagation();
     const picker = document.getElementById('digit-picker');
     if (!picker) return;
     if (picker.style.display !== 'none') { picker.style.display = 'none'; return; }
+    hideOverlayPickers();
 
     const current = parseInt(document.getElementById('digit-label').textContent) || 6;
     const options = document.getElementById('digit-options');
@@ -150,7 +152,22 @@ window.cycleDigits = function() {
     preview.textContent = '▪'.repeat(current);
     picker.style.display = 'block';
 };
-window.showCalibConfirm = function() {
+// === Close any open picker when tapping outside ===
+document.addEventListener('click', () => {
+    const pickers = ['digit-picker', 'coords-picker', 'confirm-picker'];
+    pickers.forEach(id => {
+        const el = document.getElementById(id);
+        if (el && el.style.display !== 'none') el.style.display = 'none';
+    });
+});
+// Stop picker clicks from bubbling to the document listener
+['digit-picker', 'coords-picker', 'confirm-picker'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.addEventListener('click', e => e.stopPropagation());
+});
+
+window.showCalibConfirm = function(e) {
+    if (e) e.stopPropagation();
     const picker = document.getElementById('confirm-picker');
     if (!picker) return;
     // Hide digit picker if open
@@ -164,11 +181,30 @@ window.showCalibConfirm = function() {
         computeAndSendRoi();
     };
 };
+window.toggleCoordsPicker = function(e) {
+    if (e) e.stopPropagation();
+    const picker = document.getElementById('coords-picker');
+    if (!picker) return;
+    if (picker.style.display !== 'none') { picker.style.display = 'none'; return; }
+    hideOverlayPickers();
+
+    if (picker.style.display !== 'none') {
+        picker.style.display = 'none';
+        return;
+    }
+    // Copy coords content from calib-coords to coords-display
+    const src = document.getElementById('calib-coords');
+    const dst = document.getElementById('coords-display');
+    if (src && dst) dst.textContent = src.textContent || 'No coordinates yet';
+    picker.style.display = 'block';
+};
 window.hideOverlayPickers = function() {
     const dp = document.getElementById('digit-picker');
     const cp = document.getElementById('confirm-picker');
+    const co = document.getElementById('coords-picker');
     if (dp) dp.style.display = 'none';
     if (cp) cp.style.display = 'none';
+    if (co) co.style.display = 'none';
 };
 window.toggleSetupLog = function() {
     const content = document.getElementById('setup-log-content');
@@ -223,6 +259,25 @@ window.addEventListener('beforeunload', () => {
         stopBleSession().catch(() => {});
     }
 });
+
+// === Mock mode: skip BLE, show camera view with test image ===
+if (new URLSearchParams(location.search).has('mock')) {
+    state.running = true;
+    state.bleMode = true;
+    state.bleCalibMode = true;
+    dom.connectScreen.style.display = 'none';
+    dom.cam.style.display = 'block';
+    dom.cam.src = 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="640" height="480" viewBox="0 0 640 480"><rect fill="#1a1a2e" width="640" height="480"/><circle cx="320" cy="200" r="120" fill="none" stroke="#334155" stroke-width="2"/><text x="320" y="190" text-anchor="middle" fill="#38bdf8" font-family="monospace" font-size="28">00000.00</text><text x="320" y="220" text-anchor="middle" fill="#475569" font-family="monospace" font-size="12">m³</text><text x="320" y="400" text-anchor="middle" fill="#334155" font-size="14">Mock — water meter</text></svg>');
+    dom.statusDot.classList.add('connected');
+    dom.btnStop.classList.add('visible');
+    dom.modeArea.classList.add('visible');
+    dom.modeSelector.classList.add('visible');
+    const mt = document.getElementById('mode-title');
+    if (mt) mt.style.display = 'block';
+    dom.stats.className = 'active';
+    dom.stats.textContent = 'Mock mode';
+    log('Mock mode — no BLE connection');
+}
 
 // === Init check ===
 const isSecure = window.isSecureContext;
