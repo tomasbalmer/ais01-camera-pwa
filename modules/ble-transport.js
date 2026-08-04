@@ -157,31 +157,50 @@ export async function reconnect() {
 }
 
 /*
- * Every chunk is given its own drain time before the next one is queued.
+ * Send a payload WHOLE when the link allows it, and only fall back to slices.
  *
- * `writeValueWithoutResponse` resolves when a chunk is QUEUED, not when it has
- * been sent, so the loop below has no backpressure of its own. BLE delivers
- * well above 2 kB/s and the BT24's UART drains at 9600 baud — 960 B/s — so a
- * 65-byte PEM line goes out as four chunks with nothing between them, and the
- * module has to absorb the whole burst while the firmware is busy printing its
- * own `Signal Strength` heartbeat. Whatever does not fit is dropped silently.
+ * This is the one structural difference between the USB path that works and
+ * the BLE path that does not. Over USB a 65-byte PEM line enters the console
+ * UART as one continuous stream. Over BLE the same line left here as four
+ * 20-byte writes, and BLE delivers each in its own connection event — so the
+ * firmware, which assembles a console line up to its first CR before
+ * forwarding it, was being handed a line in pieces with gaps between them.
  *
- * Pacing between LINES was not enough, and could not have been: it made the
- * average rate safe while leaving every individual burst as sharp as before.
- * On 2026-08-04 a 1208-byte CA reached the modem short — no `+QFUPL` at all,
- * which is the modem still waiting for the rest, not a checksum it disliked.
+ * On 2026-08-04 `AT+QFLST` was finally asked what the silence meant and
+ * answered plainly: no such file. The modem never completed the transfer, so
+ * the bytes were lost on the way IN — and not for want of bandwidth. The
+ * stream averaged about 238 B/s against the bridge's 960, four times under
+ * capacity, which rules out rate and leaves delivery shape.
  *
- * 20 bytes need 20 × 10 / 9600 ≈ 21 ms on the wire. The floor below is a
- * little over that, so the stream leaves at roughly the speed the UART can
- * take it rather than in bursts it cannot.
+ * `writeValueWithoutResponse` accepts up to the negotiated ATT MTU minus three,
+ * which is 20 bytes only when nothing better was negotiated. Chrome routinely
+ * gets far more, and a whole line then crosses in one event, arriving as the
+ * uninterrupted run the firmware is expecting. The fallback keeps the old
+ * behaviour for links that really are stuck at the minimum.
  */
 const CHUNK_DRAIN_MS = Math.ceil(CHUNK * 10 / 9600) + 10;
 
 const wait = ms => new Promise(r => setTimeout(r, ms));
 
+/* Set on the first oversized write that the link refuses, so it is attempted
+ * once per connection rather than once per line. */
+let mustSlice = false;
+
 async function writeChunks(bytes, kind) {
     if (!char) throw new Error('BLE not connected');
     onChunk(new TextDecoder().decode(bytes), kind);
+
+    if (!mustSlice && bytes.length > CHUNK) {
+        try {
+            await char.writeValueWithoutResponse(bytes);
+            return;
+        } catch {
+            /* Only the MTU can refuse this, and it refuses every line equally
+             * — so ask once and remember the answer. */
+            mustSlice = true;
+        }
+    }
+
     for (let i = 0; i < bytes.length; i += CHUNK) {
         await char.writeValueWithoutResponse(bytes.slice(i, i + CHUNK));
         /* The last chunk of a payload needs no gap after it — the caller's own

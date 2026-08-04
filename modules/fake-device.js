@@ -75,6 +75,9 @@ export function makeFakeDevice(faults = {}, onEmit = null) {
          * put certificate body text on a phone screen on 2026-08-04. */
         if (!echoOff && inCertmod) emit(cmd);
 
+        if (cmd === 'ATI') { emit('Quectel_Ltd'); emit('OK'); return; }
+        /* The app answers a bare AT itself and never forwards it, so it can
+         * never carry the modem's echo — see console_line_law.py. */
         if (cmd === 'AT') { emit('OK'); return; }
 
         if (cmd === 'AT+CERTMOD') {

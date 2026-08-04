@@ -570,7 +570,9 @@ async function doCerts() {
         sendRaw: link.sendRaw,
         listen,
         until,
-        floorMs: 150,
+        /* The proven writer's `--part-delay` default, and for the reason given
+         * in `partDelayMs`: the firmware's single line buffer, not the wire. */
+        floorMs: 600,
         /* `?probe=1` spends a couple of seconds asking the modem how it counts
          * what we send, before writing anything. Off by default — it is a
          * question, and the window is for the answer we already want. */

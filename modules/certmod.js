@@ -131,11 +131,22 @@ export function buildTargets(bundle) {
 /* ── Pacing ─────────────────────────────────────────────────────────────── */
 
 /*
- * A part must be given at least its own drain time before the next one. The
- * dominant constraint is the firmware's single line buffer, but the 9600-baud
- * bridge sets a hard floor that is easy to compute and cheap to double.
+ * A part must be given at least its own drain time before the next one — and
+ * the drain that matters is not the wire's.
+ *
+ * `cli/ais01_cli/core/console_line_law.py`, read off the firmware itself, is
+ * the authority: the console has ONE 300-byte line buffer and no queue. The RX
+ * handler fills it and raises `line_ready`; the main loop dispatches, then
+ * zeroes it. Anything that arrives in between is discarded outright. A burst
+ * does not stress the link, it destroys lines.
+ *
+ * So the floor is set by how often that main loop comes round, not by 9600
+ * baud. The proven writer picked 600 ms and labelled it "conservative
+ * BLE-safe"; this ran at 150 and lost a fifth of every certificate to a
+ * buffer that had not been emptied yet. Four times too fast, silently, which
+ * is exactly the failure mode the law describes.
  */
-export function partDelayMs(partBytes, floorMs = 150) {
+export function partDelayMs(partBytes, floorMs = 600) {
     const wireMs = (partBytes * 10 / 9600) * 1000;
     return Math.max(floorMs, Math.ceil(wireMs * 2));
 }
@@ -345,19 +356,27 @@ async function enterCertmod(io, attempts = 3) {
  *     about nine seconds earlier. A `+QFUPL` answer arriving into a backlog
  *     that deep can miss its window without ever having been lost.
  *
- * The probe is the only honest test. `AT` costs nothing and its own echo is
- * the answer: if the command comes back, the echo is still on.
+ * The probe has to reach the modem to mean anything, and the obvious choice
+ * does not. `console_line_law.py` reads it off the firmware: `at_dispatch`
+ * answers a bare `AT` locally and never forwards it, so the first version of
+ * this probe was asking the app whether the modem echoes. It always came back
+ * clean, and every following command was still echoed. `ATI` is neither
+ * locally answered nor one of the 58 table entries the app intercepts, so it
+ * crosses into the BG95 and its echo is the modem's own.
  */
+const ECHO_PROBE = 'ATI';
+
 async function silenceEcho(io, attempts = 3) {
     for (let attempt = 1; attempt <= attempts; attempt++) {
         await at(io, 'ATE0', 3000);
 
-        const probe = await at(io, 'AT', 2500);
-        const echoed = probe.some(l => l.trim() === 'AT');
+        const probe = await at(io, ECHO_PROBE, 2500);
+        const echoed = probe.some(l => l.trim() === ECHO_PROBE);
         const answered = probe.some(l => /\bOK\b/.test(l));
 
         if (answered && !echoed) {
-            io.log('  echo off (AT came back without its own text)', 'note');
+            io.log(`  echo off (${ECHO_PROBE} came back without its own text)`,
+                   'note');
             return true;
         }
         if (!answered) {
