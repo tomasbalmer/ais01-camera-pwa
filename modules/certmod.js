@@ -409,6 +409,50 @@ async function exitCertmod(io, toggles = 2) {
     return false;
 }
 
+const QFLST_RE = /\+QFLST:\s*"([^"]+)"\s*,\s*(\d+)/;
+
+/*
+ * Ask a second time, down a quieter channel.
+ *
+ * A missing `+QFUPL` had been read as "the modem is still waiting for bytes",
+ * and that is one of two possibilities. The other is that the transfer
+ * finished, the modem answered, and the answer did not survive the trip back.
+ * The 2026-08-04 logs make the second one credible: the echo returning during
+ * an upload arrives in fragments and stops mid-line — `b24gUm9vdCBDQSAxMB4XDTE1M`
+ * where sixty-four characters were sent. A return path dropping that much can
+ * drop one line of answer just as easily.
+ *
+ * `AT+QFLST` settles it, and it is the right instrument precisely because it
+ * is small: one command and one short line, asked once the flood has stopped.
+ *
+ *   the file is there at the declared size  the write landed; the ANSWER was
+ *                                           lost, not the data
+ *   the file is absent or short             the modem really is short of bytes
+ *
+ * A size is still not proof of content — only the checksum is that, and this
+ * changes nothing about the gate. It is here to name the failure, which is
+ * what turns a third identical run into a different one.
+ */
+async function explainSilence(io, target, want) {
+    const lines = await at(io, `AT+QFLST="${target.bg95Name}"`, 3000);
+    const found = lines.map(l => QFLST_RE.exec(l)).find(Boolean);
+
+    if (!found) {
+        io.log('  QFLST finds no such file — the modem never completed the ' +
+               'transfer, so bytes were lost on the way in', 'fail');
+        return;
+    }
+    const size = parseInt(found[2], 10);
+    if (size === want.size) {
+        io.log(`  QFLST says the file IS there at ${size}B — the transfer ` +
+               `landed and it was the +QFUPL answer that was lost coming back`,
+               'ok');
+    } else {
+        io.log(`  QFLST says ${size}B of ${want.size}B — the modem is genuinely ` +
+               `short by ${want.size - size}`, 'fail');
+    }
+}
+
 /*
  * Ask the modem how it counts what we send it.
  *
@@ -560,13 +604,7 @@ async function writeTarget(io, target, retries = 3) {
             }
             if (!got) {
                 io.log('  no +QFUPL result received', 'fail');
-                /* Silence is not a rejected file. The modem answers as soon as
-                 * it has the byte count it was promised, so no answer means it
-                 * is still waiting for the rest — bytes were lost on the way,
-                 * and it will keep eating whatever is sent next until its
-                 * timeout expires. */
-                io.log('  the modem is short of bytes and still waiting, not ' +
-                       'refusing the file', 'note');
+                await explainSilence(io, target, want);
             }
             else io.log(`  INTEGRITY MISMATCH: got ${got.size},${hex4(got.checksum)}` +
                         ` — expected ${want.size},${hex4(want.checksum)}`, 'fail');
