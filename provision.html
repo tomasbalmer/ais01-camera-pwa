@@ -169,14 +169,19 @@
     </main>
 
     <div class="bar">
-        <label for="bundle-input">Load bundle</label>
+        <label for="bundle-input">Load device folder</label>
         <!-- No `accept` filter on purpose. iOS Files greys out .json on some
              versions, which looks like the file is missing rather than
              filtered — and the file always arrives from somewhere we do not
              control (AirDrop, Drive, a download). The parser rejects anything
              that is not a bundle, with a reason, which is the better place to
              be strict. -->
-        <input id="bundle-input" type="file">
+        <!-- webkitdirectory picks the whole folder in one gesture and, unlike a
+             loose multi-select, preserves the directory name — which is the
+             only place the IMEI exists. `multiple` is the fallback for browsers
+             without it; loadFiles() handles either, and a prepared .json bundle
+             too. -->
+        <input id="bundle-input" type="file" webkitdirectory directory multiple>
         <button id="btn-connect">Connect BLE</button>
     </div>
 

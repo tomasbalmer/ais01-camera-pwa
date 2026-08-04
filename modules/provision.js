@@ -227,14 +227,90 @@ function imeiMismatch(bundle) {
     return `bundle is for ${bundle.imei}, connected unit advertises "${advertised}"`;
 }
 
-async function loadBundleFile(file) {
+/*
+ * What AWS hands you when you create a thing is a folder, so that is what this
+ * reads. Nothing is prepared, converted or transferred first: the technician
+ * picks the folder and the app does the grouping.
+ *
+ * Files are identified by the names AWS gives them, not by order or position:
+ *
+ *   *-certificate.pem.crt   the client certificate
+ *   *-private.pem.key       the private key
+ *   password.txt            the device PIN (added by us, not by AWS)
+ *   AmazonRootCA*.pem       ignored — public, identical everywhere, in the app
+ *   *-public.pem.key        ignored — the modem never sees it
+ *
+ * The IMEI comes from the folder name, which is the only place it exists: a
+ * PEM carries no identity. When the browser gives a folder (webkitRelativePath),
+ * that check is available; when it can only give loose files, it is not, and
+ * the app says so rather than pretending.
+ */
+const FILE_ROLES = [
+    ['certificate', /-certificate\.pem\.crt$/i],
+    ['private_key', /-private\.pem\.key$/i],
+    ['password',    /^password\.txt$/i],
+];
+
+async function loadFiles(fileList) {
+    const files = Array.from(fileList || []);
+    if (!files.length) return;
+
+    /* A prepared bundle still works — it is what a Drive-based flow hands out
+     * and there is no reason to break it. */
+    const json = files.find(f => /\.json$/i.test(f.name));
+    if (json && files.length === 1) return loadBundleJson(json);
+
+    const found = {};
+    for (const [role, pattern] of FILE_ROLES) {
+        const hit = files.find(f => pattern.test(f.name));
+        if (hit) found[role] = hit;
+    }
+
+    const missing = FILE_ROLES.map(([r]) => r).filter(r => !found[r]);
+    if (missing.length) {
+        state.bundle = null;
+        el('imei').textContent = '—';
+        fail(`missing from the selection: ${missing.join(', ')}`);
+        note(`picked ${files.length} file(s): ${files.map(f => f.name).join(', ')}`);
+        note('Select the whole device folder, including password.txt.');
+        return;
+    }
+
+    /* Folder pick preserves the directory name; a loose multi-select does not. */
+    const relative = found.certificate.webkitRelativePath || '';
+    const imei = (relative.match(/(\d{15})/) || [])[1] || null;
+
+    const bundle = {
+        imei,
+        thing_name: imei ? `AIS01-CB-${imei}` : null,
+        password: (await found.password.text()).split(/\r?\n/)[0].trim(),
+        certificate: await found.certificate.text(),
+        private_key: await found.private_key.text(),
+        mqtt: {},
+    };
+
+    if (!bundle.password) { fail('password.txt is empty'); return; }
+
+    state.bundle = bundle;
+    el('imei').textContent = imei || '(unknown)';
+    ok(`loaded ${relative ? relative.split('/')[0] : files.length + ' files'}`);
+    note(`  certificate ${bundle.certificate.length}B · key ${bundle.private_key.length}B`);
+
+    if (!imei) {
+        note('No IMEI in the selection — pick the folder, not the files, to');
+        note('enable the wrong-unit check. Writing is still allowed.');
+    } else {
+        const problem = imeiMismatch(bundle);
+        if (problem) fail(`WRONG UNIT — ${problem}`);
+    }
+}
+
+async function loadBundleJson(file) {
     try {
         const bundle = parseBundle(await file.text());
         state.bundle = bundle;
         el('imei').textContent = bundle.imei;
-        note(`bundle loaded: ${file.name}`);
-        note(`  thing ${bundle.thing_name}`);
-
+        ok(`bundle loaded: ${file.name}`);
         const problem = imeiMismatch(bundle);
         if (problem) fail(`WRONG UNIT — ${problem}`);
     } catch (err) {
@@ -542,10 +618,7 @@ export function initProvision() {
     el('raw-toggle').addEventListener('click', () => setRawView(!state.rawView));
     el('copy-log').addEventListener('click', copyRawLog);
 
-    el('bundle-input').addEventListener('change', e => {
-        const file = e.target.files && e.target.files[0];
-        if (file) loadBundleFile(file);
-    });
+    el('bundle-input').addEventListener('change', e => loadFiles(e.target.files));
 
     /* Scrolling away from the tail unpins; the marker is how the operator
      * knows they are no longer looking at the present. */
