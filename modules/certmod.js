@@ -158,9 +158,36 @@ const pause = (io, ms) => (io.sleep || realSleep)(ms);
  *   until(re, ms)   same, but resolve as soon as `re` matches — ms is a ceiling
  *   log(text, kind) display; callers pass already-redacted text only
  */
+/*
+ * Wait for a marker, then drain whatever shared its batch.
+ *
+ * The drain is not optional: a collector leaves the set synchronously on the
+ * line that matches, so anything delivered after it in the same batch reaches
+ * nobody. That is the bug that cost a session on 2026-08-04, and every early
+ * resolve reintroduces it unless the drain follows.
+ */
+async function reply(io, pattern, ceilingMs, drainMs = 250) {
+    const lines = await io.until(pattern, ceilingMs);
+    return lines.concat(await io.listen(drainMs));
+}
+
+/* What ends an AT exchange. An echoed command is not an answer, so the
+ * terminator has to be the answer itself. */
+const AT_DONE = /^\s*(OK|ERROR|CONNECT|\+CM[ES] ERROR)/im;
+
+/*
+ * One AT command, resolved by its answer rather than by a stopwatch.
+ *
+ * `windowMs` used to be a duration and is now a ceiling. Every exchange in a
+ * cert write was paying its full budget whether or not the device had already
+ * answered — `ATE0`, the echo probe, and two `QFDEL`s alone spent ten seconds
+ * waiting for replies that had arrived in a few hundred milliseconds. In a
+ * window worth about twenty-five seconds that was most of it, and it is why
+ * three files never fit into one.
+ */
 async function at(io, command, windowMs) {
     io.log(command, 'tx');
-    const replies = io.listen(windowMs);
+    const replies = reply(io, AT_DONE, windowMs);
     await io.send(command);
     return replies;
 }
@@ -383,6 +410,81 @@ async function exitCertmod(io, toggles = 2) {
 }
 
 /*
+ * Ask the modem how it counts what we send it.
+ *
+ * The write has been failing with silence, and silence has exactly one
+ * meaning: the modem has not yet received the byte count it was promised, so
+ * it is still waiting. What it cannot tell us is WHY — twenty bytes short
+ * because the firmware did not append the LF it is supposed to append, or
+ * short by an arbitrary amount because the link dropped some.
+ *
+ * This settles it in about two seconds. Three PEM lines are sent under a
+ * throwaway name, declaring the size they occupy ON THE WIRE — a count the
+ * modem reaches whether or not anything is added on the way, so it always
+ * answers. The checksum in that answer says which content actually arrived:
+ *
+ *   checksum(wire)             the firmware forwards the bare CR untouched
+ *   checksum(canonical[0..n])  the firmware appends LF, as it is documented to
+ *   neither                    bytes were lost, and this is a link problem
+ *
+ * `cacert.pem` is never touched by any of it.
+ */
+const PROBE_NAME = 'wpprobe.txt';
+
+function concatBytes(chunks) {
+    const out = new Uint8Array(chunks.reduce((n, c) => n + c.length, 0));
+    let at = 0;
+    for (const c of chunks) { out.set(c, at); at += c.length; }
+    return out;
+}
+
+async function probeByteAccounting(io, target) {
+    const parts = target.parts.slice(0, 3);
+    const wire = concatBytes(parts);
+    const canonical = concatBytes(
+        parts.map(p => concatBytes([p, new Uint8Array([0x0A])])));
+    const declared = wire.length;
+
+    io.log(`byte-accounting probe: ${parts.length} lines, declaring the wire ` +
+           `count ${declared}`, 'note');
+
+    await at(io, `AT+QFDEL="${PROBE_NAME}"`, 2000);
+    const opened = await at(io, `AT+QFUPL="${PROBE_NAME}",${declared},10`, 3000);
+    if (!opened.some(l => l.includes('CONNECT'))) {
+        io.log('  probe could not open an upload — inconclusive', 'fail');
+        return;
+    }
+
+    let collected = [];
+    for (let i = 0; i < parts.length; i++) {
+        const final = i === parts.length - 1;
+        io.log(`[probe line ${i + 1}/${parts.length}]`, 'tx');
+        const replies = final ? reply(io, QFUPL_RE, 8000) : io.listen(60);
+        await io.sendRaw(parts[i]);
+        collected = collected.concat(await replies);
+        if (!final) await pause(io, partDelayMs(parts[i].length, io.floorMs));
+    }
+
+    const got = parseQfupl(collected);
+    if (!got) {
+        io.log('  VERDICT: even three lines did not arrive complete — the link ' +
+               'is losing bytes, not the byte accounting', 'fail');
+    } else if (got.checksum === qfuplChecksum(wire)) {
+        io.log('  VERDICT: the firmware forwards the bare CR untouched — every ' +
+               'declared size is one byte per line too large', 'fail');
+    } else if (got.checksum === qfuplChecksum(canonical.slice(0, declared))) {
+        io.log('  VERDICT: the firmware appends LF as documented — the byte ' +
+               'accounting is right and the loss is elsewhere', 'ok');
+    } else {
+        io.log(`  VERDICT: arrived complete but as neither candidate ` +
+               `(+QFUPL: ${got.size},${hex4(got.checksum)}) — content is being ` +
+               `altered in transit`, 'fail');
+    }
+
+    await at(io, `AT+QFDEL="${PROBE_NAME}"`, 2000);
+}
+
+/*
  * Inventory, after the writes. The reference is explicit that this is evidence
  * and not an integrity gate — the checksums above remain the only proof of
  * correct stored content. It is here because "the file exists on the modem with
@@ -403,7 +505,14 @@ async function streamParts(io, target) {
 
         io.log(`[${target.bg95Name} PEM part ${i + 1}/${target.parts.length} redacted]`,
                'tx');
-        const replies = io.listen(final ? 15000 : 60);
+        /* The modem answers the moment it has the byte count it was promised,
+         * so the last part waits for that answer rather than for a fixed
+         * fifteen seconds. Every successful file used to spend those seconds
+         * after it had already succeeded — the cost of the second and third
+         * file being written in a window that had already been spent. */
+        const replies = final
+            ? reply(io, QFUPL_RE, 15000)
+            : io.listen(60);
         await io.sendRaw(part);
         collected = collected.concat(await replies);
 
@@ -481,6 +590,9 @@ export async function writeCerts(io, bundle, onProgress = () => {}) {
     let exited = false;
     await enterCertmod(io);
     try {
+        /* Opt-in, because it spends window on a question rather than on the
+         * write. Reach for it when a file comes back silent — `?probe=1`. */
+        if (io.probe) await probeByteAccounting(io, targets[0]);
         for (let i = 0; i < targets.length; i++) {
             await writeTarget(io, targets[i]);
             onProgress(i + 1, targets.length);

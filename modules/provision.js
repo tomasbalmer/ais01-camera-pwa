@@ -571,6 +571,10 @@ async function doCerts() {
         listen,
         until,
         floorMs: 150,
+        /* `?probe=1` spends a couple of seconds asking the modem how it counts
+         * what we send, before writing anything. Off by default — it is a
+         * question, and the window is for the answer we already want. */
+        probe: new URLSearchParams(location.search).has('probe'),
         log: (text, kind) => write(text, kind === 'ok' ? 'ok'
             : kind === 'fail' ? 'fail' : kind === 'tx' ? 'tx' : 'note'),
     };
