@@ -16,7 +16,7 @@
  * cached shell — pull to refresh, or reinstall the app from the home screen.
  */
 
-export const VERSION = '0.9.0';
+export const VERSION = '0.9.1';
 
 /* One line, for the places that want context rather than just a number. */
-export const VERSION_NOTE = 'reads the AWS folder directly';
+export const VERSION_NOTE = 'folder read + IMEI guard fix';

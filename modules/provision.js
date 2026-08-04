@@ -223,6 +223,13 @@ function parseBundle(text) {
 function imeiMismatch(bundle) {
     const advertised = link.deviceName();
     if (!advertised || !bundle) return null;
+
+    /* No IMEI in the selection means the browser handed over loose files rather
+     * than a folder. There is nothing to compare, so there is no mismatch —
+     * claiming one would refuse a correct unit, which is the exact opposite of
+     * this guard's job. The absence is already reported once, at load. */
+    if (!bundle.imei) return null;
+
     if (advertised.includes(bundle.imei)) return null;
     return `bundle is for ${bundle.imei}, connected unit advertises "${advertised}"`;
 }
