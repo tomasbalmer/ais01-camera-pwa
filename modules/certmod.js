@@ -356,8 +356,17 @@ async function writeTarget(io, target, retries = 3) {
          * allowed; the upload still starts from a clean slot. */
         await at(io, `AT+QFDEL="${target.bg95Name}"`, 2000);
 
+        /*
+         * The third argument is how long the modem will sit in data mode
+         * waiting for the rest of the file. The reference uses 100 s, which
+         * over USB is never reached; over BLE a short transfer leaves the
+         * modem consuming everything sent afterwards — on 2026-08-04 the two
+         * retries never saw `CONNECT` because their commands were being eaten
+         * as file content. 20 s is comfortably past a complete transfer and
+         * gives the rest of the window back when one is not.
+         */
         const opened = await at(
-            io, `AT+QFUPL="${target.bg95Name}",${want.size},100`, 3000);
+            io, `AT+QFUPL="${target.bg95Name}",${want.size},20`, 3000);
 
         if (!opened.some(l => l.includes('CONNECT'))) {
             io.log('  QFUPL did not return CONNECT', 'fail');
@@ -367,7 +376,16 @@ async function writeTarget(io, target, retries = 3) {
                 io.log(`  VERIFIED +QFUPL: ${got.size},${hex4(got.checksum)}`, 'ok');
                 return true;
             }
-            if (!got) io.log('  no +QFUPL result received', 'fail');
+            if (!got) {
+                io.log('  no +QFUPL result received', 'fail');
+                /* Silence is not a rejected file. The modem answers as soon as
+                 * it has the byte count it was promised, so no answer means it
+                 * is still waiting for the rest — bytes were lost on the way,
+                 * and it will keep eating whatever is sent next until its
+                 * timeout expires. */
+                io.log('  the modem is short of bytes and still waiting, not ' +
+                       'refusing the file', 'note');
+            }
             else io.log(`  INTEGRITY MISMATCH: got ${got.size},${hex4(got.checksum)}` +
                         ` — expected ${want.size},${hex4(want.checksum)}`, 'fail');
         }

@@ -142,11 +142,37 @@ export async function reconnect() {
     onStatus('connected', device.name || '');
 }
 
+/*
+ * Every chunk is given its own drain time before the next one is queued.
+ *
+ * `writeValueWithoutResponse` resolves when a chunk is QUEUED, not when it has
+ * been sent, so the loop below has no backpressure of its own. BLE delivers
+ * well above 2 kB/s and the BT24's UART drains at 9600 baud — 960 B/s — so a
+ * 65-byte PEM line goes out as four chunks with nothing between them, and the
+ * module has to absorb the whole burst while the firmware is busy printing its
+ * own `Signal Strength` heartbeat. Whatever does not fit is dropped silently.
+ *
+ * Pacing between LINES was not enough, and could not have been: it made the
+ * average rate safe while leaving every individual burst as sharp as before.
+ * On 2026-08-04 a 1208-byte CA reached the modem short — no `+QFUPL` at all,
+ * which is the modem still waiting for the rest, not a checksum it disliked.
+ *
+ * 20 bytes need 20 × 10 / 9600 ≈ 21 ms on the wire. The floor below is a
+ * little over that, so the stream leaves at roughly the speed the UART can
+ * take it rather than in bursts it cannot.
+ */
+const CHUNK_DRAIN_MS = Math.ceil(CHUNK * 10 / 9600) + 10;
+
+const wait = ms => new Promise(r => setTimeout(r, ms));
+
 async function writeChunks(bytes, kind) {
     if (!char) throw new Error('BLE not connected');
     onChunk(new TextDecoder().decode(bytes), kind);
     for (let i = 0; i < bytes.length; i += CHUNK) {
         await char.writeValueWithoutResponse(bytes.slice(i, i + CHUNK));
+        /* The last chunk of a payload needs no gap after it — the caller's own
+         * pacing, or its wait for a reply, covers that. */
+        if (i + CHUNK < bytes.length) await wait(CHUNK_DRAIN_MS);
     }
 }
 
