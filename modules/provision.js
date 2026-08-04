@@ -20,6 +20,7 @@ import {
     sendLine, sendRaw, disconnect,
 } from './ble-transport.js';
 import { writeCerts } from './certmod.js';
+import { VERSION, VERSION_NOTE } from './version.js';
 
 /*
  * Every device call goes through this one object so `?mock` can replace the
@@ -423,6 +424,11 @@ async function installMock(kind) {
 }
 
 export function initProvision() {
+    /* First line of every session, so it lands in any screenshot sent back
+     * from a bench. A log without a version is a log you cannot place. */
+    el('app-version').textContent = `v${VERSION}`;
+    note(`AIS01 Provision v${VERSION} — ${VERSION_NOTE}`);
+
     el('btn-connect').addEventListener('click', doConnect);
     el('btn-login').addEventListener('click', doLogin);
     el('btn-certs').addEventListener('click', doCerts);

@@ -133,6 +133,12 @@
                 <button id="ble-btn" class="connect-btn connect-btn-primary" onclick="toggleBLE()">Connect via Bluetooth</button>
                 <button id="big-btn" class="connect-btn connect-btn-secondary" onclick="toggleConnection()">Connect via USB</button>
                 <p id="message" style="display:none;"></p>
+                <!--
+                  Filled from modules/version.js after the modules load. If this
+                  stays empty, the shell rendered but the modules did not — which
+                  is itself the answer to "why does this look old?".
+                -->
+                <p id="app-version" style="margin-top:18px;font-size:11px;color:#475569;font-family:ui-monospace,Menlo,monospace;text-align:center;"></p>
             </div>
 
             <!-- USB session ended screen -->
@@ -577,6 +583,15 @@
             }
         }
         await import('./app.js');
+
+        /* Rendered from a module, on purpose: modules come through the service
+         * worker with no-store, so this number is always the deployed one. If
+         * it disagrees with what you just shipped, the HTML shell is cached —
+         * not the code. */
+        const { VERSION } = await import('./modules/version.js');
+        const badge = document.getElementById('app-version');
+        if (badge) badge.textContent = `v${VERSION}`;
+
         const splash = document.getElementById('splash');
         if (splash) {
             splash.style.transition = 'opacity 0.3s ease-out';
