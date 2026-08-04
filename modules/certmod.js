@@ -172,18 +172,20 @@ async function at(io, command, windowMs) {
  * both observed live on 2026-08-04:
  *
  *     >>> AT+CERTMOD
- *     [33445]Exit certificate mode
+ *     [35102]Exit certificate mode
  *     NORMAL POWER DOWN            <- the BG95 going away
  *     >>> AT+CERTMOD
- *     [37533]Enter certificate mode
- *     [39175]Signal Strength:0     <- and staying away
+ *     [40820]Enter certificate mode
+ *     RDY                          <- and coming back
+ *     [42470]Signal Strength:0     <- with no network yet, which is not the
+ *                                     same thing as not being there
  *
- * So finding the unit already inside is not a state to toggle out of and back
- * into: the second entry lands on a modem that is off, and `RDY` never comes
- * because nothing is there to send it. The only way back is a reset, and that
- * is a physical fact this code cannot work around — it can only say so.
+ * The state is therefore recoverable in software: a unit found inside is
+ * toggled out and straight back in, inside the same window, at the cost of a
+ * few seconds rather than a reset. `Signal Strength:0` had previously been
+ * read as a modem that was gone — it is a modem that has just booted.
  *
- * Which makes leaving a unit inside passthrough a real cost, not an untidiness.
+ * Leaving a unit inside passthrough is still a real cost, not an untidiness.
  * `enterCertmod` therefore cleans up after itself: if it engages and cannot
  * confirm the modem, it toggles back out before throwing, so the next attempt
  * starts from a known state instead of inheriting this one.
@@ -196,31 +198,47 @@ async function at(io, command, windowMs) {
 async function enterCertmod(io, attempts = 3) {
     for (let attempt = 1; attempt <= attempts; attempt++) {
         io.log('AT+CERTMOD', 'tx');
-        const reply = io.until(/certificate mode/i, 12000);
+
+        /*
+         * ONE collector spans the whole entry, from the command to the answer
+         * that settles it. Two sequential collectors lose everything that
+         * arrives between them, and on 2026-08-04 that cost a good session:
+         * the device sent `Enter certificate mode` / `OK` / `RDY` in a single
+         * batch, the first collector resolved on the first line and left the
+         * set synchronously, and the collector that then went looking for RDY
+         * registered a beat too late. It waited its full 25 s for a line that
+         * had already gone past, and the code took that silence for a modem
+         * that was not there — while the modem was up and waiting.
+         *
+         * So the wait ends on what actually decides the outcome: BG95 `RDY`,
+         * or the `Exit` that says the unit was already inside.
+         */
+        const settled = io.until(
+            /Exit certificate mode|(^|\s)RDY(\s|$)/i, 15000);
         await io.send('AT+CERTMOD');
-        let seen = (await reply).join('\n');
+        let seen = (await settled).join('\n');
+
+        /* Lines sharing a batch with the resolving one are delivered after it.
+         * A short drain is what makes the buffer complete rather than merely
+         * long enough — it is the same gap, one level down. */
+        seen += '\n' + (await io.listen(400)).join('\n');
 
         if (/Exit certificate mode/i.test(seen)) {
-            /* A previous attempt left it inside. It is now out — which is the
-             * right state — but the modem went down on the way, so nothing can
-             * be written until the unit reboots. */
-            throw new Error(
-                'The unit was still inside passthrough from an earlier attempt. ' +
-                'It has now been taken out, and leaving passthrough powers the ' +
-                'BG95 down — press RESET, wait for the window, and tap ② again');
+            /* A previous attempt left it inside, and it is now out. Leaving
+             * powers the BG95 down, but entering brings it back — observed
+             * live: `Exit` + `NORMAL POWER DOWN`, then a re-entry answered
+             * with `RDY`. So this is a state to pass through, not a reason to
+             * send the operator back for a reset. The RDY gate below is what
+             * stays honest if the modem does not in fact return. */
+            io.log('was inside passthrough — now out, re-entering', 'note');
+            await pause(io, 1500);
+            continue;
         }
 
         if (!/Enter certificate mode/i.test(seen)) {
             io.log(`no CERTMOD response; retry ${attempt + 1}/${attempts}`, 'note');
             await pause(io, 1500);
             continue;
-        }
-
-        /* Engaged on the firmware side. From here on, any failure has to undo
-         * it — see the note above about inheriting state. */
-        if (!/(^|\s)RDY(\s|$)/.test(seen)) {
-            io.log('entered — waiting for BG95 RDY', 'note');
-            seen += '\n' + (await io.until(/(^|\s)RDY(\s|$)/, 25000)).join('\n');
         }
 
         if (!/(^|\s)RDY(\s|$)/.test(seen)) {

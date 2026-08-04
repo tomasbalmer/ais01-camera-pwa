@@ -16,7 +16,7 @@
  * cached shell — pull to refresh, or reinstall the app from the home screen.
  */
 
-export const VERSION = '0.11.1';
+export const VERSION = '0.12.0';
 
 /* One line, for the places that want context rather than just a number. */
-export const VERSION_NOTE = 'the RAW toggle no longer erases the log';
+export const VERSION_NOTE = 'RDY is no longer lost in the batch that carries it';

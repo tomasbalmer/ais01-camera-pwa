@@ -128,16 +128,40 @@ await scenario('an unconfirmed exit is an error, not a note', { noExit: true },
         return null;
     });
 
+/*
+ * The regression that cost a live session on 2026-08-04, and the reason this
+ * simulator now models the app's collector rather than a forgiving window.
+ *
+ * `Enter certificate mode` / `OK` / `RDY` arrive in ONE batch. Any entry that
+ * stops listening on the first of them and then starts again for RDY misses
+ * it, waits out its whole ceiling, and concludes the modem is dead — one
+ * command short of streaming the certificates it was there to write.
+ *
+ * The assertion is deliberately the happy path: with a modem that answers
+ * immediately, the write must complete. It failed before this fix.
+ */
+await scenario('does not lose RDY when it shares a batch with the entry', {},
+    (out, fake) => {
+        if (!out.ok) return `threw: ${out.error}`;
+        const t = fake.transcript;
+        const rdy = t.indexOf('RDY');
+        const enter = t.indexOf('Enter certificate mode');
+        if (rdy === -1 || enter === -1) return 'the batch was never emitted';
+        if (rdy - enter > 2) return 'RDY did not arrive with the entry';
+        if (!t.some(l => l.startsWith('CONNECT'))) return 'never opened an upload';
+        return null;
+    });
+
 /* Observed live: the unit was already inside passthrough from a failed run, so
- * the first AT+CERTMOD took it OUT — and leaving passthrough powers the BG95
- * down. Re-entering therefore lands on a modem that is off. The unit must be
- * left out and the human told to reset, not toggled back in. */
-await scenario('does not re-enter after finding the unit inside',
+ * the first AT+CERTMOD takes it OUT and the BG95 goes down with it. Entering
+ * again brings the modem back — `RDY` arrived on the re-entry — so this is a
+ * state to pass through inside one window, not a reset to send a human away
+ * for. What must NOT happen is proceeding without that RDY. */
+await scenario('passes through a unit found inside passthrough',
     { startInside: true }, (out, fake) => {
-        if (out.ok) return 'entered anyway, on a modem that is powered down';
-        if (!/press RESET/i.test(out.error)) return `unhelpful error: ${out.error}`;
+        if (!out.ok) return `gave up instead of re-entering: ${out.error}`;
         const toggles = fake.received.filter(c => c === 'AT+CERTMOD').length;
-        if (toggles !== 1) return `sent AT+CERTMOD ${toggles} times, expected 1`;
+        if (toggles !== 3) return `sent AT+CERTMOD ${toggles} times, expected 3`;
         if (fake.state().inCertmod) return 'left the unit inside passthrough';
         return null;
     });

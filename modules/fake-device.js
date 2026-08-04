@@ -42,7 +42,13 @@ export function makeFakeDevice(faults = {}, onEmit = null) {
 
     const emit = line => {
         emitted.push(line);
-        listeners.forEach(l => l.lines.push(line));
+        /* A copy, because `onLine` unregisters mid-delivery — the whole point
+         * of this simulator is to let that happen the way it happens live. */
+        for (const l of [...listeners]) {
+            if (!listeners.includes(l)) continue;
+            l.lines.push(line);
+            if (l.onLine) l.onLine(line);
+        }
         /* When the page drives this, its terminal is the other subscriber —
          * the same path a real notification takes, so the display and the
          * redaction filter are exercised too. */
@@ -58,12 +64,23 @@ export function makeFakeDevice(faults = {}, onEmit = null) {
         if (cmd === 'AT+CERTMOD') {
             inCertmod = !inCertmod;
             if (inCertmod) {
+                /* Observed live 2026-08-04, and the reason the three lines are
+                 * emitted together: they arrive in ONE batch, so a collector
+                 * that resolves on the first of them loses the other two. */
                 emit('Enter certificate mode');
+                emit('OK');
+                /* Entering powers the BG95 back up. The earlier reading — that
+                 * a re-entry lands on a dead modem — came from `Signal
+                 * Strength:0`, which is a modem that just booted and has no
+                 * network yet, not a modem that is absent. RDY says it is
+                 * there, and RDY is what arrived. */
+                if (!faults.deadModem) modemUp = true;
                 if (!faults.noRdy && modemUp) emit('RDY');
             } else if (!faults.noExit) {
                 emit('Exit certificate mode');
-                /* Leaving passthrough powers the BG95 down — the reason a
-                 * re-entry finds nothing home. */
+                emit('OK');
+                /* Leaving passthrough powers the BG95 down. Survivable — the
+                 * next entry brings it back — but never free. */
                 emit('NORMAL POWER DOWN');
                 modemUp = false;
             }
@@ -133,7 +150,38 @@ export function makeFakeDevice(faults = {}, onEmit = null) {
                 resolve(l.lines);
             }, 5));
         },
-        until(_pattern, ms) { return io.listen(ms); },
+        /*
+         * This must be the app's `until`, not a window that ignores the
+         * pattern — which is what it used to be, and why ten passing scenarios
+         * said nothing about the bug that actually stopped a cert write on
+         * 2026-08-04.
+         *
+         * The behaviour that matters is the unregister: the collector leaves
+         * the set SYNCHRONOUSLY on the matching line, while the rest of the
+         * batch is still being delivered. Whatever the device says after the
+         * marker and before the next collector registers is delivered to
+         * nobody. A simulator that collects everything for a fixed window
+         * cannot lose a line, so it cannot reproduce the one failure this
+         * conversation is most exposed to.
+         */
+        until(pattern, ms) {
+            const l = { lines: [] };
+            listeners.push(l);
+            return new Promise(resolve => {
+                l.onLine = line => {
+                    if (!pattern.test(line)) return;
+                    listeners = listeners.filter(x => x !== l);
+                    resolve(l.lines);
+                };
+                /* The ceiling is collapsed, like every other delay here: what
+                 * is being rehearsed is the ORDER lines arrive in, never how
+                 * long the code is willing to wait for them. */
+                setTimeout(() => {
+                    listeners = listeners.filter(x => x !== l);
+                    resolve(l.lines);
+                }, Math.min(ms, 5));
+            });
+        },
         async send(text) { onLine(text); },
         async sendRaw(bytes) { onRaw(bytes); },
         log() {},
