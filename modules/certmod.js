@@ -289,24 +289,97 @@ async function enterCertmod(io, attempts = 3) {
         }
 
         io.log('CERTMOD engaged (Enter certificate mode + BG95 RDY)', 'note');
-        const echo = await at(io, 'ATE0', 3000);
-        if (!echo.some(l => /\bOK\b/.test(l))) {
+        if (!await silenceEcho(io)) {
             await exitCertmod(io);
             throw new Error(
-                'BG95 did not confirm ATE0 — refusing to stream key material ' +
-                'into a console that may echo it back onto this screen');
+                'BG95 echo could not be turned off — refusing to stream key ' +
+                'material into a console that echoes it back onto this screen');
         }
         return;
     }
     throw new Error('could not enter CERTMOD with a confirmed BG95 RDY');
 }
 
-async function exitCertmod(io) {
-    const lines = await at(io, 'AT+CERTMOD', 12000);
-    const confirmed = lines.join('\n').includes('Exit certificate mode');
-    io.log(`CERTMOD exit: ${confirmed ? 'confirmed' : 'UNCONFIRMED'}`,
-           confirmed ? 'note' : 'fail');
-    return confirmed;
+/*
+ * Turn the BG95's echo off, and prove it rather than believe it.
+ *
+ * Entering passthrough reboots the modem, which comes back at its `ATE1`
+ * default, so the echo the firmware silenced during its own init is on again.
+ * `OK` after `ATE0` was being taken as proof and is not: on 2026-08-04 every
+ * later command still came back echoed, and so did the certificate body —
+ * `b6dNqcmzU5L/qw` appeared verbatim in the log during the upload.
+ *
+ * Two reasons that matters, and only one of them is tidiness:
+ *
+ *   - a private key echoed onto a phone screen is the disclosure this gate
+ *     exists to prevent;
+ *   - the echo doubles the return traffic through a 9600-baud console, and it
+ *     showed: at 16:34:13 the display was rendering device time [53443] from
+ *     about nine seconds earlier. A `+QFUPL` answer arriving into a backlog
+ *     that deep can miss its window without ever having been lost.
+ *
+ * The probe is the only honest test. `AT` costs nothing and its own echo is
+ * the answer: if the command comes back, the echo is still on.
+ */
+async function silenceEcho(io, attempts = 3) {
+    for (let attempt = 1; attempt <= attempts; attempt++) {
+        await at(io, 'ATE0', 3000);
+
+        const probe = await at(io, 'AT', 2500);
+        const echoed = probe.some(l => l.trim() === 'AT');
+        const answered = probe.some(l => /\bOK\b/.test(l));
+
+        if (answered && !echoed) {
+            io.log('  echo off (AT came back without its own text)', 'note');
+            return true;
+        }
+        if (!answered) {
+            io.log(`  no answer to the echo probe; retry ${attempt + 1}/${attempts}`,
+                   'note');
+            continue;
+        }
+        io.log(`  echo still on after ATE0; retry ${attempt + 1}/${attempts}`,
+               'note');
+    }
+    return false;
+}
+
+/*
+ * Leave passthrough — and check which way the toggle actually went.
+ *
+ * `AT+CERTMOD` is a toggle with no query form, so "exit" is only an intention.
+ * Observed 2026-08-04: when the firmware powered the NB module off at [58245]
+ * it had already left certificate mode on its own, so the exit sent at [71752]
+ * ENTERED instead, answered `Enter certificate mode` + `RDY`, and the run
+ * finished by leaving the unit inside the state it was trying to leave.
+ *
+ * That is where every following run's `was inside passthrough` came from: a
+ * cost we were charging ourselves, twice — a wasted entry attempt and the
+ * seconds it takes, in a window that has none to spare.
+ *
+ * So the reply decides. `Enter` means the unit was already out and is now in;
+ * one more toggle puts it back.
+ */
+async function exitCertmod(io, toggles = 2) {
+    for (let i = 1; i <= toggles; i++) {
+        const seen = (await at(io, 'AT+CERTMOD', 12000)).join('\n');
+
+        if (/Exit certificate mode/i.test(seen)) {
+            io.log('CERTMOD exit: confirmed', 'note');
+            return true;
+        }
+        if (/Enter certificate mode/i.test(seen)) {
+            /* The firmware had already left. This toggle put it back in, so it
+             * takes one more to undo — and that one will answer `Exit`. */
+            io.log('CERTMOD was already out; that toggle re-entered it — ' +
+                   'toggling back', 'note');
+            continue;
+        }
+        io.log('CERTMOD exit: no answer to the toggle', 'fail');
+        return false;
+    }
+    io.log('CERTMOD exit: UNCONFIRMED after both toggles', 'fail');
+    return false;
 }
 
 /*

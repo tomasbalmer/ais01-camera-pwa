@@ -16,7 +16,7 @@
  * cached shell — pull to refresh, or reinstall the app from the home screen.
  */
 
-export const VERSION = '0.14.0';
+export const VERSION = '0.15.0';
 
 /* One line, for the places that want context rather than just a number. */
-export const VERSION_NOTE = 'every BLE chunk gets its own drain time';
+export const VERSION_NOTE = 'echo is proved off, and the exit checks which way it went';

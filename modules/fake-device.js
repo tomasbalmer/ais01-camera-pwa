@@ -70,8 +70,18 @@ export function makeFakeDevice(faults = {}, onEmit = null) {
         const cmd = text.trim();
         received.push(cmd);
 
+        /* A modem with echo on sends the command back before answering it.
+         * That is what makes `OK` after `ATE0` worthless as proof, and what
+         * put certificate body text on a phone screen on 2026-08-04. */
+        if (!echoOff && inCertmod) emit(cmd);
+
+        if (cmd === 'AT') { emit('OK'); return; }
+
         if (cmd === 'AT+CERTMOD') {
             inCertmod = !inCertmod;
+            /* The modem reboots on the way in, so it comes back at its ATE1
+             * default and whatever the firmware silenced earlier is undone. */
+            if (inCertmod) echoOff = false;
             if (inCertmod) {
                 /* Observed live 2026-08-04, and the reason the three lines are
                  * emitted together: they arrive in ONE batch, so a collector
@@ -96,8 +106,20 @@ export function makeFakeDevice(faults = {}, onEmit = null) {
             return;
         }
         if (cmd === 'ATE0') {
-            if (faults.refuseAte0) emit('ERROR');
-            else { echoOff = true; emit('OK'); }
+            if (faults.refuseAte0) { emit('ERROR'); return; }
+            /* Observed live: `OK` came back and every later command was still
+             * echoed. An answer is not an effect, and only the probe can tell
+             * them apart. */
+            if (!faults.ate0Lies) echoOff = true;
+            emit('OK');
+            return;
+        }
+        if (cmd.startsWith('AT+QFLST')) {
+            /* The firmware can drop out of certificate mode by itself — it did
+             * on 2026-08-04 when it powered the NB module down. After that the
+             * exit toggle goes the other way. */
+            if (faults.exitFindsItOut) inCertmod = false;
+            emit('OK');
             return;
         }
         if (cmd.startsWith('AT+QFDEL=')) {

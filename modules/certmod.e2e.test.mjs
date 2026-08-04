@@ -69,9 +69,36 @@ await scenario('refuses to proceed when BG95 never says RDY', { noRdy: true },
 await scenario('refuses to stream when ATE0 is not confirmed', { refuseAte0: true },
     (out, fake) => {
         if (out.ok) return 'streamed with echo possibly on';
-        if (!/ATE0/.test(out.error)) return `wrong error: ${out.error}`;
+        if (!/echo/i.test(out.error)) return `wrong error: ${out.error}`;
         if (fake.transcript.some(l => l.startsWith('CONNECT')))
             return 'opened an upload anyway';
+        return null;
+    });
+
+/*
+ * The live failure, and the reason `OK` stopped counting as proof: on
+ * 2026-08-04 ATE0 was answered and the echo stayed on, so every command came
+ * back and so did the certificate body. Only sending something and watching
+ * for its own text can tell an answer from an effect.
+ */
+await scenario('an answered ATE0 that did not take is still echo on',
+    { ate0Lies: true }, (out, fake) => {
+        if (out.ok) return 'streamed into a console that echoes key material';
+        if (!/echo/i.test(out.error)) return `wrong error: ${out.error}`;
+        if (fake.transcript.some(l => l.startsWith('CONNECT')))
+            return 'opened an upload anyway';
+        return null;
+    });
+
+/*
+ * Observed live at [71752]: the firmware had already left certificate mode
+ * when it powered the NB module down, so the exit toggle ENTERED — and the
+ * run finished by leaving the unit inside the state it meant to leave. Every
+ * following run then paid for it twice, in a window with nothing to spare.
+ */
+await scenario('an exit that enters is toggled back out', { exitFindsItOut: true },
+    (out, fake) => {
+        if (fake.state().inCertmod) return 'left the unit inside passthrough';
         return null;
     });
 
