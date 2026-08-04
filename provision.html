@@ -49,13 +49,14 @@
 
         /* The terminal is the instrument, so it takes every spare pixel. */
         main { flex: 1 1 auto; position: relative; min-height: 0; }
-        #terminal {
+        #terminal, #terminal-raw {
             position: absolute; inset: 0;
             overflow-y: auto; padding: 8px 12px 20px;
             font-family: ui-monospace, "SF Mono", Menlo, monospace;
             font-size: 12px; line-height: 1.45;
             -webkit-overflow-scrolling: touch;
         }
+        [hidden] { display: none !important; }
         .line { white-space: pre-wrap; word-break: break-word; }
         .line-rx   { color: #cbd5e1; }
         .line-tx   { color: #7dd3fc; }
@@ -64,9 +65,13 @@
         .line-fail { color: #f87171; font-weight: 600; }
 
         /* Raw view: no per-line elements, no styling, no interpretation —
-           the buffer printed as it arrived. */
-        #terminal.raw {
-            white-space: pre-wrap;
+           the buffer printed as it arrived. It is a SEPARATE element from the
+           annotated terminal on purpose. One element rendering two views meant
+           that showing either one destroyed the other, and a log a toggle can
+           erase is not a log. */
+        #terminal-raw {
+            margin: 0;
+            white-space: pre-wrap; word-break: break-word;
             color: #cbd5e1;
         }
 
@@ -157,6 +162,7 @@
 
     <main>
         <div id="terminal"></div>
+        <pre id="terminal-raw" hidden></pre>
         <!-- Controls sit on the log they act on. RAW shows the bytes exactly
              as the device sent them; SHARE hands the whole buffer to whoever
              has to diagnose it, which on a bench is not the person holding the

@@ -95,23 +95,36 @@ function rawAppend(text, dir) {
 }
 
 function renderRaw() {
-    const out = el('terminal');
+    const out = el('terminal-raw');
     out.textContent = rawLog || '(nothing received yet)';
-    if (state.pinned) out.scrollTop = out.scrollHeight;
+    if (state.pinned) tail(out);
 }
 
+/*
+ * The two views are two elements, and switching only changes which one is
+ * hidden. Nothing is cleared and nothing is replayed, because both panes are
+ * written to at all times — including while they are hidden.
+ *
+ * This used to be one element rendered two ways, which meant every toggle
+ * destroyed the view it was leaving: RAW overwrote the annotated lines, and
+ * coming back started from an empty screen. On a bench that is the log of the
+ * boot you are in the middle of, gone for having looked at it.
+ */
 function setRawView(on) {
     state.rawView = on;
     el('raw-toggle').textContent = on ? 'ANNOTATED' : 'RAW';
-    el('terminal').classList.toggle('raw', on);
+    el('terminal').hidden = on;
+    el('terminal-raw').hidden = !on;
+
+    /* A hidden element has no scroll height, so neither pane can be tailed
+     * while it is off screen — the one coming back is re-pinned here. The raw
+     * pane is also re-rendered here rather than on every chunk, since printing
+     * a megabyte buffer nobody is looking at is work for nothing. */
     if (on) renderRaw();
-    else {
-        /* The annotated view is rebuilt from here on, not replayed: its history
-         * lives in the DOM and the raw log is the thing that survives. */
-        el('terminal').textContent = '';
-        note('— switched to annotated view; the raw log is unaffected —');
-    }
+    else if (state.pinned) tail(el('terminal'));
 }
+
+function tail(out) { out.scrollTop = out.scrollHeight; }
 
 async function copyRawLog() {
     const text = rawLog || '(empty)';
@@ -151,7 +164,9 @@ function write(text, kind = 'rx') {
     /* Bounded: a bench session runs for hours across many boots. */
     while (out.childElementCount > 2000) out.removeChild(out.firstChild);
 
-    if (state.pinned) out.scrollTop = out.scrollHeight;
+    /* Writing continues while this pane is hidden — only the scroll does not,
+     * because a hidden element has no height to scroll. setRawView re-pins. */
+    if (state.pinned && !out.hidden) tail(out);
 }
 
 function note(text) { write(text, 'note'); }
@@ -373,7 +388,7 @@ async function doConnect() {
     try {
         /* Redact for the screen only — the collectors that decide whether a
          * write landed must still see the real bytes. */
-        const onLine = line => { if (!state.rawView) write(redact(line)); feed(line); };
+        const onLine = line => { write(redact(line)); feed(line); };
         const onChunk = (text, dir) => rawAppend(text, dir);
         const name = await link.connect({ onLine, onChunk, onStatus: setLink });
         if (name === null) { note('scan dismissed'); return; }
@@ -613,7 +628,7 @@ async function installMock(kind) {
 
     const fake = makeFakeDevice(faults, line => {
         rawAppend(line + '\r\n');
-        if (!state.rawView) write(redact(line));
+        write(redact(line));
         feed(line);
     });
     let up = false;
@@ -655,13 +670,15 @@ export function initProvision() {
 
     /* Scrolling away from the tail unpins; the marker is how the operator
      * knows they are no longer looking at the present. */
-    const out = el('terminal');
-    out.addEventListener('scroll', () => {
-        const atBottom =
-            out.scrollHeight - out.scrollTop - out.clientHeight < 24;
-        state.pinned = atBottom;
-        el('live').style.visibility = atBottom ? 'visible' : 'hidden';
-    });
+    for (const id of ['terminal', 'terminal-raw']) {
+        const out = el(id);
+        out.addEventListener('scroll', () => {
+            const atBottom =
+                out.scrollHeight - out.scrollTop - out.clientHeight < 24;
+            state.pinned = atBottom;
+            el('live').style.visibility = atBottom ? 'visible' : 'hidden';
+        });
+    }
 
     const kind = new URLSearchParams(location.search).get('mock');
     if (kind !== null || location.search.includes('mock')) {
