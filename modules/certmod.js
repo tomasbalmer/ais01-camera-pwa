@@ -142,7 +142,12 @@ export function partDelayMs(partBytes, floorMs = 150) {
 
 /* ── Orchestration ──────────────────────────────────────────────────────── */
 
-const sleep = ms => new Promise(r => setTimeout(r, ms));
+const realSleep = ms => new Promise(r => setTimeout(r, ms));
+
+/* Pacing is a device property, so it is injectable like every other one. A
+ * simulated modem has no 300-byte buffer to drain and should not cost nine
+ * seconds a run to say so. */
+const pause = (io, ms) => (io.sleep || realSleep)(ms);
 
 /*
  * `io` is the whole device dependency, so this module never imports a
@@ -189,7 +194,7 @@ async function enterCertmod(io, attempts = 3) {
         }
         if (attempt < attempts) {
             io.log(`modem not idle; retry ${attempt + 1}/${attempts}`, 'note');
-            await sleep(1500);
+            await pause(io, 1500);
         }
     }
     throw new Error('could not enter CERTMOD with a confirmed BG95 RDY');
@@ -217,7 +222,7 @@ async function streamParts(io, target) {
         await io.sendRaw(part);
         collected = collected.concat(await replies);
 
-        if (!final) await sleep(partDelayMs(part.length, io.floorMs));
+        if (!final) await pause(io, partDelayMs(part.length, io.floorMs));
     }
     return parseQfupl(collected);
 }
@@ -257,7 +262,7 @@ async function writeTarget(io, target, retries = 3) {
 
         /* Never leave a known-bad file in the modem between attempts. */
         await at(io, `AT+QFDEL="${target.bg95Name}"`, 2000);
-        if (attempt < retries) await sleep(2000);
+        if (attempt < retries) await pause(io, 2000);
     }
     throw new Error(
         `${target.bg95Name} failed the checksum gate after ${retries} attempts`);

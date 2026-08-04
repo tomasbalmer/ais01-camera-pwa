@@ -21,6 +21,15 @@ import {
 } from './ble-transport.js';
 import { writeCerts } from './certmod.js';
 
+/*
+ * Every device call goes through this one object so `?mock` can replace the
+ * device without the stages knowing. The stages are the thing worth testing;
+ * they must not contain a branch for being tested.
+ */
+const link = {
+    connect, reconnect, isConnected, deviceName, sendLine, sendRaw, disconnect,
+};
+
 /* Everything below is app state. None of it describes the device. */
 const state = {
     bundle: null,
@@ -28,6 +37,7 @@ const state = {
     pendingDeltas: null, /* config deltas awaiting a confirming second tap */
     redacting: false,  /* key material may be on the wire — see redact() */
     busy: false,       /* a stage's own loop is running */
+    mock: false,       /* ?mock — simulated device, no radio */
 };
 
 /*
@@ -147,7 +157,7 @@ function parseBundle(text) {
  * link is not up yet (nothing to compare against).
  */
 function imeiMismatch(bundle) {
-    const advertised = deviceName();
+    const advertised = link.deviceName();
     if (!advertised || !bundle) return null;
     if (advertised.includes(bundle.imei)) return null;
     return `bundle is for ${bundle.imei}, connected unit advertises "${advertised}"`;
@@ -173,7 +183,7 @@ async function loadBundleFile(file) {
 /* Refuse to write anything without a bundle that matches this unit. */
 function bundleReady() {
     if (!state.bundle) { fail('no bundle loaded'); return false; }
-    if (!isConnected()) { fail('not connected'); return false; }
+    if (!link.isConnected()) { fail('not connected'); return false; }
     const problem = imeiMismatch(state.bundle);
     if (problem) { fail(`refusing to write — ${problem}`); return false; }
     return true;
@@ -182,17 +192,17 @@ function bundleReady() {
 /* ── Actions ─────────────────────────────────────────────────────────── */
 
 async function doConnect() {
-    if (!hasBluetooth()) {
+    if (!state.mock && !hasBluetooth()) {
         fail('This browser has no Web Bluetooth. On iOS use Bluefy.');
         return;
     }
-    if (isConnected()) { await disconnect(); setLink('disconnected'); return; }
+    if (link.isConnected()) { await link.disconnect(); setLink('disconnected'); return; }
 
     try {
         /* Redact for the screen only — the collectors that decide whether a
          * write landed must still see the real bytes. */
         const onLine = line => { write(redact(line)); feed(line); };
-        const name = await connect({ onLine, onStatus: setLink });
+        const name = await link.connect({ onLine, onStatus: setLink });
         if (name === null) { note('scan dismissed'); return; }
         note(`paired with ${name}`);
         if (state.bundle) {
@@ -206,16 +216,16 @@ async function doConnect() {
 
 async function doLogin() {
     if (!state.bundle) { fail('no bundle loaded — the password is in it'); return; }
-    if (!isConnected()) {
+    if (!link.isConnected()) {
         /* An idle drop is normal on BT24; try the same device before giving up. */
-        try { await reconnect(); } catch (err) {
+        try { await link.reconnect(); } catch (err) {
             fail(`not connected: ${err.message}`); return;
         }
     }
     write('••••••  (password)', 'tx');
     setMark('login', 'sending', 'run');
     const replies = listen(3000);
-    await sendLine(state.bundle.password);
+    await link.sendLine(state.bundle.password);
 
     /*
      * There is no "login OK" to wait for — only the one reply that means no.
@@ -246,9 +256,9 @@ async function doLogin() {
  * shown in the terminal — the operator reads it, exactly like everything else.
  */
 async function doReadConfig() {
-    if (!isConnected()) { fail('not connected'); return; }
+    if (!link.isConnected()) { fail('not connected'); return; }
     write('AT+CFG', 'tx');
-    await sendLine('AT+CFG');
+    await link.sendLine('AT+CFG');
     note('read the dump above, then tap ③ again to stage the deltas');
 }
 
@@ -300,7 +310,7 @@ async function doApplyConfig() {
     for (const [i, cmd] of deltas.entries()) {
         write(cmd, 'tx');
         const replies = listen(350);
-        await sendLine(cmd);
+        await link.sendLine(cmd);
         /* Paced, not timed: the console is a 9600-baud bridge and swallows a
          * burst. This is not a wait-for-the-window heuristic. */
         const lines = await replies;
@@ -337,8 +347,8 @@ async function doCerts() {
     if (state.busy) { note('a stage is already running'); return; }
 
     const io = {
-        send: sendLine,
-        sendRaw,
+        send: link.sendLine,
+        sendRaw: link.sendRaw,
         listen,
         floorMs: 150,
         log: (text, kind) => write(text, kind === 'ok' ? 'ok'
@@ -374,6 +384,44 @@ function doVerify() {
 
 /* ── Wiring ──────────────────────────────────────────────────────────── */
 
+/*
+ * `?mock` — drive the real page against the simulated device.
+ *
+ * Same convention as modules/mock.js: dynamically imported, never on a
+ * production path. This exists because the one thing a hardware session cannot
+ * rehearse is its own failures, and because the BLE chooser is native browser
+ * UI that nothing can drive on your behalf. What it proves is the wiring —
+ * buttons, marks, redaction, the terminal — against a modem that computes its
+ * checksum independently.
+ *
+ *   ?mock            happy path
+ *   ?mock=nordy      passthrough half-engaged — must refuse
+ *   ?mock=noecho     ATE0 refused — must refuse to stream
+ *   ?mock=drop       a lost part — must fail the gate, then recover on retry
+ */
+async function installMock(kind) {
+    const { makeFakeDevice } = await import('./fake-device.js');
+    const faults = kind === 'nordy' ? { noRdy: true }
+        : kind === 'noecho' ? { refuseAte0: true }
+        : kind === 'drop' ? { dropPart: 5, healAfter: 1 }
+        : {};
+
+    const fake = makeFakeDevice(faults, line => { write(redact(line)); feed(line); });
+    let up = false;
+    state.mock = true;
+
+    link.connect = async () => { up = true; setLink('connected', 'simulated'); return 'MOCK-869181072714122'; };
+    link.reconnect = async () => { up = true; };
+    link.isConnected = () => up;
+    link.deviceName = () => 'MOCK-869181072714122';
+    link.sendLine = fake.io.send;
+    link.sendRaw = fake.io.sendRaw;
+    link.disconnect = async () => { up = false; };
+
+    fail(`MOCK MODE (${kind || 'happy path'}) — no radio, no device.`);
+    note('Everything below is simulated. Nothing here proves the link works.');
+}
+
 export function initProvision() {
     el('btn-connect').addEventListener('click', doConnect);
     el('btn-login').addEventListener('click', doLogin);
@@ -400,6 +448,12 @@ export function initProvision() {
         state.pinned = atBottom;
         el('live').style.visibility = atBottom ? 'visible' : 'hidden';
     });
+
+    const kind = new URLSearchParams(location.search).get('mock');
+    if (kind !== null || location.search.includes('mock')) {
+        installMock(kind || '');
+        return;
+    }
 
     if (!hasBluetooth()) {
         fail('No Web Bluetooth in this browser. On iOS use Bluefy.');
