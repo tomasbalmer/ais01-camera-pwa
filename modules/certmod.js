@@ -168,64 +168,75 @@ async function at(io, command, windowMs) {
 /*
  * Enter passthrough.
  *
- * `AT+CERTMOD` is a TOGGLE, not an "enter". Sending it to a unit that is
- * already inside takes it *out* — observed live on 2026-08-04, where the first
- * command answered "Exit certificate mode" and the write then failed for a
- * reason that had nothing to do with the link. Treating the toggle-out as a
- * failed attempt is wrong: it is a successful command that moved the device the
- * other way, and the correct response is to send it again.
+ * `AT+CERTMOD` is a TOGGLE, and leaving passthrough POWERS THE MODEM DOWN —
+ * both observed live on 2026-08-04:
+ *
+ *     >>> AT+CERTMOD
+ *     [33445]Exit certificate mode
+ *     NORMAL POWER DOWN            <- the BG95 going away
+ *     >>> AT+CERTMOD
+ *     [37533]Enter certificate mode
+ *     [39175]Signal Strength:0     <- and staying away
+ *
+ * So finding the unit already inside is not a state to toggle out of and back
+ * into: the second entry lands on a modem that is off, and `RDY` never comes
+ * because nothing is there to send it. The only way back is a reset, and that
+ * is a physical fact this code cannot work around — it can only say so.
+ *
+ * Which makes leaving a unit inside passthrough a real cost, not an untidiness.
+ * `enterCertmod` therefore cleans up after itself: if it engages and cannot
+ * confirm the modem, it toggles back out before throwing, so the next attempt
+ * starts from a known state instead of inheriting this one.
  *
  * BG95 `RDY` remains the mandatory engagement proof — the firmware printing
- * entry means the STM32 side flipped, while the modem may not have, and
- * streaming into that state writes nowhere. But RDY is the modem *rebooting*,
- * so it arrives seconds after the entry line, not with it. It gets its own
- * budget, and the wait ends the moment it appears rather than burning the
- * ceiling.
+ * entry means the STM32 flipped while the modem may not have, and streaming
+ * into that writes nowhere. It arrives seconds late (it is a reboot), so the
+ * wait ends on the marker rather than on a fixed window.
  */
 async function enterCertmod(io, attempts = 3) {
-    let toggles = 0;
-
-    for (let attempt = 1; attempt <= attempts; ) {
+    for (let attempt = 1; attempt <= attempts; attempt++) {
         io.log('AT+CERTMOD', 'tx');
         const reply = io.until(/certificate mode/i, 12000);
         await io.send('AT+CERTMOD');
         let seen = (await reply).join('\n');
 
         if (/Exit certificate mode/i.test(seen)) {
-            if (++toggles > 2) {
-                throw new Error(
-                    'AT+CERTMOD keeps toggling out — the unit will not stay in ' +
-                    'passthrough. Reset it and read the log');
-            }
-            io.log('was already inside passthrough — toggled out; entering again',
-                   'note');
-            await pause(io, 1500);
-            continue;                       /* not a failed attempt */
+            /* A previous attempt left it inside. It is now out — which is the
+             * right state — but the modem went down on the way, so nothing can
+             * be written until the unit reboots. */
+            throw new Error(
+                'The unit was still inside passthrough from an earlier attempt. ' +
+                'It has now been taken out, and leaving passthrough powers the ' +
+                'BG95 down — press RESET, wait for the window, and tap ② again');
         }
 
         if (!/Enter certificate mode/i.test(seen)) {
             io.log(`no CERTMOD response; retry ${attempt + 1}/${attempts}`, 'note');
-            attempt++;
             await pause(io, 1500);
             continue;
         }
 
-        /* Entered. RDY may already be in what we just read; if not, it is the
-         * modem restarting and worth waiting for properly. */
+        /* Engaged on the firmware side. From here on, any failure has to undo
+         * it — see the note above about inheriting state. */
         if (!/(^|\s)RDY(\s|$)/.test(seen)) {
             io.log('entered — waiting for BG95 RDY', 'note');
             seen += '\n' + (await io.until(/(^|\s)RDY(\s|$)/, 25000)).join('\n');
         }
 
         if (!/(^|\s)RDY(\s|$)/.test(seen)) {
+            io.log('no RDY — leaving passthrough so the next attempt starts clean',
+                   'note');
+            await exitCertmod(io);
             throw new Error(
                 'CERTMOD state unknown: the firmware printed entry but BG95 RDY ' +
-                'was never seen. Reset the unit and read the log before retrying');
+                'was never seen. The modem is not responding — press RESET and ' +
+                'read the log before retrying');
         }
 
         io.log('CERTMOD engaged (Enter certificate mode + BG95 RDY)', 'note');
         const echo = await at(io, 'ATE0', 3000);
         if (!echo.some(l => /\bOK\b/.test(l))) {
+            await exitCertmod(io);
             throw new Error(
                 'BG95 did not confirm ATE0 — refusing to stream key material ' +
                 'into a console that may echo it back onto this screen');

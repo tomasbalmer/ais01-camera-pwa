@@ -34,6 +34,7 @@ export function makeFakeDevice(faults = {}, onEmit = null) {
     const received = [];   /* what we were told, so tests can assert on it */
     let listeners = [];
     let inCertmod = !!faults.startInside;
+    let modemUp = true;
     let echoOff = false;
     let upload = null;          /* { name, declaredSize, stored: [] } */
     let attempts = {};          /* per filename, to drive healAfter */
@@ -58,9 +59,13 @@ export function makeFakeDevice(faults = {}, onEmit = null) {
             inCertmod = !inCertmod;
             if (inCertmod) {
                 emit('Enter certificate mode');
-                if (!faults.noRdy) emit('RDY');
+                if (!faults.noRdy && modemUp) emit('RDY');
             } else if (!faults.noExit) {
                 emit('Exit certificate mode');
+                /* Leaving passthrough powers the BG95 down — the reason a
+                 * re-entry finds nothing home. */
+                emit('NORMAL POWER DOWN');
+                modemUp = false;
             }
             return;
         }

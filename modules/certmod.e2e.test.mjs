@@ -128,15 +128,27 @@ await scenario('an unconfirmed exit is an error, not a note', { noExit: true },
         return null;
     });
 
-/* Observed live: the unit was already inside passthrough, so the first
- * AT+CERTMOD took it OUT. A toggle-out is a command that worked and moved the
- * device the other way — sending it again is the fix, not a retry budget. */
-await scenario('recovers when the unit is already inside passthrough',
+/* Observed live: the unit was already inside passthrough from a failed run, so
+ * the first AT+CERTMOD took it OUT — and leaving passthrough powers the BG95
+ * down. Re-entering therefore lands on a modem that is off. The unit must be
+ * left out and the human told to reset, not toggled back in. */
+await scenario('does not re-enter after finding the unit inside',
     { startInside: true }, (out, fake) => {
-        if (!out.ok) return `threw: ${out.error}`;
-        if (out.files !== 3) return `wrote ${out.files} files`;
+        if (out.ok) return 'entered anyway, on a modem that is powered down';
+        if (!/press RESET/i.test(out.error)) return `unhelpful error: ${out.error}`;
         const toggles = fake.received.filter(c => c === 'AT+CERTMOD').length;
-        if (toggles < 3) return `only ${toggles} toggles — never re-entered`;
+        if (toggles !== 1) return `sent AT+CERTMOD ${toggles} times, expected 1`;
+        if (fake.state().inCertmod) return 'left the unit inside passthrough';
+        return null;
+    });
+
+/* The failure that produced all of the above: entering, failing to confirm the
+ * modem, and leaving the unit inside for the next run to inherit. */
+await scenario('leaves passthrough when RDY never arrives', { noRdy: true },
+    (out, fake) => {
+        if (out.ok) return 'proceeded without RDY';
+        if (fake.state().inCertmod)
+            return 'left the unit inside — the next attempt inherits this';
         return null;
     });
 
