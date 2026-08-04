@@ -86,7 +86,9 @@
             padding-bottom: calc(8px + env(safe-area-inset-bottom));
         }
         .actions button {
-            flex: 1; min-height: 52px; padding: 6px 4px;
+            flex: 1; min-height: 56px; padding: 6px 4px;
+            display: flex; flex-direction: column;
+            align-items: center; justify-content: center; gap: 3px;
             border: 1px solid #334155; border-radius: 8px;
             background: #1e293b; color: #e2e8f0;
             font-size: 12px; font-weight: 600;
@@ -94,6 +96,21 @@
         }
         .actions button:active { background: #334155; }
         .actions button.armed { background: #b45309; border-color: #f59e0b; }
+
+        /*
+          The per-stage mark reports what the stage's own commands came back
+          with — confirmation, not device-phase inference. Its wording is
+          deliberately uneven: stages whose evidence is weak must not wear the
+          same green tick as stages the modem or the platform actually proved.
+        */
+        .mark {
+            font-size: 10px; font-weight: 500; line-height: 1;
+            color: #64748b; min-height: 11px;
+        }
+        .mark-ok    { color: #4ade80; }
+        .mark-weak  { color: #fbbf24; }
+        .mark-fail  { color: #f87171; }
+        .mark-run   { color: #7dd3fc; }
 
         .bar {
             flex: 0 0 auto; display: flex; gap: 6px; padding: 8px;
@@ -134,10 +151,18 @@
     </div>
 
     <div class="actions">
-        <button id="btn-login">①&nbsp;LOGIN</button>
-        <button id="btn-certs">②&nbsp;CERTS</button>
-        <button id="btn-config">③&nbsp;CONFIG</button>
-        <button id="btn-verify">④&nbsp;VERIFY</button>
+        <button id="btn-login">
+            <span class="label">①&nbsp;LOGIN</span><span id="mark-login" class="mark"></span>
+        </button>
+        <button id="btn-certs">
+            <span class="label">②&nbsp;CERTS</span><span id="mark-certs" class="mark"></span>
+        </button>
+        <button id="btn-config">
+            <span class="label">③&nbsp;CONFIG</span><span id="mark-config" class="mark"></span>
+        </button>
+        <button id="btn-verify">
+            <span class="label">④&nbsp;VERIFY</span><span id="mark-verify" class="mark"></span>
+        </button>
     </div>
 
     <script type="module">

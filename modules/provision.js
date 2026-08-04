@@ -58,6 +58,43 @@ function write(text, kind = 'rx') {
 function note(text) { write(text, 'note'); }
 function fail(text) { write(text, 'fail'); }
 
+/* ── Confirmation ────────────────────────────────────────────────────────
+ *
+ * Reading the reply to a command this app just sent is confirmation, and it is
+ * the one thing the code must keep doing — it is not the phase inference the
+ * spec rules out. The difference is the question being asked: "what did my
+ * command come back with" versus "what do I think the device is doing now".
+ */
+
+const collectors = new Set();
+
+function feed(line) {
+    for (const c of collectors) c.lines.push(line);
+}
+
+/* Collect everything the device says for `ms`, then resolve with the lines. */
+function listen(ms) {
+    const c = { lines: [] };
+    collectors.add(c);
+    return new Promise(resolve => setTimeout(() => {
+        collectors.delete(c);
+        resolve(c.lines);
+    }, ms));
+}
+
+/*
+ * The per-stage mark. Its wording is deliberately uneven across stages: only
+ * ② and ④ carry evidence strong enough to be called proof — a checksum the
+ * modem computed over what it stored, and the platform seeing an uplink. ① and
+ * ③ get an amber mark that says what was observed and nothing more, because a
+ * green tick on "OK was returned" would be a claim this app cannot support.
+ */
+function setMark(stage, text, kind = 'weak') {
+    const mark = el(`mark-${stage}`);
+    mark.textContent = text;
+    mark.className = `mark mark-${kind}`;
+}
+
 function setLink(status, detail) {
     const dot = el('link-state');
     dot.textContent = status === 'connected' ? '● BLE'
@@ -131,7 +168,8 @@ async function doConnect() {
     if (isConnected()) { await disconnect(); setLink('disconnected'); return; }
 
     try {
-        const name = await connect({ onLine: write, onStatus: setLink });
+        const onLine = line => { write(line); feed(line); };
+        const name = await connect({ onLine, onStatus: setLink });
         if (name === null) { note('scan dismissed'); return; }
         note(`paired with ${name}`);
         if (state.bundle) {
@@ -152,7 +190,31 @@ async function doLogin() {
         }
     }
     write('••••••  (password)', 'tx');
+    setMark('login', 'sending', 'run');
+    const replies = listen(3000);
     await sendLine(state.bundle.password);
+
+    /*
+     * There is no "login OK" to wait for — only the one reply that means no.
+     * `Password Incorrect` at this point almost always means the password was
+     * sent before the window opened, not that it is wrong, so the mark says
+     * exactly that instead of asserting a cause.
+     */
+    const lines = await replies;
+    if (lines.some(l => /password\s+incorrect/i.test(l))) {
+        setMark('login', 'refused', 'fail');
+        fail('Password Incorrect — almost always too soon, not wrong.');
+        note('Press RESET, wait for "NBIOT has responded.", tap ① again.');
+        return;
+    }
+    if (lines.some(l => /password\s+timeout/i.test(l))) {
+        setMark('login', 'expired', 'fail');
+        fail('Password timeout — the session expired. Log in again.');
+        return;
+    }
+    /* Amber, not green: silence is consistent with a good login and does not
+     * prove one. The next command is what proves it. */
+    setMark('login', 'no refusal', 'weak');
 }
 
 /*
@@ -200,28 +262,46 @@ async function doStageConfig() {
     state.pendingDeltas = wanted.map(([k, v]) => `${k}=${v}`);
     note(`staged ${state.pendingDeltas.length} settings:`);
     state.pendingDeltas.forEach(line => note(`  ${line}`));
-    el('btn-config').textContent = `③ APPLY ${state.pendingDeltas.length}`;
+    el('btn-config').querySelector('.label').textContent =
+        `③ APPLY ${state.pendingDeltas.length}`;
     el('btn-config').classList.add('armed');
+    setMark('config', 'staged', 'run');
 }
 
 async function doApplyConfig() {
     if (!bundleReady()) return;
     const deltas = state.pendingDeltas || [];
-    for (const cmd of deltas) {
+    let accepted = 0;
+    setMark('config', `0/${deltas.length}`, 'run');
+
+    for (const [i, cmd] of deltas.entries()) {
         write(cmd, 'tx');
+        const replies = listen(350);
         await sendLine(cmd);
         /* Paced, not timed: the console is a 9600-baud bridge and swallows a
          * burst. This is not a wait-for-the-window heuristic. */
-        await new Promise(r => setTimeout(r, 350));
+        const lines = await replies;
+        if (lines.some(l => /\bOK\b/.test(l))) accepted++;
+        else if (lines.some(l => /ERROR/i.test(l))) fail(`  ${cmd} → ERROR`);
+        setMark('config', `${i + 1}/${deltas.length}`, 'run');
     }
-    note(`sent ${deltas.length} settings — read the replies above`);
+
+    /*
+     * Amber even at 9/9. `OK` means the command parsed, not that the setting
+     * survives a reboot — the only proof is re-reading AT+CFG after a reset,
+     * and this app does not get to claim it on the device's behalf.
+     */
+    setMark('config', `${accepted}/${deltas.length} OK`,
+            accepted === deltas.length ? 'weak' : 'fail');
+    note(`${accepted}/${deltas.length} settings returned OK`);
     note('OK is not persisted: verify with AT+CFG after a reset');
     state.pendingDeltas = null;
-    el('btn-config').textContent = '③ CONFIG';
+    el('btn-config').querySelector('.label').textContent = '③ CONFIG';
     el('btn-config').classList.remove('armed');
 }
 
 function doCerts() {
+    setMark('certs', 'not built', 'fail');
     fail('② WRITE CERTS is not implemented yet.');
     note('The CERTMOD/QFUPL upload is checksum-gated and must match the');
     note('reference in AIS01-CB-LTE cli/ais01_cli/commands/certs.py.');
@@ -229,6 +309,7 @@ function doCerts() {
 }
 
 function doVerify() {
+    setMark('verify', 'no backend', 'fail');
     fail('④ RESET & VERIFY needs the backend check that does not exist yet.');
     note('Interim: reset the unit, wait one cycle, and confirm in AWS IoT that');
     note(`${state.bundle ? state.bundle.imei : 'this IMEI'} published.`);
