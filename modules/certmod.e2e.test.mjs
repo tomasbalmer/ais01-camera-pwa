@@ -64,14 +64,22 @@ await scenario('refuses to proceed when BG95 never says RDY', { noRdy: true },
         return null;
     });
 
-/* Echo off is a confidentiality gate, not a nicety — this terminal is on a
- * phone screen. No ATE0, no secrets on the wire. */
+/*
+ * Echo off is a confidentiality gate, not a nicety — this terminal is on a
+ * phone screen. But the three files are not equally secret: the Amazon root CA
+ * ships in this app's own source and the client certificate is presented in
+ * the clear on every handshake. Only the private key is worth refusing over,
+ * and refusing over all three only meant that a modem whose echo will not go
+ * off could not be provisioned at all.
+ */
+const keyUpload = fake =>
+    fake.received.some(c => c.startsWith('AT+QFUPL="user_key.pem"'));
+
 await scenario('refuses to stream when ATE0 is not confirmed', { refuseAte0: true },
     (out, fake) => {
-        if (out.ok) return 'streamed with echo possibly on';
+        if (out.ok) return 'completed with echo on';
         if (!/echo/i.test(out.error)) return `wrong error: ${out.error}`;
-        if (fake.transcript.some(l => l.startsWith('CONNECT')))
-            return 'opened an upload anyway';
+        if (keyUpload(fake)) return 'streamed the private key with echo on';
         return null;
     });
 
@@ -83,10 +91,9 @@ await scenario('refuses to stream when ATE0 is not confirmed', { refuseAte0: tru
  */
 await scenario('an answered ATE0 that did not take is still echo on',
     { ate0Lies: true }, (out, fake) => {
-        if (out.ok) return 'streamed into a console that echoes key material';
+        if (out.ok) return 'completed into a console that echoes key material';
         if (!/echo/i.test(out.error)) return `wrong error: ${out.error}`;
-        if (fake.transcript.some(l => l.startsWith('CONNECT')))
-            return 'opened an upload anyway';
+        if (keyUpload(fake)) return 'streamed the private key with echo on';
         return null;
     });
 

@@ -121,10 +121,15 @@ export function buildTargets(bundle) {
             parts: wireParts(text),
         };
     };
+    /* `secret` decides whether an unsilenced echo is a reason to refuse. The
+     * CA ships in this file's source and the client certificate is presented
+     * in the clear on every TLS handshake; the key is the one that matters. */
     return [
-        of('CA', BG95_NAMES.ca, AMAZON_ROOT_CA1),
-        of('client certificate', BG95_NAMES.cert, bundle.certificate),
-        of('private key', BG95_NAMES.key, bundle.private_key),
+        { ...of('CA', BG95_NAMES.ca, AMAZON_ROOT_CA1), secret: false },
+        { ...of('client certificate', BG95_NAMES.cert, bundle.certificate),
+          secret: false },
+        { ...of('private key', BG95_NAMES.key, bundle.private_key),
+          secret: true },
     ];
 }
 
@@ -327,11 +332,19 @@ async function enterCertmod(io, attempts = 3) {
         }
 
         io.log('CERTMOD engaged (Enter certificate mode + BG95 RDY)', 'note');
-        if (!await silenceEcho(io)) {
-            await exitCertmod(io);
-            throw new Error(
-                'BG95 echo could not be turned off — refusing to stream key ' +
-                'material into a console that echoes it back onto this screen');
+        /*
+         * An echo that will not go off is a disclosure risk, and the risk is
+         * not the same for all three files. The Amazon root CA and the client
+         * certificate are public — the CA ships in this app's source. Only the
+         * private key is a secret, and only it is worth refusing over.
+         *
+         * So the outcome is recorded and enforced per file, rather than
+         * stopping a write that discloses nothing. See `writeTarget`.
+         */
+        io.echoOff = await silenceEcho(io);
+        if (!io.echoOff) {
+            io.log('echo is STILL ON — public material may be written, the ' +
+                   'private key will not be', 'fail');
         }
         return;
     }
@@ -591,6 +604,12 @@ async function streamParts(io, target) {
  */
 async function writeTarget(io, target, retries = 3) {
     const want = { size: target.declaredSize, checksum: target.expectedChecksum };
+
+    if (target.secret && io.echoOff === false) {
+        throw new Error(
+            'BG95 echo could not be turned off — refusing to stream the ' +
+            'private key into a console that echoes it back onto this screen');
+    }
 
     for (let attempt = 1; attempt <= retries; attempt++) {
         io.log(`${target.label} → ${target.bg95Name} ` +

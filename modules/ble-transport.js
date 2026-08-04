@@ -209,9 +209,20 @@ async function writeChunks(bytes, kind) {
     }
 }
 
-/* One AT command. The device's line terminator is CRLF. */
+/*
+ * One AT command, terminated by a BARE CR — the same law the PEM parts obey.
+ *
+ * `console_line_law.py`: the RX handler raises `line_ready` on CR *or* LF, and
+ * the main loop dispatches and only then zeroes the buffer. A `\r\n` therefore
+ * raises it twice, and the second one can catch the buffer before the memset —
+ * so the command is dispatched again. It is visible in the log: `ATE0` echoed
+ * back twice from a single send. Every command was being executed twice.
+ *
+ * The terminator is destroyed and CRLF re-appended before forwarding either
+ * way, so a lone CR loses nothing and stops the double dispatch.
+ */
 export async function sendLine(text) {
-    await writeChunks(new TextEncoder().encode(text + '\r\n'), 'tx-line');
+    await writeChunks(new TextEncoder().encode(text + '\r'), 'tx-line');
 }
 
 /* Payload bytes with no terminator — the body of an AT+QFUPL upload, where
