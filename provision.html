@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="theme-color" content="#0f172a">
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+    <meta http-equiv="Pragma" content="no-cache">
+    <meta http-equiv="Expires" content="0">
+    <title>AIS01 Provision</title>
+    <link rel="icon" type="image/svg+xml" href="waterplan-icon.svg">
+    <link rel="apple-touch-icon" href="waterplan-icon.svg">
+    <link rel="manifest" href="manifest.json">
+    <!--
+      Deliberately self-contained: this page shares no CSS with the calibration
+      flow. Provisioning talks to Dragino v1.3, calibration talks to our custom
+      firmware — keeping them apart is the point of a second entry point, and a
+      shared stylesheet is how two pages start drifting into one.
+      Spec: specs/004-ble-provisioning-mode.md
+    -->
+    <style>
+        * { box-sizing: border-box; }
+        html, body {
+            margin: 0; height: 100%;
+            background: #0f172a; color: #e2e8f0;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            overscroll-behavior: none;
+        }
+        body { display: flex; flex-direction: column; }
+
+        header {
+            padding: 10px 14px 8px;
+            border-bottom: 1px solid #1e293b;
+            flex: 0 0 auto;
+        }
+        .row { display: flex; align-items: center; justify-content: space-between; }
+        .title { font-size: 15px; font-weight: 600; }
+        .link { font-size: 13px; font-variant-numeric: tabular-nums; }
+        .link-connected { color: #4ade80; }
+        .link-reconnecting { color: #fbbf24; }
+        .link-disconnected { color: #64748b; }
+        .meta {
+            margin-top: 4px; font-size: 13px; color: #94a3b8;
+            font-family: ui-monospace, "SF Mono", Menlo, monospace;
+        }
+        .meta b { color: #e2e8f0; font-weight: 500; }
+
+        /* The terminal is the instrument, so it takes every spare pixel. */
+        main { flex: 1 1 auto; position: relative; min-height: 0; }
+        #terminal {
+            position: absolute; inset: 0;
+            overflow-y: auto; padding: 8px 12px 20px;
+            font-family: ui-monospace, "SF Mono", Menlo, monospace;
+            font-size: 12px; line-height: 1.45;
+            -webkit-overflow-scrolling: touch;
+        }
+        .line { white-space: pre-wrap; word-break: break-word; }
+        .line-rx   { color: #cbd5e1; }
+        .line-tx   { color: #7dd3fc; }
+        .line-note { color: #64748b; }
+        .line-fail { color: #f87171; font-weight: 600; }
+
+        #live {
+            position: absolute; right: 10px; bottom: 8px;
+            font-size: 11px; color: #4ade80;
+            background: #0f172acc; padding: 2px 6px; border-radius: 4px;
+            pointer-events: none;
+        }
+
+        /* Static text. It never reacts and is never hidden — documentation
+           printed on the tool, not a state readout. */
+        .cheat {
+            flex: 0 0 auto;
+            padding: 8px 14px;
+            background: #1e293b; border-top: 1px solid #334155;
+            font-size: 12px; color: #cbd5e1; line-height: 1.4;
+        }
+        .cheat code { color: #fbbf24; font-family: ui-monospace, monospace; }
+
+        .actions {
+            flex: 0 0 auto;
+            display: flex; gap: 6px; padding: 8px;
+            border-top: 1px solid #1e293b;
+            padding-bottom: calc(8px + env(safe-area-inset-bottom));
+        }
+        .actions button {
+            flex: 1; min-height: 52px; padding: 6px 4px;
+            border: 1px solid #334155; border-radius: 8px;
+            background: #1e293b; color: #e2e8f0;
+            font-size: 12px; font-weight: 600;
+            -webkit-tap-highlight-color: transparent;
+        }
+        .actions button:active { background: #334155; }
+        .actions button.armed { background: #b45309; border-color: #f59e0b; }
+
+        .bar {
+            flex: 0 0 auto; display: flex; gap: 6px; padding: 8px;
+            border-top: 1px solid #1e293b;
+        }
+        .bar button, .bar label {
+            flex: 1; min-height: 40px;
+            display: flex; align-items: center; justify-content: center;
+            border: 1px solid #334155; border-radius: 8px;
+            background: #0f172a; color: #cbd5e1; font-size: 13px;
+        }
+        .bar input { display: none; }
+    </style>
+</head>
+<body>
+    <header>
+        <div class="row">
+            <span class="title">AIS01 Provision</span>
+            <span id="link-state" class="link link-disconnected">○ BLE</span>
+        </div>
+        <div class="meta">IMEI <b id="imei">—</b></div>
+    </header>
+
+    <main>
+        <div id="terminal"></div>
+        <div id="live">▼ live</div>
+    </main>
+
+    <div class="bar">
+        <label for="bundle-input">Load bundle</label>
+        <input id="bundle-input" type="file" accept=".json,application/json">
+        <button id="btn-connect">Connect BLE</button>
+    </div>
+
+    <div class="cheat">
+        Wait for <code>NBIOT has responded.</code> before login.
+        <code>Password Incorrect</code> this early means too soon, not wrong.
+    </div>
+
+    <div class="actions">
+        <button id="btn-login">①&nbsp;LOGIN</button>
+        <button id="btn-certs">②&nbsp;CERTS</button>
+        <button id="btn-config">③&nbsp;CONFIG</button>
+        <button id="btn-verify">④&nbsp;VERIFY</button>
+    </div>
+
+    <script type="module">
+        import { initProvision } from './modules/provision.js';
+        initProvision();
+    </script>
+</body>
+</html>

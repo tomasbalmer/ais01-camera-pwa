@@ -191,9 +191,17 @@ AIS01-CB-<IMEI>.json
   "password":    "……",
   "certificate": "-----BEGIN CERTIFICATE-----\n…",
   "private_key": "-----BEGIN RSA PRIVATE KEY-----\n…",
-  "expect": { "certificate": "3A7C", "private_key": "91B2" }
+  "expect": { "certificate": "3A7C", "private_key": "91B2" },
+  "mqtt":   { "endpoint": "…-ats.iot.<region>.amazonaws.com",
+              "endpoint_ip": "…", "tdc": 3600 }
 }
 ```
+
+`mqtt` is environment configuration rather than per-unit material, but it rides
+in the bundle on purpose: the app refuses to build a `AT+SERVADDR` from a
+default it invented, and the command that writes the bundle is the thing that
+already knows the environment. `AT+BKDNS` is only sent when `endpoint_ip` is
+present, and `AT+TDC` only when `tdc` is.
 
 Lives in the shared Drive folder, one per unit. The technician picks it once,
 per unit, and types nothing.
