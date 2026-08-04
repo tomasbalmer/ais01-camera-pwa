@@ -73,6 +73,10 @@ export function makeFakeDevice(faults = {}, onEmit = null) {
         /* A modem with echo on sends the command back before answering it.
          * That is what makes `OK` after `ATE0` worthless as proof, and what
          * put certificate body text on a phone screen on 2026-08-04. */
+        /* The BT24 bridge echoes locally, always — one copy that never reached
+         * the device. The modem adds a second only when its own echo is on, and
+         * that count is the only thing that tells them apart. */
+        if (inCertmod) emit(cmd);
         if (!echoOff && inCertmod) emit(cmd);
 
         if (cmd === 'ATI') { emit('Quectel_Ltd'); emit('OK'); return; }

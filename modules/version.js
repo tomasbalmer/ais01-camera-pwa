@@ -16,7 +16,7 @@
  * cached shell — pull to refresh, or reinstall the app from the home screen.
  */
 
-export const VERSION = '0.20.0';
+export const VERSION = '0.21.0';
 
 /* One line, for the places that want context rather than just a number. */
-export const VERSION_NOTE = 'a bare CR on the way out too, and echo is a per-file gate';
+export const VERSION_NOTE = 'one copy back is the bridge, two is the modem';

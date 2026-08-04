@@ -384,7 +384,19 @@ async function silenceEcho(io, attempts = 3) {
         await at(io, 'ATE0', 3000);
 
         const probe = await at(io, ECHO_PROBE, 2500);
-        const echoed = probe.some(l => l.trim() === ECHO_PROBE);
+        /*
+         * ONE copy back is the BT24's, not the modem's. The bridge echoes
+         * what it is handed, locally, before any of it reaches the device — so
+         * "did the text come back" cannot answer this question and said echo
+         * was off while it was on, then on while it was off.
+         *
+         * The count separates them, and the live logs show it cleanly: with
+         * echo still on, `ATE0` came back TWICE from one send; once `ATE0` had
+         * taken, `ATI` came back once and its answer followed. Two copies is
+         * the modem adding its own to the bridge's.
+         */
+        const copies = probe.filter(l => l.trim() === ECHO_PROBE).length;
+        const echoed = copies >= 2;
         const answered = probe.some(l => /\bOK\b/.test(l));
 
         if (answered && !echoed) {
