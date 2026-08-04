@@ -17,15 +17,35 @@
 
 import {
     hasBluetooth, connect, reconnect, isConnected, deviceName,
-    sendLine, disconnect,
+    sendLine, sendRaw, disconnect,
 } from './ble-transport.js';
+import { writeCerts } from './certmod.js';
 
 /* Everything below is app state. None of it describes the device. */
 const state = {
     bundle: null,
     pinned: true,      /* terminal follows the tail */
     pendingDeltas: null, /* config deltas awaiting a confirming second tap */
+    redacting: false,  /* key material may be on the wire — see redact() */
+    busy: false,       /* a stage's own loop is running */
 };
+
+/*
+ * Defence in depth for the one screen that shows everything.
+ *
+ * `ATE0` is the real protection and certmod.js refuses to stream without it,
+ * but this terminal is on a phone — photographed, mirrored, looked over. A
+ * long unbroken base64 run is PEM body and cannot be a Dragino message, so
+ * while key material is in flight those lines are replaced rather than shown.
+ * Everything else still comes through: this must never hide an error.
+ */
+function redact(line) {
+    if (!state.redacting) return line;
+    if (line.length >= 60 && /^[A-Za-z0-9+/=]+$/.test(line.trim())) {
+        return '[redacted PEM body]';
+    }
+    return line;
+}
 
 const el = id => document.getElementById(id);
 
@@ -57,6 +77,7 @@ function write(text, kind = 'rx') {
 
 function note(text) { write(text, 'note'); }
 function fail(text) { write(text, 'fail'); }
+function ok(text) { write(text, 'ok'); }
 
 /* ── Confirmation ────────────────────────────────────────────────────────
  *
@@ -168,7 +189,9 @@ async function doConnect() {
     if (isConnected()) { await disconnect(); setLink('disconnected'); return; }
 
     try {
-        const onLine = line => { write(line); feed(line); };
+        /* Redact for the screen only — the collectors that decide whether a
+         * write landed must still see the real bytes. */
+        const onLine = line => { write(redact(line)); feed(line); };
         const name = await connect({ onLine, onStatus: setLink });
         if (name === null) { note('scan dismissed'); return; }
         note(`paired with ${name}`);
@@ -300,12 +323,45 @@ async function doApplyConfig() {
     el('btn-config').classList.remove('armed');
 }
 
-function doCerts() {
-    setMark('certs', 'not built', 'fail');
-    fail('② WRITE CERTS is not implemented yet.');
-    note('The CERTMOD/QFUPL upload is checksum-gated and must match the');
-    note('reference in AIS01-CB-LTE cli/ais01_cli/commands/certs.py.');
-    note('Until it is ported and proven, write certs from the laptop harness.');
+/*
+ * The stage that decides whether a phone can replace the laptop at all. One
+ * tap runs the whole sequence — enter passthrough, three checksum-gated
+ * uploads, exit — and the operator does nothing but watch.
+ *
+ * Acceptance is not "it finished": it is the CA echoing `+QFUPL: 1208,5769`,
+ * the same pair the USB path produced on 2026-07-13. A different checksum
+ * means the link lost bytes, not that the certificate is wrong.
+ */
+async function doCerts() {
+    if (!bundleReady()) return;
+    if (state.busy) { note('a stage is already running'); return; }
+
+    const io = {
+        send: sendLine,
+        sendRaw,
+        listen,
+        floorMs: 150,
+        log: (text, kind) => write(text, kind === 'ok' ? 'ok'
+            : kind === 'fail' ? 'fail' : kind === 'tx' ? 'tx' : 'note'),
+    };
+
+    state.busy = true;
+    state.redacting = true;
+    setMark('certs', '0/3', 'run');
+    try {
+        await writeCerts(io, state.bundle,
+            done => setMark('certs', `${done}/3`, done === 3 ? 'ok' : 'run'));
+        setMark('certs', '3/3 ✓', 'ok');
+        ok('All three certificates verified by the modem.');
+    } catch (err) {
+        setMark('certs', 'failed', 'fail');
+        fail(`② CERTS: ${err.message}`);
+        note('Nothing half-written survives — every attempt starts with QFDEL.');
+        note('Press RESET, wait for the window, and tap ② again.');
+    } finally {
+        state.redacting = false;
+        state.busy = false;
+    }
 }
 
 function doVerify() {
