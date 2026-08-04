@@ -26,9 +26,11 @@ import { qfuplChecksum } from './certmod.js';
  *   refuseAte0    echo cannot be turned off — must refuse to stream secrets
  *   dropPart      1-based part index to swallow, simulating a lost BLE write
  *   healAfter     attempt number from which faults stop, to exercise recovery
+ *   noExit        passthrough never confirms the exit
  */
 export function makeFakeDevice(faults = {}, onEmit = null) {
     const emitted = [];
+    const received = [];   /* what we were told, so tests can assert on it */
     let listeners = [];
     let inCertmod = false;
     let echoOff = false;
@@ -49,13 +51,14 @@ export function makeFakeDevice(faults = {}, onEmit = null) {
 
     function onLine(text) {
         const cmd = text.trim();
+        received.push(cmd);
 
         if (cmd === 'AT+CERTMOD') {
             inCertmod = !inCertmod;
             if (inCertmod) {
                 emit('Enter certificate mode');
                 if (!faults.noRdy) emit('RDY');
-            } else {
+            } else if (!faults.noExit) {
                 emit('Exit certificate mode');
             }
             return;
@@ -132,6 +135,7 @@ export function makeFakeDevice(faults = {}, onEmit = null) {
     return {
         io,
         transcript: emitted,
+        received,
         state: () => ({ inCertmod, echoOff, attempts }),
     };
 }

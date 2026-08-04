@@ -292,27 +292,53 @@ async function doLogin() {
     const replies = listen(3000);
     await link.sendLine(state.bundle.password);
 
-    /*
-     * There is no "login OK" to wait for — only the one reply that means no.
-     * `Password Incorrect` at this point almost always means the password was
-     * sent before the window opened, not that it is wrong, so the mark says
-     * exactly that instead of asserting a cause.
-     */
     const lines = await replies;
-    if (lines.some(l => /password\s+incorrect/i.test(l))) {
+    return judgeLogin(lines);
+}
+
+/*
+ * The device does answer positively: `Password Correct`. The reference writer
+ * treats anything else as a refusal to send certificates at all
+ * (certs.py `_login`), and so does this — a cert stream into an unauthenticated
+ * console writes nowhere while looking like it worked.
+ *
+ * Returns true only on the confirmed positive.
+ */
+function judgeLogin(lines) {
+    const joined = lines.join('\n');
+
+    if (/password\s+correct/i.test(joined)) {
+        setMark('login', 'correct', 'ok');
+        ok('Password Correct — logged in.');
+        return true;
+    }
+    if (/password\s+incorrect/i.test(joined)) {
         setMark('login', 'refused', 'fail');
-        fail('Password Incorrect — almost always too soon, not wrong.');
-        note('Press RESET, wait for "NBIOT has responded.", tap ① again.');
-        return;
+        fail('Password Incorrect.');
+        note('Sent before the window opens, this means too soon rather than');
+        note('wrong. After "NBIOT has responded." it means the password.');
+        return false;
     }
-    if (lines.some(l => /password\s+timeout/i.test(l))) {
+    if (/password\s+timeout/i.test(joined)) {
         setMark('login', 'expired', 'fail');
-        fail('Password timeout — the session expired. Log in again.');
-        return;
+        fail('Password timeout — the session expired (~50 s idle). Log in again.');
+        return false;
     }
-    /* Amber, not green: silence is consistent with a good login and does not
-     * prove one. The next command is what proves it. */
-    setMark('login', 'no refusal', 'weak');
+    /* Silence is not consent. It usually means the console never received the
+     * line at all, which is a transport answer, not a credential one. */
+    setMark('login', 'no answer', 'fail');
+    fail('No reply to the password — the console did not answer.');
+    note('Nothing was authenticated, so nothing else should be sent yet.');
+    return false;
+}
+
+/* Log in and require the positive. Used by ② so a single tap is self-contained
+ * — the technician should not have to remember that certs need a session. */
+async function ensureLogin() {
+    write('••••••  (password)', 'tx');
+    const replies = listen(3000);
+    await link.sendLine(state.bundle.password);
+    return judgeLogin(await replies);
 }
 
 /*
@@ -421,9 +447,17 @@ async function doCerts() {
     };
 
     state.busy = true;
-    state.redacting = true;
-    setMark('certs', '0/3', 'run');
+    setMark('certs', 'login…', 'run');
     try {
+        /* Gate, not courtesy: certificates streamed into an unauthenticated
+         * console go nowhere and still look like they were sent. */
+        if (!await ensureLogin()) {
+            setMark('certs', 'no session', 'fail');
+            fail('② CERTS: not sent — the console is not authenticated.');
+            return;
+        }
+        state.redacting = true;
+        setMark('certs', '0/3', 'run');
         await writeCerts(io, state.bundle,
             done => setMark('certs', `${done}/3`, done === 3 ? 'ok' : 'run'));
         setMark('certs', '3/3 ✓', 'ok');

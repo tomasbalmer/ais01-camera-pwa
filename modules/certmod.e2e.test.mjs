@@ -105,5 +105,28 @@ await scenario('leaves passthrough even after a failure', { dropPart: 2 },
         return null;
     });
 
+/* The device's own confirmations are the verification, so the ones that close
+ * a successful run have to actually be asked for. */
+await scenario('takes inventory and restarts after a successful write', {},
+    (out, fake) => {
+        if (!out.ok) return `threw: ${out.error}`;
+        if (!fake.received.some(c => c.startsWith('AT+QFLST')))
+            return 'never took the file inventory';
+        if (!fake.received.includes('ATZ'))
+            return 'never restarted — Dragino requires it after a cert change';
+        /* Order matters: the restart is the last thing, after the exit. */
+        if (fake.received.indexOf('ATZ') < fake.received.lastIndexOf('AT+CERTMOD'))
+            return 'restarted before leaving passthrough';
+        if (fake.state().inCertmod) return 'still inside CERTMOD';
+        return null;
+    });
+
+await scenario('an unconfirmed exit is an error, not a note', { noExit: true },
+    (out) => {
+        if (out.ok) return 'completed despite an unconfirmed exit';
+        if (!/exit was not confirmed/.test(out.error)) return `wrong error: ${out.error}`;
+        return null;
+    });
+
 console.log(failed ? `\n${failed} failed` : '\nall passed');
 process.exit(failed ? 1 : 0);

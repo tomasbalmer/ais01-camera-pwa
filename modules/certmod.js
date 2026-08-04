@@ -208,6 +208,17 @@ async function exitCertmod(io) {
     return confirmed;
 }
 
+/*
+ * Inventory, after the writes. The reference is explicit that this is evidence
+ * and not an integrity gate — the checksums above remain the only proof of
+ * correct stored content. It is here because "the file exists on the modem with
+ * this size" is an independent second opinion, and independent second opinions
+ * are what let you believe the first one.
+ */
+async function listFiles(io) {
+    await at(io, 'AT+QFLST="*"', 3000);
+}
+
 /* Stream one PEM as paced bare-CR parts. Nothing of the payload is displayed —
  * only a redacted progress label. */
 async function streamParts(io, target) {
@@ -275,16 +286,32 @@ async function writeTarget(io, target, retries = 3) {
  */
 export async function writeCerts(io, bundle, onProgress = () => {}) {
     const targets = buildTargets(bundle);
+    let exited = false;
     await enterCertmod(io);
     try {
         for (let i = 0; i < targets.length; i++) {
             await writeTarget(io, targets[i]);
             onProgress(i + 1, targets.length);
         }
+        await listFiles(io);
     } finally {
         /* Always attempt the exit, including after a failure — leaving the unit
          * in passthrough is worse than the failure that got us here. */
-        await exitCertmod(io);
+        exited = await exitCertmod(io);
     }
+
+    if (!exited) throw new Error('CERTMOD exit was not confirmed');
+
+    /*
+     * Dragino's guide requires a restart after certificate changes, so this is
+     * part of the write and not an afterthought: certs that are stored but
+     * never picked up read exactly like certs that were never written.
+     *
+     * It ends the session — the device reboots, the AT window closes and the
+     * BLE link drops until the next cycle. That is the expected outcome of a
+     * successful run, not a failure.
+     */
+    io.log('ATZ — restarting: Dragino requires it after a certificate change', 'note');
+    await at(io, 'ATZ', 500);
     return targets.length;
 }
