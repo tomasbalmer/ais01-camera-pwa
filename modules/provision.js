@@ -332,14 +332,19 @@ function judgeLogin(lines) {
     return false;
 }
 
-/* Log in and require the positive. Used by ② so a single tap is self-contained
- * — the technician should not have to remember that certs need a session. */
-async function ensureLogin() {
-    write('••••••  (password)', 'tx');
-    const replies = listen(3000);
-    await link.sendLine(state.bundle.password);
-    return judgeLogin(await replies);
-}
+/*
+ * ② does NOT log in, and does not check whether ① did.
+ *
+ * A stage that requires a session would also have to know whether that session
+ * is still valid — it expires after ~50 s idle and after any reboot, neither of
+ * which this app can observe without inferring device state. That is the thing
+ * this design refuses to do.
+ *
+ * It costs nothing to leave out, because the confirmation already covers it:
+ * without a session `AT+CERTMOD` never returns BG95 RDY, and the write stops
+ * there with an error that names exactly that. The technician owns the order;
+ * the code owns whether each thing landed.
+ */
 
 /*
  * `AT+CFG` returns the whole property dump in one command, which is why this
@@ -447,17 +452,9 @@ async function doCerts() {
     };
 
     state.busy = true;
-    setMark('certs', 'login…', 'run');
+    state.redacting = true;
+    setMark('certs', '0/3', 'run');
     try {
-        /* Gate, not courtesy: certificates streamed into an unauthenticated
-         * console go nowhere and still look like they were sent. */
-        if (!await ensureLogin()) {
-            setMark('certs', 'no session', 'fail');
-            fail('② CERTS: not sent — the console is not authenticated.');
-            return;
-        }
-        state.redacting = true;
-        setMark('certs', '0/3', 'run');
         await writeCerts(io, state.bundle,
             done => setMark('certs', `${done}/3`, done === 3 ? 'ok' : 'run'));
         setMark('certs', '3/3 ✓', 'ok');
