@@ -152,6 +152,21 @@ await scenario('does not lose RDY when it shares a batch with the entry', {},
         return null;
     });
 
+/*
+ * Observed 2026-08-04: entering while the firmware's NB init still owns the
+ * BG95 gets `Enter certificate mode` and no RDY, and the init lines keep
+ * printing afterwards — proof the firmware never let go. Entry must wait for
+ * the `Signal Strength:` heartbeat that says init is over.
+ */
+await scenario('waits out the firmware NB init before entering',
+    { initBusy: true }, (out, fake) => {
+        if (!out.ok) return `entered during NB init: ${out.error}`;
+        const t = fake.transcript;
+        if (t.indexOf('Signal Strength:0') > t.indexOf('Enter certificate mode'))
+            return 'entered before the heartbeat said init was done';
+        return null;
+    });
+
 /* Observed live: the unit was already inside passthrough from a failed run, so
  * the first AT+CERTMOD takes it OUT and the BG95 goes down with it. Entering
  * again brings the modem back — `RDY` arrived on the re-entry — so this is a

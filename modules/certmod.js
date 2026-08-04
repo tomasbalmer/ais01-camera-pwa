@@ -195,8 +195,45 @@ async function at(io, command, windowMs) {
  * into that writes nowhere. It arrives seconds late (it is a reboot), so the
  * wait ends on the marker rather than on a fixed window.
  */
+/*
+ * Wait until the firmware has finished talking to the BG95 itself.
+ *
+ * After every boot the firmware runs its own NB init — frequency band, network
+ * category, data format, APN — and it drives the modem for the whole of it.
+ * Entering passthrough in the middle lands on a modem that is already in
+ * another conversation, and `RDY` never comes. Observed 2026-08-04, twice, and
+ * the two runs differ in nothing else:
+ *
+ *     [31891]Enter certificate mode   <- inside init, and the firmware kept
+ *     [33433]Configure Network Category   going: no RDY, ever
+ *     [36366]Set APN successfully
+ *
+ *     [28053]Set APN successfully     <- init finished first
+ *     [40820]Enter certificate mode
+ *     RDY                             <- immediately
+ *
+ * `Signal Strength:` is the heartbeat that only starts once init is done, and
+ * it repeats for the rest of the window. So waiting for one is both the gate
+ * and self-healing: on a unit that is already past init, the next beat is
+ * seconds away rather than a state to reconstruct.
+ *
+ * It never blocks. If the heartbeat does not come the entry is attempted
+ * anyway and the RDY gate stays the arbiter — a wait that can strand the
+ * operator would be worse than the collision it avoids.
+ */
+async function awaitFirmwareIdle(io, ms = 20000) {
+    const beat = /Signal Strength:/i;
+    io.log('waiting for the firmware to finish its NB init', 'note');
+    const seen = await io.until(beat, ms);
+    if (seen.some(l => beat.test(l))) return true;
+    io.log('no Signal Strength heartbeat — entering anyway, NB init may still ' +
+           'own the modem', 'note');
+    return false;
+}
+
 async function enterCertmod(io, attempts = 3) {
     for (let attempt = 1; attempt <= attempts; attempt++) {
+        await awaitFirmwareIdle(io);
         io.log('AT+CERTMOD', 'tx');
 
         /*

@@ -35,6 +35,11 @@ export function makeFakeDevice(faults = {}, onEmit = null) {
     let listeners = [];
     let inCertmod = !!faults.startInside;
     let modemUp = true;
+    /* The firmware's own NB init owns the BG95 until it is done. Entering
+     * passthrough during it gets the entry printed and no RDY — the modem is
+     * mid-conversation with someone else. `Signal Strength:` is the heartbeat
+     * that says init is over. */
+    let initBusy = !!faults.initBusy;
     let echoOff = false;
     let upload = null;          /* { name, declaredSize, stored: [] } */
     let attempts = {};          /* per filename, to drive healAfter */
@@ -57,6 +62,10 @@ export function makeFakeDevice(faults = {}, onEmit = null) {
 
     const healed = name => faults.healAfter && (attempts[name] || 0) >= faults.healAfter;
 
+    /* Init finishes on its own clock, not on anything the app sends — so the
+     * only way to be past it is to have waited for the beat that says so. */
+    if (initBusy) setTimeout(() => { initBusy = false; emit('Signal Strength:0'); }, 1);
+
     function onLine(text) {
         const cmd = text.trim();
         received.push(cmd);
@@ -75,7 +84,7 @@ export function makeFakeDevice(faults = {}, onEmit = null) {
                  * network yet, not a modem that is absent. RDY says it is
                  * there, and RDY is what arrived. */
                 if (!faults.deadModem) modemUp = true;
-                if (!faults.noRdy && modemUp) emit('RDY');
+                if (!faults.noRdy && modemUp && !initBusy) emit('RDY');
             } else if (!faults.noExit) {
                 emit('Exit certificate mode');
                 emit('OK');
