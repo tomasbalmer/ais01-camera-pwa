@@ -70,8 +70,22 @@ function handleNotification(event) {
      */
     onChunk(text);
 
+    /*
+     * A bare CR ends a line here too.
+     *
+     * Splitting on LF alone was right for everything the firmware prints and
+     * wrong for everything that comes back during a cert write: the modem
+     * returns our upload lines terminated the way we sent them, with a bare
+     * CR and no LF. Those never split. They accumulated until some later LF
+     * arrived and then left as one blob, which is why the log showed `ATE0\r`
+     * as a single line and PEM tails with their beginnings missing.
+     *
+     * It also quietly broke matching. The echo probe asks whether `AT` comes
+     * back and got `AT\rOK` as one line, which is neither and reads as an echo
+     * that is off while it is on.
+     */
     rxBuffer += text;
-    const parts = rxBuffer.split(/\r?\n/);
+    const parts = rxBuffer.split(/\r\n|\r|\n/);
     rxBuffer = parts.pop();
     for (const line of parts) {
         if (line.length) onLine(line);

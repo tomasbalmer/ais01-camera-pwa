@@ -16,7 +16,7 @@
  * cached shell — pull to refresh, or reinstall the app from the home screen.
  */
 
-export const VERSION = '0.16.0';
+export const VERSION = '0.17.0';
 
 /* One line, for the places that want context rather than just a number. */
-export const VERSION_NOTE = 'replies end the wait, not the stopwatch';
+export const VERSION_NOTE = 'a bare CR ends a line on the way back too';
