@@ -13,6 +13,35 @@
     <link rel="icon" type="image/svg+xml" href="waterplan-icon.svg">
     <link rel="apple-touch-icon" href="waterplan-icon.svg">
     <link rel="manifest" href="manifest.json">
+    <style>
+        /* The entry door. Self-contained so the calibration stylesheets stay
+           untouched — this screen belongs to neither tunnel. */
+        #job-chooser {
+            display: flex; flex-direction: column; align-items: center;
+            justify-content: center; gap: 14px; padding: 24px 20px;
+        }
+        .job-title {
+            margin: 0 0 6px; color: #94a3b8; font-size: 15px; font-weight: 500;
+        }
+        .job-btn {
+            width: 100%; max-width: 320px; padding: 18px 20px;
+            display: flex; flex-direction: column; align-items: flex-start; gap: 4px;
+            border: 1px solid #334155; border-radius: 12px;
+            background: #1e293b; color: #e2e8f0; text-align: left;
+            -webkit-tap-highlight-color: transparent;
+        }
+        .job-btn:active { background: #334155; }
+        .job-btn-main { font-size: 16px; font-weight: 600; }
+        .job-btn-sub  { font-size: 12px; color: #94a3b8; }
+        .job-back {
+            align-self: flex-start; margin-bottom: 10px; padding: 6px 2px;
+            background: none; border: none; color: #64748b; font-size: 13px;
+        }
+        .app-version-line {
+            margin-top: 18px; font-size: 11px; color: #475569;
+            font-family: ui-monospace, Menlo, monospace; text-align: center;
+        }
+    </style>
     <script>
     // Cache-bust: append timestamp to CSS/JS so browser always fetches fresh
     var v = Date.now();
@@ -128,8 +157,38 @@
         </div>
         <!-- Calibration positioning hint (shown on first rect move) -->
         <div id="connect-screen">
-            <!-- Phase 1: Choose connection method -->
-            <div id="connect-chooser">
+            <!--
+              Phase 0: which DEVICE is in your hand, before anything else.
+
+              These are not two views of one product. They are two different
+              devices running two different firmwares: a camera on our custom
+              build (AT+INSTALL, AT+SETROI), and a node on Dragino v1.3
+              (AT+CERTMOD, AT+CFG). The two are never used at the same time.
+
+              Asking "how do you connect" first let someone land in a flow
+              waiting for banners their unit will never print. Transport cannot
+              be the discriminator anyway — Bluetooth serves both. The device
+              can, and it is the one thing the person always knows for certain,
+              because they are holding it.
+            -->
+            <div id="job-chooser">
+                <p class="job-title">Which device do you have?</p>
+                <button id="job-calibrate" class="job-btn">
+                    <span class="job-btn-main">Calibrate camera</span>
+                    <span class="job-btn-sub">at the meter</span>
+                </button>
+                <button id="job-provision" class="job-btn">
+                    <span class="job-btn-main">Configure node</span>
+                    <span class="job-btn-sub">at the bench · BLE</span>
+                </button>
+                <p id="app-version-job" class="app-version-line"></p>
+            </div>
+
+            <!-- Phase 1: Choose connection method. Hidden until the job is
+                 picked; every existing show/hide of this element still works,
+                 because by the time they run the job is already chosen. -->
+            <div id="connect-chooser" style="display:none;">
+                <button id="job-back" class="job-back">← back</button>
                 <button id="ble-btn" class="connect-btn connect-btn-primary" onclick="toggleBLE()">Connect via Bluetooth</button>
                 <button id="big-btn" class="connect-btn connect-btn-secondary" onclick="toggleConnection()">Connect via USB</button>
                 <p id="message" style="display:none;"></p>
@@ -589,8 +648,37 @@
          * it disagrees with what you just shipped, the HTML shell is cached —
          * not the code. */
         const { VERSION } = await import('./modules/version.js');
-        const badge = document.getElementById('app-version');
-        if (badge) badge.textContent = `v${VERSION}`;
+        for (const id of ['app-version', 'app-version-job']) {
+            const badge = document.getElementById(id);
+            if (badge) badge.textContent = `v${VERSION}`;
+        }
+
+        /*
+         * The door. It only ever shows or hides — it never touches the
+         * calibration flow, which continues to own #connect-chooser exactly as
+         * before. Choosing the node leaves this page entirely: the two tunnels
+         * do not share a screen, because they do not share a device.
+         */
+        const jobs = document.getElementById('job-chooser');
+        const transports = document.getElementById('connect-chooser');
+        const showJobs = () => {
+            jobs.style.display = 'flex';
+            transports.style.display = 'none';
+        };
+        document.getElementById('job-calibrate').onclick = () => {
+            jobs.style.display = 'none';
+            transports.style.display = 'flex';
+        };
+        document.getElementById('job-provision').onclick = () => {
+            location.href = 'provision.html';
+        };
+        document.getElementById('job-back').onclick = showJobs;
+
+        /* ?mock drives the calibration flow directly — keep it landing where
+         * it always did rather than behind a door it never expected. */
+        if (new URLSearchParams(location.search).has('mock')) {
+            jobs.style.display = 'none';
+        }
 
         const splash = document.getElementById('splash');
         if (splash) {
