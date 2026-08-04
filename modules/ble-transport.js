@@ -34,6 +34,7 @@ let char = null;
 let rxBuffer = '';
 
 let onLine = () => {};
+let onChunk = () => {};
 let onStatus = () => {};
 
 export function hasBluetooth() {
@@ -52,10 +53,24 @@ export function deviceName() {
 
 function handleNotification(event) {
     const bytes = new Uint8Array(event.target.value.buffer);
-    rxBuffer += new TextDecoder().decode(bytes);
+    const text = new TextDecoder().decode(bytes);
 
-    /* Emit whole lines only. A notification boundary is not a line boundary —
-     * the device's own newlines are, so a partial tail waits for the rest. */
+    /*
+     * Two outputs, and the order matters.
+     *
+     * `onChunk` gets the bytes exactly as they arrived — before line assembly,
+     * before anything is dropped or joined. It is the raw log, and the harness
+     * this replaces keeps one for a reason: every claim about what a device did
+     * is settled by reading it. A view that silently discards blank lines or
+     * holds a partial tail is a view, not evidence.
+     *
+     * `onLine` gets complete lines, for code that has to match on them. A
+     * notification boundary is not a line boundary — the device's own newlines
+     * are — so a partial tail waits here, and only here.
+     */
+    onChunk(text);
+
+    rxBuffer += text;
     const parts = rxBuffer.split(/\r?\n/);
     rxBuffer = parts.pop();
     for (const line of parts) {
@@ -88,6 +103,7 @@ export async function connect(handlers = {}) {
     if (!hasBluetooth()) throw new Error('This browser has no Web Bluetooth');
 
     onLine = handlers.onLine || onLine;
+    onChunk = handlers.onChunk || onChunk;
     onStatus = handlers.onStatus || onStatus;
 
     try {
@@ -128,6 +144,7 @@ export async function reconnect() {
 
 async function writeChunks(bytes) {
     if (!char) throw new Error('BLE not connected');
+    onChunk(new TextDecoder().decode(bytes), 'tx');
     for (let i = 0; i < bytes.length; i += CHUNK) {
         await char.writeValueWithoutResponse(bytes.slice(i, i + CHUNK));
     }

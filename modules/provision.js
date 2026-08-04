@@ -37,6 +37,7 @@ const state = {
     pinned: true,      /* terminal follows the tail */
     pendingDeltas: null, /* config deltas awaiting a confirming second tap */
     redacting: false,  /* key material may be on the wire — see redact() */
+    rawView: false,    /* terminal shows the verbatim stream instead */
     busy: false,       /* a stage's own loop is running */
     mock: false,       /* ?mock — simulated device, no radio */
 };
@@ -59,6 +60,68 @@ function redact(line) {
 }
 
 const el = id => document.getElementById(id);
+
+/* ── The raw log ─────────────────────────────────────────────────────────
+ *
+ * The CLI harness this replaces keeps a raw.log, and every claim about what a
+ * device did is settled by reading it — never by reading a rendered view. The
+ * annotated terminal below adds timestamps, prefixes and a redaction filter,
+ * drops blank lines and holds partial fragments until a newline arrives. All of
+ * that is useful and none of it is evidence.
+ *
+ * So the bytes are kept separately, exactly as they arrived, and the terminal
+ * is one of two ways to look at them.
+ *
+ * One asymmetry, on purpose: RX is verbatim, TX is not. What we sent we already
+ * know, and reproducing the PEM bytes would put a private key on the screen and
+ * into the clipboard of a log meant to be shared. Evidence is what the device
+ * said back.
+ */
+const RAW_CAP = 1_000_000;   /* characters; a bench session is long */
+let rawLog = '';
+
+function rawAppend(text, dir) {
+    if (dir === 'tx') {
+        text = state.redacting ? '\n[tx: PEM part redacted]\n' : `\n>>> ${text}`;
+    }
+    rawLog += text;
+    if (rawLog.length > RAW_CAP) rawLog = rawLog.slice(-RAW_CAP);
+    if (state.rawView) renderRaw();
+}
+
+function renderRaw() {
+    const out = el('terminal');
+    out.textContent = rawLog || '(nothing received yet)';
+    if (state.pinned) out.scrollTop = out.scrollHeight;
+}
+
+function setRawView(on) {
+    state.rawView = on;
+    el('raw-toggle').textContent = on ? 'ANNOTATED' : 'RAW';
+    el('terminal').classList.toggle('raw', on);
+    if (on) renderRaw();
+    else {
+        /* The annotated view is rebuilt from here on, not replayed: its history
+         * lives in the DOM and the raw log is the thing that survives. */
+        el('terminal').textContent = '';
+        note('— switched to annotated view; the raw log is unaffected —');
+    }
+}
+
+async function copyRawLog() {
+    const text = rawLog || '(empty)';
+    try {
+        if (navigator.share) {
+            await navigator.share({ title: 'AIS01 provisioning log', text });
+        } else {
+            await navigator.clipboard.writeText(text);
+            note(`raw log copied (${text.length} chars)`);
+        }
+    } catch (err) {
+        if (err && err.name === 'AbortError') return;   /* share sheet dismissed */
+        fail(`could not copy: ${err.message}`);
+    }
+}
 
 /* ── Terminal ────────────────────────────────────────────────────────── */
 
@@ -202,8 +265,9 @@ async function doConnect() {
     try {
         /* Redact for the screen only — the collectors that decide whether a
          * write landed must still see the real bytes. */
-        const onLine = line => { write(redact(line)); feed(line); };
-        const name = await link.connect({ onLine, onStatus: setLink });
+        const onLine = line => { if (!state.rawView) write(redact(line)); feed(line); };
+        const onChunk = (text, dir) => rawAppend(text, dir);
+        const name = await link.connect({ onLine, onChunk, onStatus: setLink });
         if (name === null) { note('scan dismissed'); return; }
         note(`paired with ${name}`);
         if (state.bundle) {
@@ -407,7 +471,11 @@ async function installMock(kind) {
         : kind === 'drop' ? { dropPart: 5, healAfter: 1 }
         : {};
 
-    const fake = makeFakeDevice(faults, line => { write(redact(line)); feed(line); });
+    const fake = makeFakeDevice(faults, line => {
+        rawAppend(line + '\r\n');
+        if (!state.rawView) write(redact(line));
+        feed(line);
+    });
     let up = false;
     state.mock = true;
 
@@ -439,6 +507,9 @@ export function initProvision() {
         if (!state.bundle) return doReadConfig();
         return doStageConfig();
     });
+
+    el('raw-toggle').addEventListener('click', () => setRawView(!state.rawView));
+    el('copy-log').addEventListener('click', copyRawLog);
 
     el('bundle-input').addEventListener('change', e => {
         const file = e.target.files && e.target.files[0];

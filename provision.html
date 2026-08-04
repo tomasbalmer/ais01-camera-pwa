@@ -63,8 +63,26 @@
         .line-ok   { color: #4ade80; font-weight: 600; }
         .line-fail { color: #f87171; font-weight: 600; }
 
+        /* Raw view: no per-line elements, no styling, no interpretation —
+           the buffer printed as it arrived. */
+        #terminal.raw {
+            white-space: pre-wrap;
+            color: #cbd5e1;
+        }
+
+        #log-controls {
+            position: absolute; right: 8px; bottom: 6px;
+            display: flex; align-items: center; gap: 6px;
+        }
+        #log-controls button {
+            font-size: 10px; font-weight: 600; letter-spacing: 0.04em;
+            color: #94a3b8; background: #1e293bdd;
+            border: 1px solid #334155; border-radius: 4px;
+            padding: 4px 8px;
+            -webkit-tap-highlight-color: transparent;
+        }
+        #log-controls button:active { background: #334155; }
         #live {
-            position: absolute; right: 10px; bottom: 8px;
             font-size: 11px; color: #4ade80;
             background: #0f172acc; padding: 2px 6px; border-radius: 4px;
             pointer-events: none;
@@ -139,7 +157,15 @@
 
     <main>
         <div id="terminal"></div>
-        <div id="live">▼ live</div>
+        <!-- Controls sit on the log they act on. RAW shows the bytes exactly
+             as the device sent them; SHARE hands the whole buffer to whoever
+             has to diagnose it, which on a bench is not the person holding the
+             phone. -->
+        <div id="log-controls">
+            <button id="raw-toggle">RAW</button>
+            <button id="copy-log">SHARE</button>
+            <span id="live">▼ live</span>
+        </div>
     </main>
 
     <div class="bar">
