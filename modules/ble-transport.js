@@ -142,9 +142,9 @@ export async function reconnect() {
     onStatus('connected', device.name || '');
 }
 
-async function writeChunks(bytes) {
+async function writeChunks(bytes, kind) {
     if (!char) throw new Error('BLE not connected');
-    onChunk(new TextDecoder().decode(bytes), 'tx');
+    onChunk(new TextDecoder().decode(bytes), kind);
     for (let i = 0; i < bytes.length; i += CHUNK) {
         await char.writeValueWithoutResponse(bytes.slice(i, i + CHUNK));
     }
@@ -152,13 +152,13 @@ async function writeChunks(bytes) {
 
 /* One AT command. The device's line terminator is CRLF. */
 export async function sendLine(text) {
-    await writeChunks(new TextEncoder().encode(text + '\r\n'));
+    await writeChunks(new TextEncoder().encode(text + '\r\n'), 'tx-line');
 }
 
 /* Payload bytes with no terminator — the body of an AT+QFUPL upload, where
  * appending CRLF would corrupt the file and fail the checksum. */
 export async function sendRaw(bytes) {
-    await writeChunks(bytes);
+    await writeChunks(bytes, 'tx-raw');
 }
 
 export async function disconnect() {

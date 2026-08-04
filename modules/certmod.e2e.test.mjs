@@ -128,5 +128,17 @@ await scenario('an unconfirmed exit is an error, not a note', { noExit: true },
         return null;
     });
 
+/* Observed live: the unit was already inside passthrough, so the first
+ * AT+CERTMOD took it OUT. A toggle-out is a command that worked and moved the
+ * device the other way — sending it again is the fix, not a retry budget. */
+await scenario('recovers when the unit is already inside passthrough',
+    { startInside: true }, (out, fake) => {
+        if (!out.ok) return `threw: ${out.error}`;
+        if (out.files !== 3) return `wrote ${out.files} files`;
+        const toggles = fake.received.filter(c => c === 'AT+CERTMOD').length;
+        if (toggles < 3) return `only ${toggles} toggles — never re-entered`;
+        return null;
+    });
+
 console.log(failed ? `\n${failed} failed` : '\nall passed');
 process.exit(failed ? 1 : 0);

@@ -27,12 +27,13 @@ import { qfuplChecksum } from './certmod.js';
  *   dropPart      1-based part index to swallow, simulating a lost BLE write
  *   healAfter     attempt number from which faults stop, to exercise recovery
  *   noExit        passthrough never confirms the exit
+ *   startInside   unit is ALREADY in passthrough, so the first toggle exits
  */
 export function makeFakeDevice(faults = {}, onEmit = null) {
     const emitted = [];
     const received = [];   /* what we were told, so tests can assert on it */
     let listeners = [];
-    let inCertmod = false;
+    let inCertmod = !!faults.startInside;
     let echoOff = false;
     let upload = null;          /* { name, declaredSize, stored: [] } */
     let attempts = {};          /* per filename, to drive healAfter */
@@ -127,6 +128,7 @@ export function makeFakeDevice(faults = {}, onEmit = null) {
                 resolve(l.lines);
             }, 5));
         },
+        until(_pattern, ms) { return io.listen(ms); },
         async send(text) { onLine(text); },
         async sendRaw(bytes) { onRaw(bytes); },
         log() {},

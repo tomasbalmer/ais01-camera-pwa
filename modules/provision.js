@@ -81,8 +81,13 @@ const RAW_CAP = 1_000_000;   /* characters; a bench session is long */
 let rawLog = '';
 
 function rawAppend(text, dir) {
-    if (dir === 'tx') {
-        text = state.redacting ? '\n[tx: PEM part redacted]\n' : `\n>>> ${text}`;
+    /* Only the payload is a secret. Redacting the commands too hid `AT+CERTMOD`
+     * behind "[PEM part redacted]" in the one artefact meant to explain a
+     * failure — the raw log stopped being able to answer what we had sent. */
+    if (dir === 'tx-raw') {
+        text = '\n[tx: PEM part redacted]\n';
+    } else if (dir === 'tx-line') {
+        text = `\n>>> ${text}`;
     }
     rawLog += text;
     if (rawLog.length > RAW_CAP) rawLog = rawLog.slice(-RAW_CAP);
@@ -164,7 +169,16 @@ function ok(text) { write(text, 'ok'); }
 const collectors = new Set();
 
 function feed(line) {
-    for (const c of collectors) c.lines.push(line);
+    for (const c of collectors) {
+        c.lines.push(line);
+        /* An expected marker ends the wait immediately. A fixed window has to be
+         * long enough for the slowest case and is then that long for every case
+         * — which is how a two-second budget met a marker that arrived in four. */
+        if (c.test && c.test.test(line)) {
+            collectors.delete(c);
+            c.done(c.lines);
+        }
+    }
 }
 
 /* Collect everything the device says for `ms`, then resolve with the lines. */
@@ -175,6 +189,17 @@ function listen(ms) {
         collectors.delete(c);
         resolve(c.lines);
     }, ms));
+}
+
+/* Same, but resolve as soon as `pattern` appears. `ms` becomes a ceiling rather
+ * than a duration, so a generous budget costs nothing when the device is
+ * prompt. */
+function until(pattern, ms) {
+    return new Promise(resolve => {
+        const c = { lines: [], test: pattern, done: resolve };
+        collectors.add(c);
+        setTimeout(() => { collectors.delete(c); resolve(c.lines); }, ms);
+    });
 }
 
 /*
@@ -529,6 +554,7 @@ async function doCerts() {
         send: link.sendLine,
         sendRaw: link.sendRaw,
         listen,
+        until,
         floorMs: 150,
         log: (text, kind) => write(text, kind === 'ok' ? 'ok'
             : kind === 'fail' ? 'fail' : kind === 'tx' ? 'tx' : 'note'),
