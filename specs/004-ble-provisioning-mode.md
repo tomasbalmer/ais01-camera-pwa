@@ -288,6 +288,54 @@ Note what "manual" does and does not mean:
 
 **Nobody types an AT command, ever.**
 
+### Two kinds of timing — only one belongs to the technician
+
+"The technician owns timing" is about *when an action starts*, never about the
+rhythm inside it. Conflating the two would mean asking a person to hand-pace
+sixty PEM lines, which is neither possible nor desirable.
+
+| | Scale | Owner | Why |
+|---|---|---|---|
+| When an action starts | seconds — the AT window | **technician** | a person watching a line on screen is the right sensor; a model frozen between turns is the wrong one |
+| Rhythm inside an action | ~120 ms between PEM parts, 20-byte chunks | **code** | derived from byte count, not chosen; no human can hold it |
+
+So ② is **one tap**. Behind it runs the whole loop: enter `AT+CERTMOD`, then per
+file `QFDEL` → `QFUPL` → wait for `CONNECT` → stream the paced parts → gate on
+the echoed `+QFUPL: <size>,<checksum>` → next file, then exit. The operator
+watches `VERIFIED 1/3 … 3/3` go by and does nothing.
+
+### Why the pacing exists at all, and why BLE needs more of it than USB
+
+The USB path writes a whole PEM line to a serial port with a driver and a
+hardware buffer behind it. BLE has neither:
+`writeValueWithoutResponse` resolves when the packet is *queued*, not sent, so
+there is no backpressure — and BLE delivers well above 2 kB/s while the BT24's
+UART drains at 9600 baud, or 960 B/s. Push faster than that and the module's
+buffer overflows and drops bytes **silently**.
+
+Pacing is therefore computed, not guessed: a part must be given at least its own
+drain time, `bytes × 10 / 9600` seconds. A 65-byte PEM line needs ≥68 ms; at
+120 ms there is roughly double the margin and a full certificate takes about
+three seconds.
+
+Nothing else about the write changes between transports — same parts, same bare
+`\r` terminator (the CRLF conversion happens in the STM32 passthrough, not in
+the link), same XOR-16 checksum. The pure functions in
+`AIS01-CB-LTE cli/ais01_cli/commands/certs.py` are unit-tested against real
+modem vectors and are ported as-is.
+
+**The experiment has a known answer.** The CA file returned
+`+QFUPL: 1208,5769` over USB on 2026-07-13. The same file over BLE must echo
+the same pair. A different checksum means bytes were lost in transit and the
+pacing floor is too low — it does not mean the certificate is wrong.
+
+### Interrupted uploads leave nothing behind
+
+If the window closes mid-upload the device sleeps, the transfer dies, and no
+`+QFUPL` arrives. The technician presses RESET and taps ② again. Every attempt
+begins with `QFDEL`, so a half-written file never survives to be trusted — and
+on a bench, retrying is free. That is the property the whole design rests on.
+
 ### When something fails in a way the sequence does not cover
 
 The technician retries once. If it fails again they **stop and escalate** — the
