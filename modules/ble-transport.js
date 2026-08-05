@@ -215,6 +215,35 @@ async function writeChunks(bytes, kind) {
     if (!char) throw new Error('BLE not connected');
     onChunk(new TextDecoder().decode(bytes), kind);
 
+    /*
+     * Try the whole payload first, and say which way it went.
+     *
+     * Bisected 2026-08-05: line 1 alone (29 B, two 20-byte writes) arrives and
+     * verifies. Lines 1+2 (95 B, the second a 66-byte base64 line needing four
+     * writes) do not, with fifteen seconds of live modem to answer in. Five
+     * lines fail the same way. So it is not the pacing and not the count — it
+     * is what happens to a line that has to cross in four pieces instead of
+     * two.
+     *
+     * `writeValueWithoutResponse` accepts up to the negotiated ATT MTU minus
+     * three, and Chrome routinely negotiates far more than the 23-byte
+     * minimum. A whole line then arrives in one connection event, which is the
+     * shape the USB path has always had and this one never did.
+     */
+    if (!mustSlice && bytes.length > CHUNK) {
+        try {
+            await char.writeValueWithoutResponse(bytes);
+            if (kind === 'tx-raw') onDiag(`tx ${bytes.length}B whole`);
+            return;
+        } catch (err) {
+            /* Only the MTU refuses this, and it refuses every line equally —
+             * so ask once, remember, and say so. */
+            mustSlice = true;
+            onDiag(`whole-payload write refused (${err.message}) — slicing ` +
+                   `every payload from here`);
+        }
+    }
+
     let sent = 0;
     let slices = 0;
     for (let i = 0; i < bytes.length; i += CHUNK) {
