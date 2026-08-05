@@ -146,8 +146,12 @@ export async function connect(handlers = {}) {
          * comes back around the next duty cycle. Callers must not read this as
          * the unit being gone. */
         onStatus('disconnected', 'BT24 idle timeout or device asleep');
+        keepConnected();
     });
 
+    /* From here the link is ours to keep. Only an explicit disconnect gives it
+     * up — everything else is the unit sleeping, and it comes back. */
+    wantLink = true;
     await attach();
     onStatus('connected', device.name || '');
     return device.name || '(unnamed)';
@@ -159,6 +163,43 @@ export async function reconnect() {
     onStatus('reconnecting', '');
     await attach();
     onStatus('connected', device.name || '');
+}
+
+/*
+ * Keep re-attaching until the unit comes back, or until someone asks us to
+ * stop.
+ *
+ * The link drops constantly and by design: the BT24 gives up after about sixty
+ * seconds idle, and the unit itself goes away at the end of every duty cycle.
+ * Re-pairing needs a user gesture; re-attaching to a device already chosen does
+ * not, so the only reason this was manual is that nobody had written the loop.
+ * Every reset was costing a click, and a click at the wrong moment costs the
+ * whole AT window.
+ *
+ * It retries while the device is asleep — that is most of the wait, and every
+ * attempt fails until the unit advertises again — so the interval stays short
+ * enough to catch the window opening and backs off enough not to spin.
+ */
+let wantLink = false;
+let reattaching = false;
+
+async function keepConnected() {
+    if (reattaching || !wantLink || !device) return;
+    reattaching = true;
+    for (let attempt = 1; wantLink; attempt++) {
+        if (device.gatt && device.gatt.connected) break;
+        onStatus('reconnecting', `attempt ${attempt}`);
+        try {
+            await attach();
+            onStatus('connected', device.name || '');
+            break;
+        } catch {
+            /* Asleep, or still shutting down. Neither is an error to report —
+             * the status line already says `reconnecting`. */
+            await wait(Math.min(1000 + attempt * 250, 4000));
+        }
+    }
+    reattaching = false;
 }
 
 /*
@@ -287,6 +328,9 @@ export async function sendRaw(bytes) {
 }
 
 export async function disconnect() {
+    /* Before the drop, so the disconnect event does not start reattaching to
+     * the device this is letting go of. */
+    wantLink = false;
     if (device && device.gatt && device.gatt.connected) device.gatt.disconnect();
     device = null;
     char = null;
