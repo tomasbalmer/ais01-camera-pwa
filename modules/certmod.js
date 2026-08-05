@@ -573,7 +573,7 @@ function concatBytes(chunks) {
     return out;
 }
 
-async function probeByteAccounting(io, target, lineCount) {
+async function probeByteAccounting(io, target, lineCount, from = 0) {
     /*
      * Upload the first N lines under a throwaway name and gate them on the
      * checksum of exactly those N lines.
@@ -590,12 +590,20 @@ async function probeByteAccounting(io, target, lineCount) {
      * as file content, which is how it produced a checksum that matched
      * nothing at all.
      */
-    const parts = target.parts.slice(0, Math.max(1, lineCount));
+    const parts = target.parts.slice(from, from + Math.max(1, lineCount));
     const expect = concatBytes(parts);
     const declared = expect.length;
 
-    io.log(`line-loss probe: first ${parts.length} of ${target.parts.length} ` +
-           `lines, ${declared}B, gated on ${hex4(qfuplChecksum(expect))}`, 'note');
+    /*
+     * `from` exists because every probe so far started at line 1, and line 1 is
+     * 29 bytes of ASCII while every other line is 66 bytes of base64. One line
+     * verifies and two do not, so the failure is either the second line or the
+     * length of it — and starting at line 1 can never tell those apart. This is
+     * the isolation that should have been run three probes ago.
+     */
+    io.log(`line-loss probe: lines ${from + 1}..${from + parts.length} of ` +
+           `${target.parts.length}, ${declared}B, gated on ` +
+           `${hex4(qfuplChecksum(expect))}`, 'note');
 
     await at(io, `AT+QFDEL="${PROBE_NAME}"`, 2000);
     const opened = await at(io, `AT+QFUPL="${PROBE_NAME}",${declared},30`, 3000);
@@ -738,7 +746,7 @@ export async function writeCerts(io, bundle, onProgress = () => {}) {
     try {
         /* Opt-in, because it spends window on a question rather than on the
          * write. Reach for it when a file comes back silent — `?probe=1`. */
-        if (io.probe) await probeByteAccounting(io, targets[0], io.probe);
+        if (io.probe) await probeByteAccounting(io, targets[0], io.probe, io.probeFrom);
         for (let i = 0; i < targets.length; i++) {
             await writeTarget(io, targets[i]);
             onProgress(i + 1, targets.length);
