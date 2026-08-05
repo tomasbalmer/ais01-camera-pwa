@@ -297,7 +297,17 @@ async function awaitFirmwareIdle(io, ms = 20000) {
 
 async function enterCertmod(io, attempts = 3) {
     for (let attempt = 1; attempt <= attempts; attempt++) {
-        await awaitFirmwareIdle(io);
+        /*
+         * Only the FIRST attempt has to establish that NB init is over. Once a
+         * heartbeat has been seen the init cannot restart, so waiting for
+         * another one before the second toggle bought nothing and cost about
+         * four seconds — measured 2026-08-05, in a window where the write
+         * finished four seconds after the modem had already been shut down.
+         *
+         * The unit boots INTO certificate mode, so that second toggle is not
+         * an edge case: it is what every run does.
+         */
+        if (attempt === 1) await awaitFirmwareIdle(io);
         io.log('AT+CERTMOD', 'tx');
 
         /*
@@ -501,7 +511,18 @@ const QFLST_RE = /\+QFLST:\s*"([^"]+)"\s*,\s*(\d+)/;
 async function explainSilence(io, target, want) {
     const lines = await at(io, `AT+QFLST="${target.bg95Name}"`, 3000);
     const found = lines.map(l => QFLST_RE.exec(l)).find(Boolean);
+    const answered = lines.some(l => /\b(OK|ERROR)\b|\+CM[ES] ERROR/.test(l));
 
+    if (!found && !answered) {
+        /* Nothing came back at all, which is not the same as the file being
+         * absent — and reading it that way on 2026-08-05 produced a confident
+         * "bytes were lost on the way in" about a modem that had been powered
+         * off eleven seconds earlier. A question nobody was awake to hear
+         * proves nothing. */
+        io.log('  QFLST got no answer either — the modem is gone, so this run ' +
+               'cannot say whether the transfer completed', 'note');
+        return;
+    }
     if (!found) {
         io.log('  QFLST finds no such file — the modem never completed the ' +
                'transfer, so bytes were lost on the way in', 'fail');

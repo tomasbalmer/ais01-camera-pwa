@@ -16,7 +16,7 @@
  * cached shell — pull to refresh, or reinstall the app from the home screen.
  */
 
-export const VERSION = '0.23.0';
+export const VERSION = '0.24.0';
 
 /* One line, for the places that want context rather than just a number. */
-export const VERSION_NOTE = 'CRLF on the wire — the firmware appends nothing';
+export const VERSION_NOTE = 'no second init wait, and silence from a dead modem says so';
