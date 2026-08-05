@@ -360,6 +360,7 @@ async function loadFiles(fileList) {
     if (!bundle.password) { fail('password.txt is empty'); return; }
 
     state.bundle = bundle;
+    rememberBundle(bundle, relative ? relative.split('/')[0] : 'loose files');
     el('imei').textContent = imei || '(unknown)';
     ok(`loaded ${relative ? relative.split('/')[0] : files.length + ' files'}`);
     note(`  certificate ${bundle.certificate.length}B · key ${bundle.private_key.length}B`);
@@ -373,10 +374,56 @@ async function loadFiles(fileList) {
     }
 }
 
+/* ── Remembering the unit's material ─────────────────────────────────────
+ *
+ * A bench session is one unit and many attempts, and each attempt has been
+ * costing a trip through the file picker for the same folder. So the last
+ * bundle is kept and restored on load.
+ *
+ * It is kept HERE, in this browser, and not in the app's source. The bundle
+ * carries the unit's private key and console password, and this app is served
+ * from a public repository — anything committed to it is published. Storage on
+ * the machine doing the provisioning is a different risk from storage on the
+ * open internet, and only one of them is acceptable.
+ *
+ * `FORGET` is on the load control for when the bench moves to another unit,
+ * because material that outlives its purpose is the other half of the same
+ * problem.
+ */
+const REMEMBERED = 'ais01.provision.bundle';
+
+function rememberBundle(bundle, label) {
+    try {
+        localStorage.setItem(REMEMBERED, JSON.stringify({ bundle, label }));
+    } catch {
+        note('could not remember this bundle — it will need reloading');
+    }
+}
+
+function forgetBundle() {
+    try { localStorage.removeItem(REMEMBERED); } catch { /* nothing to undo */ }
+    state.bundle = null;
+    el('imei').textContent = '—';
+    note('bundle forgotten — load the next unit\'s material');
+}
+
+function restoreBundle() {
+    let saved;
+    try { saved = JSON.parse(localStorage.getItem(REMEMBERED) || 'null'); }
+    catch { return; }
+    if (!saved || !saved.bundle) return;
+
+    state.bundle = saved.bundle;
+    el('imei').textContent = saved.bundle.imei || '(unknown)';
+    ok(`remembered ${saved.label} — stored in this browser, not in the app`);
+    note('  tap FORGET before provisioning a different unit');
+}
+
 async function loadBundleJson(file) {
     try {
         const bundle = parseBundle(await file.text());
         state.bundle = bundle;
+        rememberBundle(bundle, file.name);
         el('imei').textContent = bundle.imei;
         ok(`bundle loaded: ${file.name}`);
         const problem = imeiMismatch(bundle);
@@ -708,6 +755,8 @@ export function initProvision() {
     el('raw-toggle').addEventListener('click', () => setRawView(!state.rawView));
     el('copy-log').addEventListener('click', copyRawLog);
     el('btn-reset').addEventListener('click', doReset);
+    el('btn-forget').addEventListener('click', forgetBundle);
+    restoreBundle();
 
     el('bundle-input').addEventListener('change', e => loadFiles(e.target.files));
 
