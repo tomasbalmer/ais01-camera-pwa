@@ -575,10 +575,18 @@ async function doCerts() {
         /* The proven writer's `--part-delay` default, and for the reason given
          * in `partDelayMs`: the firmware's single line buffer, not the wire. */
         floorMs: 600,
-        /* `?probe=1` spends a couple of seconds asking the modem how it counts
-         * what we send, before writing anything. Off by default — it is a
-         * question, and the window is for the answer we already want. */
-        probe: new URLSearchParams(location.search).has('probe'),
+        /*
+         * `?probe=N` uploads the first N lines of the CA under a throwaway
+         * name before writing anything, and gates them on the checksum of
+         * exactly those N lines.
+         *
+         * It is a bisector. One line lands; twenty do not, with all 1208 bytes
+         * proven to have left the phone and fourteen seconds of modem left to
+         * answer in. Somewhere between the two the console starts dropping
+         * lines, and the count that first fails is worth more than any theory
+         * about why — it turns "raise the pacing and see" into a number.
+         */
+        probe: Number(new URLSearchParams(location.search).get('probe')) || 0,
         log: (text, kind) => write(text, kind === 'ok' ? 'ok'
             : kind === 'fail' ? 'fail' : kind === 'tx' ? 'tx' : 'note'),
     };

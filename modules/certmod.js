@@ -81,19 +81,22 @@ export function canonicalBytes(pemText) {
  * modem stores is `line + CRLF` either way, and a full CRLF risks the trailing
  * LF draining as a second, empty line.
  *
- * This unit does not do that. Measured on 2026-08-05 with a one-line probe
- * declaring its exact wire count: `+QFUPL: 28,6c53`, which is the checksum of
- * `-----BEGIN CERTIFICATE-----` plus a bare CR — the terminator arrived
- * untouched and nothing was appended. Every size this file declared was
- * therefore one byte per line too large, 20 of them for the CA, and the modem
- * sat waiting for bytes that were never coming. That is the whole of the
- * silence: no `+QFUPL`, no stored file, and every retry talking into an upload
- * that was still open.
+ * Whether THIS unit does that is unresolved, and the probe that looked like it
+ * settled the question could not have. The modem truncates to the size it was
+ * declared, and that truncation drops exactly the disputed byte: one line sent
+ * as `line+CR` declaring 28, and one sent as `line+CRLF` declaring 29, both
+ * answer the canonical checksum whichever way the app behaves. Two runs, no
+ * information — the earlier claim here that "the firmware appends nothing" was
+ * never supported.
  *
- * Sending CRLF makes the stored content the canonical bytes again, so the
- * declared size and the checksum stay exactly what the proven USB run
- * produced — `+QFUPL: 1208,5769` remains the acceptance test rather than
- * becoming a second convention to keep straight.
+ * CRLF is kept because it is safe under both readings: if the app appends, it
+ * truncates our terminator first and adds its own; if it does not, what we
+ * send is already canonical. Either way the modem stores the canonical bytes
+ * and `+QFUPL: 1208,5769` stays the single acceptance test.
+ *
+ * It did not fix the silence, which is still there at twenty lines with all
+ * 1208 bytes proven by the transport to have left the phone. That is line loss
+ * in the console, not terminator arithmetic — see `probeByteAccounting`.
  */
 export function wireParts(pemText) {
     const enc = new TextEncoder();
@@ -570,38 +573,32 @@ function concatBytes(chunks) {
     return out;
 }
 
-async function probeByteAccounting(io, target) {
+async function probeByteAccounting(io, target, lineCount) {
     /*
-     * ONE line, and nothing sent afterwards until it answers.
+     * Upload the first N lines under a throwaway name and gate them on the
+     * checksum of exactly those N lines.
      *
-     * The three-line probe did answer on 2026-08-05 — `+QFUPL: 158,7a65` —
-     * which settles that raw data reaches the modem and that an upload over
-     * BLE can complete. Two things about that answer make it useless as a
-     * measurement, and both are fixed here.
+     * One line lands. Twenty do not — with all 1208 bytes proven by the
+     * transport to have left the phone, and fourteen seconds of live modem
+     * left to answer in, which is seven times what a completed upload takes.
+     * The console is dropping lines somewhere between one and twenty, and the
+     * count at which it starts is worth more than any theory about why: it
+     * turns "raise the pacing and see" into a number.
      *
-     * It arrived about ten seconds after the last part, by which time four
-     * more commands had been sent; anything still owed to the upload would
-     * have been taken from them, so the stored content cannot be attributed.
-     * And `7a65` matches nothing — not the wire bytes, not the canonical
-     * bytes, no window of the certificate, no subset of its lines, and no
-     * combination with the commands that followed.
-     *
-     * Guessing the content from outside has been tried and did not converge.
-     * One line, its exact wire count declared, silence afterwards, and a
-     * window long enough for a late answer makes the result attributable to
-     * exactly one transmission — which is what bisecting needs.
+     * Nothing is sent after the last part until the modem answers. The
+     * three-line version talked over its own upload and stored the commands
+     * as file content, which is how it produced a checksum that matched
+     * nothing at all.
      */
-    const parts = target.parts.slice(0, 1);
-    const wire = concatBytes(parts);
-    const canonical = concatBytes(
-        parts.map(p => concatBytes([p, new Uint8Array([0x0A])])));
-    const declared = wire.length;
+    const parts = target.parts.slice(0, Math.max(1, lineCount));
+    const expect = concatBytes(parts);
+    const declared = expect.length;
 
-    io.log(`byte-accounting probe: ${parts.length} line(s), declaring the wire ` +
-           `count ${declared}`, 'note');
+    io.log(`line-loss probe: first ${parts.length} of ${target.parts.length} ` +
+           `lines, ${declared}B, gated on ${hex4(qfuplChecksum(expect))}`, 'note');
 
     await at(io, `AT+QFDEL="${PROBE_NAME}"`, 2000);
-    const opened = await at(io, `AT+QFUPL="${PROBE_NAME}",${declared},10`, 3000);
+    const opened = await at(io, `AT+QFUPL="${PROBE_NAME}",${declared},30`, 3000);
     if (!opened.some(l => l.includes('CONNECT'))) {
         io.log('  probe could not open an upload — inconclusive', 'fail');
         return;
@@ -611,10 +608,6 @@ async function probeByteAccounting(io, target) {
     for (let i = 0; i < parts.length; i++) {
         const final = i === parts.length - 1;
         io.log(`[probe line ${i + 1}/${parts.length}]`, 'tx');
-        /* Nothing is sent after the last part until the modem answers or the
-         * ceiling expires. On 2026-08-05 the eight-second version gave up nine
-         * seconds early, and the commands sent in that gap went into the open
-         * upload as file content — which is why its checksum matched nothing. */
         const replies = final ? reply(io, QFUPL_RE, 40000) : io.listen(60);
         await io.sendRaw(parts[i]);
         collected = collected.concat(await replies);
@@ -623,18 +616,15 @@ async function probeByteAccounting(io, target) {
 
     const got = parseQfupl(collected);
     if (!got) {
-        io.log('  VERDICT: even three lines did not arrive complete — the link ' +
-               'is losing bytes, not the byte accounting', 'fail');
-    } else if (got.checksum === qfuplChecksum(wire)) {
-        io.log('  VERDICT: the firmware forwards the bare CR untouched — every ' +
-               'declared size is one byte per line too large', 'fail');
-    } else if (got.checksum === qfuplChecksum(canonical.slice(0, declared))) {
-        io.log('  VERDICT: the firmware appends LF as documented — the byte ' +
-               'accounting is right and the loss is elsewhere', 'ok');
+        io.log(`  VERDICT: ${parts.length} lines did NOT arrive complete — the ` +
+               `console drops lines at this count`, 'fail');
+    } else if (got.size === declared && got.checksum === qfuplChecksum(expect)) {
+        io.log(`  VERDICT: ${parts.length} lines arrived intact ` +
+               `(+QFUPL: ${got.size},${hex4(got.checksum)}) — try more`, 'ok');
     } else {
-        io.log(`  VERDICT: arrived complete but as neither candidate ` +
-               `(+QFUPL: ${got.size},${hex4(got.checksum)}) — content is being ` +
-               `altered in transit`, 'fail');
+        io.log(`  VERDICT: completed as ${got.size},${hex4(got.checksum)} but ` +
+               `expected ${declared},${hex4(qfuplChecksum(expect))} — the bytes ` +
+               `arrived altered rather than short`, 'fail');
     }
 
     await at(io, `AT+QFDEL="${PROBE_NAME}"`, 2000);
@@ -748,7 +738,7 @@ export async function writeCerts(io, bundle, onProgress = () => {}) {
     try {
         /* Opt-in, because it spends window on a question rather than on the
          * write. Reach for it when a file comes back silent — `?probe=1`. */
-        if (io.probe) await probeByteAccounting(io, targets[0]);
+        if (io.probe) await probeByteAccounting(io, targets[0], io.probe);
         for (let i = 0; i < targets.length; i++) {
             await writeTarget(io, targets[i]);
             onProgress(i + 1, targets.length);
