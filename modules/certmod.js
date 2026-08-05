@@ -298,16 +298,18 @@ async function awaitFirmwareIdle(io, ms = 20000) {
 async function enterCertmod(io, attempts = 3) {
     for (let attempt = 1; attempt <= attempts; attempt++) {
         /*
-         * Only the FIRST attempt has to establish that NB init is over. Once a
-         * heartbeat has been seen the init cannot restart, so waiting for
-         * another one before the second toggle bought nothing and cost about
-         * four seconds — measured 2026-08-05, in a window where the write
-         * finished four seconds after the modem had already been shut down.
+         * Every attempt waits, including the second one, and the reason is not
+         * the one this wait was named for.
          *
-         * The unit boots INTO certificate mode, so that second toggle is not
-         * an edge case: it is what every run does.
+         * Skipping it after the first attempt looked free — init cannot restart
+         * once a heartbeat has been seen — and it broke entry immediately:
+         * `NORMAL POWER DOWN` at 12:17:46, re-entry 1.5 s later, `Enter
+         * certificate mode` and then no RDY at all. Leaving passthrough powers
+         * the BG95 down, and what this wait actually buys on the second toggle
+         * is the modem's power cycle. It is load-bearing under a misleading
+         * name, so it stays.
          */
-        if (attempt === 1) await awaitFirmwareIdle(io);
+        await awaitFirmwareIdle(io);
         io.log('AT+CERTMOD', 'tx');
 
         /*
