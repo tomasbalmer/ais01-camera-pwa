@@ -16,7 +16,7 @@
  * cached shell — pull to refresh, or reinstall the app from the home screen.
  */
 
-export const VERSION = '0.29.0';
+export const VERSION = '0.30.0';
 
 /* One line, for the places that want context rather than just a number. */
-export const VERSION_NOTE = 'probe any window of lines with ?probe=N&from=M';
+export const VERSION_NOTE = 'RESET from the screen, via ATZ';

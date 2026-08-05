@@ -126,6 +126,27 @@ function setRawView(on) {
 
 function tail(out) { out.scrollTop = out.scrollHeight; }
 
+/*
+ * Restart the unit from here instead of from the board.
+ *
+ * `ATZ` is one of the commands the app answers itself rather than forwarding
+ * to the modem, so it reboots the STM32 — the same thing the button does, and
+ * the same thing this app already sends after a successful certificate write.
+ *
+ * It is not a convenience. Every attempt at a cert write costs a fresh AT
+ * window, the window opens 16 s after a boot, and until now every one of those
+ * boots needed a hand on the hardware. With the link re-attaching by itself,
+ * this closes the loop: reset, wait, log in, write — none of it requiring the
+ * unit to be within reach.
+ */
+async function doReset() {
+    if (!link.isConnected()) { fail('not connected'); return; }
+    write('ATZ', 'tx');
+    await link.sendLine('ATZ');
+    note('restarting — the link will drop and come back on its own');
+    note('the AT window opens about 16 s after the boot banner');
+}
+
 async function copyRawLog() {
     const text = rawLog || '(empty)';
     try {
@@ -686,6 +707,7 @@ export function initProvision() {
 
     el('raw-toggle').addEventListener('click', () => setRawView(!state.rawView));
     el('copy-log').addEventListener('click', copyRawLog);
+    el('btn-reset').addEventListener('click', doReset);
 
     el('bundle-input').addEventListener('change', e => loadFiles(e.target.files));
 
