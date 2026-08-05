@@ -17,6 +17,7 @@ import {
     AMAZON_ROOT_CA1, canonicalBytes, wireParts, qfuplChecksum,
     parseQfupl, hex4, partDelayMs,
 } from './certmod.js';
+import { checkPart, checkParts, wireImage } from './console-line-law.js';
 
 let failed = 0;
 const check = (name, actual, expected) => {
@@ -35,29 +36,54 @@ check('CA canonical size is what QFUPL must be told', canonical.length, 1208);
 check('CA checksum is what the modem must echo', hex4(qfuplChecksum(canonical)), '5769');
 
 /*
- * The terminator rule, as this unit actually behaves.
+ * The terminator rule, decided by the firmware rather than by a probe.
  *
- * The reference writer sends a lone CR because the app it talks to truncates
- * each console line at its first CR/LF and appends CRLF itself. Measured here
- * on 2026-08-05 with a one-line probe declaring its exact wire count, this
- * unit does no such thing: `+QFUPL: 28,6c53` is the checksum of
- * `-----BEGIN CERTIFICATE-----` followed by a bare CR, so the terminator
- * arrived untouched and nothing was appended.
+ * This file previously asserted CRLF, on the strength of a one-line probe that
+ * declared 28 and answered `+QFUPL: 28,6c53`. That measurement cannot support
+ * the claim: the modem truncates to the size it was told, and the truncation
+ * drops exactly the byte in dispute, so `line+CR` forwarded untouched and
+ * `line+CRLF` forwarded as `line+CRLF` present identical first-28 bytes.
  *
- * Under that firmware a bare CR made every declared size one byte per line too
- * large — 20 for this certificate — and the modem sat waiting for bytes that
- * were never coming. Sending CRLF puts the canonical content back on the
- * modem, which is why the two forms below must now be byte-identical.
+ * `console-line-law.js`, disassembled from the app, settles it — the forward
+ * path appends CR and LF itself (0x0801108a / 0x08011096). So a trailing LF is
+ * a SECOND terminator into a handler that raises `line_ready` on either byte,
+ * and whenever the main loop runs in the gap between them it dispatches the LF
+ * alone: a stray CRLF into the upload and a wasted turn that eats the next
+ * part. Bare CR is the reference writer's recipe and the one that produced
+ * `+QFUPL: 1208,5769` over USB.
  */
-check('every part ends in CRLF',
-      parts.every(p => p[p.length - 2] === 13 && p[p.length - 1] === 10), true);
+check('every part ends in a bare CR',
+      parts.every(p => p[p.length - 1] === 13), true);
+check('no part carries any LF at all',
+      parts.some(p => [...p].some(b => b === 10)), false);
 check('no part carries a terminator before its own',
-      parts.some(p => [...p.slice(0, -2)].some(b => b === 13 || b === 10)), false);
+      parts.some(p => [...p.slice(0, -1)].some(b => b === 13 || b === 10)), false);
 
-/* What is sent IS what is stored, so the size declared to QFUPL and the
- * checksum gated on cannot drift apart from the bytes that left. */
+/*
+ * What is SENT is one byte per line shorter than what is STORED, because the
+ * app supplies the LF. Declaring the wire count is the failure this asserts
+ * against: 1188 promised, 1208 needed, and a modem waiting forever for twenty
+ * bytes that were never going to be sent.
+ */
 const wire = parts.reduce((n, p) => n + p.length, 0);
-check('the wire form is the canonical form', wire, canonical.length);
+check('the wire form is one byte per line shorter than the stored form',
+      canonical.length - wire, parts.length);
+check('what the app forwards rebuilds the canonical bytes exactly',
+      [...wireImage(parts)], [...canonical]);
+
+/*
+ * The law's own gate, run against the real parts. Base64 has no lowercase-only
+ * alphabet and the table is matched with strstr(), so "does a PEM line happen
+ * to contain an app command" is a real question and not a theoretical one.
+ */
+check('every CA part satisfies the console line law', checkParts(parts), []);
+
+/* And it must actually refuse the form we just came from. */
+check('the law rejects a CRLF-terminated part',
+      checkPart(new TextEncoder().encode('hello\r\n')).length > 0, true);
+check('the law rejects a part carrying an app command as a substring',
+      checkPart(new TextEncoder().encode('somethingATZsomething\r'))
+          .some(i => i.includes('ATZ')), true);
 
 /* The last result wins — an earlier attempt must not be read as this verdict. */
 check('parseQfupl takes the last result',

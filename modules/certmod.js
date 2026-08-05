@@ -17,9 +17,9 @@
  *
  * 2. THE TERMINATOR IS A LONE `\r`. The app truncates each console line at its
  *    first CR/LF and appends CRLF unconditionally before forwarding, so the
- *    modem stores exactly `part + CRLF`. Send a full CRLF and the trailing LF
- *    can drain as a second, empty line, adding a stray CRLF that changes the
- *    stored bytes and fails the checksum.
+ *    modem stores exactly `part + CRLF`. A full CRLF sends a SECOND terminator
+ *    byte into a handler that raises `line_ready` on either one — see
+ *    `console-line-law.js`, and `wireParts` for what that cost.
  *
  * 3. WHAT IS STORED IS NOT WHAT IS SENT. `+QFUPL` describes the canonical-CRLF
  *    content, so the size declared to QFUPL and the checksum gated on come
@@ -29,6 +29,8 @@
  *    refuses to stream. On a phone this matters more than on a laptop: the
  *    terminal is on screen, in a photo, over a shoulder.
  */
+
+import { checkParts, wireImage } from './console-line-law.js';
 
 /* Public, identical on every unit — so it ships here rather than per device. */
 export const AMAZON_ROOT_CA1 = `-----BEGIN CERTIFICATE-----
@@ -74,33 +76,39 @@ export function canonicalBytes(pemText) {
 }
 
 /*
- * What goes on the wire: one part per PEM line, terminated by CRLF.
+ * What goes on the wire: one part per PEM line, terminated by a BARE CR.
  *
- * The reference writer sends a bare CR because the app it talks to truncates
- * each console line at its first CR/LF and appends CRLF itself — so what the
- * modem stores is `line + CRLF` either way, and a full CRLF risks the trailing
- * LF draining as a second, empty line.
+ * This is the reference writer's recipe — `certs.py:wire_parts`, the code that
+ * produced `+QFUPL: 1208,5769` over USB — and it was abandoned here for two
+ * windows on a claim that could not have been measured.
  *
- * Whether THIS unit does that is unresolved, and the probe that looked like it
- * settled the question could not have. The modem truncates to the size it was
- * declared, and that truncation drops exactly the disputed byte: one line sent
- * as `line+CR` declaring 28, and one sent as `line+CRLF` declaring 29, both
- * answer the canonical checksum whichever way the app behaves. Two runs, no
- * information — the earlier claim here that "the firmware appends nothing" was
- * never supported.
+ * The claim was "this firmware appends nothing, so send canonical CRLF", and
+ * its evidence was a one-line probe declaring 28 that answered `+QFUPL:
+ * 28,6c53`. That probe cannot distinguish the two behaviours, because the modem
+ * truncates to the size it was told and the truncation drops exactly the byte
+ * in dispute: `line+CR` forwarded untouched and `line+CRLF` forwarded as
+ * `line+CRLF` both present the same first 28 bytes. Two runs, no information.
  *
- * CRLF is kept because it is safe under both readings: if the app appends, it
- * truncates our terminator first and adds its own; if it does not, what we
- * send is already canonical. Either way the modem stores the canonical bytes
- * and `+QFUPL: 1208,5769` stays the single acceptance test.
+ * What settles it is not a probe but the firmware, disassembled in
+ * `console-line-law.js`: `normalize()` writes NUL over the first CR or LF
+ * (0x0801a450) and the forward path appends CR and LF itself (0x0801108a,
+ * 0x08011096). The app appends. It always did.
  *
- * It did not fix the silence, which is still there at twenty lines with all
- * 1208 bytes proven by the transport to have left the phone. That is line loss
- * in the console, not terminator arithmetic — see `probeByteAccounting`.
+ * So a trailing LF is not harmless padding, it is a second terminator into a
+ * handler that raises `line_ready` on either byte. Whenever the main loop runs
+ * in the gap between the CR and the LF, the LF dispatches alone: a stray `\r\n`
+ * into the upload, and an extra dispatch turn during which the NEXT part lands
+ * in a buffer that is not ready and is discarded — the single 300-byte buffer
+ * has no queue.
+ *
+ * That is the line loss. It is a race, which is why it presented as twenty
+ * lines failing while one line always worked: with one line there is no next
+ * part to destroy, and the stray CRLF arrives after the modem already has the
+ * byte count it was promised. The one-line probe is structurally blind to it.
  */
 export function wireParts(pemText) {
     const enc = new TextEncoder();
-    return pemLines(pemText).map(l => enc.encode(l + '\r\n'));
+    return pemLines(pemText).map(l => enc.encode(l + '\r'));
 }
 
 /* XOR over 16-bit big-endian words; a trailing odd byte pairs with 0. This
@@ -116,6 +124,26 @@ export function qfuplChecksum(bytes) {
 }
 
 const QFUPL_RE = /\+QFUPL:\s*(\d+)\s*,\s*([0-9A-Fa-f]+)/;
+
+/*
+ * The firmware announcing that it has taken the modem away.
+ *
+ * This is not an error the modem returns — it is the app's own cycle ending on
+ * schedule, and it ends the write whether or not the write was going well.
+ * Observed 2026-08-05 in the middle of an upload:
+ *
+ *     [53291] CONNECT                        <- the upload opens
+ *     [68606] Turn off the module receiving and sending RF function.
+ *     [73377] Closing NB module...
+ *     [73408] NB module power-off successful.
+ *
+ * Fifteen seconds. Everything after that point in the run — the 40 s wait for a
+ * `+QFUPL` nobody was left to send, `QFLST`, and two more full attempts — was
+ * spent talking to a modem that was not there. Recognising the announcement is
+ * what turns that into an immediate, correctly-named failure.
+ */
+const MODEM_GONE_RE =
+    /NORMAL POWER DOWN|Closing NB module|NB module power-off|Turn off the module receiving/i;
 
 /* The LAST result in a response window — an earlier attempt must not be read
  * as this one's verdict. */
@@ -518,6 +546,11 @@ async function explainSilence(io, target, want) {
     const found = lines.map(l => QFLST_RE.exec(l)).find(Boolean);
     const answered = lines.some(l => /\b(OK|ERROR)\b|\+CM[ES] ERROR/.test(l));
 
+    if (lines.some(l => MODEM_GONE_RE.test(l))) {
+        io.log('  the firmware powered the NB module off — the modem left ' +
+               'mid-write, so nothing here is a verdict on the bytes', 'fail');
+        return 'gone';
+    }
     if (!found && !answered) {
         /* Nothing came back at all, which is not the same as the file being
          * absent — and reading it that way on 2026-08-05 produced a confident
@@ -526,22 +559,23 @@ async function explainSilence(io, target, want) {
          * proves nothing. */
         io.log('  QFLST got no answer either — the modem is gone, so this run ' +
                'cannot say whether the transfer completed', 'note');
-        return;
+        return 'gone';
     }
     if (!found) {
         io.log('  QFLST finds no such file — the modem never completed the ' +
                'transfer, so bytes were lost on the way in', 'fail');
-        return;
+        return 'short';
     }
     const size = parseInt(found[2], 10);
     if (size === want.size) {
         io.log(`  QFLST says the file IS there at ${size}B — the transfer ` +
                `landed and it was the +QFUPL answer that was lost coming back`,
                'ok');
-    } else {
-        io.log(`  QFLST says ${size}B of ${want.size}B — the modem is genuinely ` +
-               `short by ${want.size - size}`, 'fail');
+        return 'landed';
     }
+    io.log(`  QFLST says ${size}B of ${want.size}B — the modem is genuinely ` +
+           `short by ${want.size - size}`, 'fail');
+    return 'short';
 }
 
 /*
@@ -566,13 +600,6 @@ async function explainSilence(io, target, want) {
  */
 const PROBE_NAME = 'wpprobe.txt';
 
-function concatBytes(chunks) {
-    const out = new Uint8Array(chunks.reduce((n, c) => n + c.length, 0));
-    let at = 0;
-    for (const c of chunks) { out.set(c, at); at += c.length; }
-    return out;
-}
-
 async function probeByteAccounting(io, target, lineCount, from = 0) {
     /*
      * Upload the first N lines under a throwaway name and gate them on the
@@ -590,8 +617,15 @@ async function probeByteAccounting(io, target, lineCount, from = 0) {
      * as file content, which is how it produced a checksum that matched
      * nothing at all.
      */
+    /*
+     * Declare and gate on what the modem STORES, not on what leaves the phone.
+     * With a bare-CR terminator those differ by one byte per line, and the
+     * difference is not cosmetic: declaring the wire count leaves the modem
+     * waiting for bytes that are never coming, which is indistinguishable from
+     * the line loss this probe exists to measure.
+     */
     const parts = target.parts.slice(from, from + Math.max(1, lineCount));
-    const expect = concatBytes(parts);
+    const expect = wireImage(parts);
     const declared = expect.length;
 
     /*
@@ -651,6 +685,10 @@ async function listFiles(io) {
 
 /* Stream one PEM as paced bare-CR parts. Nothing of the payload is displayed —
  * only a redacted progress label. */
+/* The last part is done when the modem answers — or when the firmware says the
+ * modem is leaving, which is equally final and arrives much sooner. */
+const FINAL_DONE = new RegExp(`${QFUPL_RE.source}|${MODEM_GONE_RE.source}`, 'i');
+
 async function streamParts(io, target) {
     let collected = [];
     for (let i = 0; i < target.parts.length; i++) {
@@ -665,14 +703,23 @@ async function streamParts(io, target) {
          * after it had already succeeded — the cost of the second and third
          * file being written in a window that had already been spent. */
         const replies = final
-            ? reply(io, QFUPL_RE, 40000)
+            ? reply(io, FINAL_DONE, 40000)
             : io.listen(60);
         await io.sendRaw(part);
         collected = collected.concat(await replies);
 
+        /* Stop the moment the firmware announces the power-off. Continuing
+         * writes PEM into a closed port and then waits out a 40 s ceiling for
+         * an answer that has no one to send it. */
+        if (collected.some(l => MODEM_GONE_RE.test(l))) {
+            io.log(`  the firmware took the NB module away at part ${i + 1}/` +
+                   `${target.parts.length} — abandoning the stream`, 'fail');
+            return { got: null, gone: true };
+        }
+
         if (!final) await pause(io, partDelayMs(part.length, io.floorMs));
     }
-    return parseQfupl(collected);
+    return { got: parseQfupl(collected), gone: false };
 }
 
 /*
@@ -680,6 +727,13 @@ async function streamParts(io, target) {
  * matching size proves nothing on its own — a corrupted stream of the right
  * length is exactly the failure this gate exists for.
  */
+/* One wording for the one thing the operator has to do about it. The failure is
+ * the window, not the certificate — so it must not read like a bad bundle. */
+const modemGoneMessage = target =>
+    `${target.bg95Name}: the firmware powered the NB module off before the ` +
+    `write finished. This is the window ending, not a problem with the ` +
+    `certificate — wake the unit and run ② again on a fresh cycle.`;
+
 async function writeTarget(io, target, retries = 3) {
     const want = { size: target.declaredSize, checksum: target.expectedChecksum };
 
@@ -710,17 +764,28 @@ async function writeTarget(io, target, retries = 3) {
         const opened = await at(
             io, `AT+QFUPL="${target.bg95Name}",${want.size},20`, 3000);
 
+        if (opened.some(l => MODEM_GONE_RE.test(l))) {
+            throw new Error(modemGoneMessage(target));
+        }
+
         if (!opened.some(l => l.includes('CONNECT'))) {
             io.log('  QFUPL did not return CONNECT', 'fail');
         } else {
-            const got = await streamParts(io, target);
+            const { got, gone } = await streamParts(io, target);
+            if (gone) throw new Error(modemGoneMessage(target));
+
             if (got && got.size === want.size && got.checksum === want.checksum) {
                 io.log(`  VERIFIED +QFUPL: ${got.size},${hex4(got.checksum)}`, 'ok');
                 return true;
             }
             if (!got) {
                 io.log('  no +QFUPL result received', 'fail');
-                await explainSilence(io, target, want);
+                /* A modem that has been powered off cannot be retried into.
+                 * Two further attempts against it is how one lost window
+                 * became one lost window plus four minutes. */
+                if (await explainSilence(io, target, want) === 'gone') {
+                    throw new Error(modemGoneMessage(target));
+                }
             }
             else io.log(`  INTEGRITY MISMATCH: got ${got.size},${hex4(got.checksum)}` +
                         ` — expected ${want.size},${hex4(want.checksum)}`, 'fail');
@@ -741,6 +806,31 @@ async function writeTarget(io, target, retries = 3) {
  */
 export async function writeCerts(io, bundle, onProgress = () => {}) {
     const targets = buildTargets(bundle);
+
+    /*
+     * Check the parts against the firmware's own law before spending a single
+     * second of window on them.
+     *
+     * This gate is here because the bug it catches is invisible from the
+     * device end: a part with the wrong terminator uploads, the modem stores
+     * something, and the run fails as silence twenty lines later — which reads
+     * like line loss, and was read like line loss for two weeks. The law
+     * (`console-line-law.js`, disassembled from the app) can say it in
+     * microseconds, on a laptop, with no unit connected.
+     *
+     * It refuses rather than warns. A part that the app intercepts or truncates
+     * cannot produce a correct file, so continuing only buys a more confusing
+     * failure later.
+     */
+    const issues = targets.flatMap(t => checkParts(t.parts)
+        .map(issue => `${t.label}: ${issue}`));
+    if (issues.length) {
+        for (const issue of issues.slice(0, 5)) io.log(`  ${issue}`, 'fail');
+        throw new Error(
+            `${issues.length} part(s) violate the console line law and would ` +
+            `not land verbatim — refusing to write. See console-line-law.js.`);
+    }
+
     let exited = false;
     await enterCertmod(io);
     try {

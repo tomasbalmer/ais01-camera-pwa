@@ -19,6 +19,7 @@
  */
 
 import { qfuplChecksum } from './certmod.js';
+import { forwardedBytes } from './console-line-law.js';
 
 /*
  * `faults` injects the failures worth rehearsing:
@@ -149,16 +150,17 @@ export function makeFakeDevice(faults = {}, onEmit = null) {
     }
 
     /*
-     * The passthrough contract, implemented from the modem's side: what arrives
-     * is what is stored, byte for byte.
+     * The passthrough contract, implemented from the modem's side.
      *
-     * This used to model the CR→CRLF expansion the reference firmware performs,
-     * and that model is exactly what let a 20-byte shortfall pass every test
-     * while the real unit sat waiting for the rest of a file. Measured
-     * 2026-08-05 with a one-line probe declaring its exact wire count: this
-     * unit forwards the terminator untouched (`+QFUPL: 28,6c53` for one line
-     * plus a bare CR). Storing verbatim is the only version that can catch a
-     * declared size the sender cannot actually deliver.
+     * What the modem receives is not what the phone sent: the app truncates
+     * each part at its first CR or LF and appends its own CRLF
+     * (`console-line-law.js`, 0x0801a450 / 0x0801108a). So this stores
+     * `forwardedBytes(part)`, which is the only model under which the declared
+     * size and the bytes that actually arrive can agree.
+     *
+     * It briefly stored verbatim instead, on a one-line probe reading that
+     * could not distinguish the two — and a fake that forwards untouched is a
+     * fake that cannot reproduce the very bug this path kept hitting.
      */
     function onRaw(bytes) {
         if (!upload) return;
@@ -166,7 +168,7 @@ export function makeFakeDevice(faults = {}, onEmit = null) {
 
         const dropping = faults.dropPart === partIndex && !healed(upload.name);
         if (!dropping) {
-            for (const b of bytes) upload.stored.push(b);
+            for (const b of forwardedBytes(bytes)) upload.stored.push(b);
         }
 
         if (upload.stored.length >= upload.declaredSize) {
