@@ -36,6 +36,10 @@ let rxBuffer = '';
 let onLine = () => {};
 let onChunk = () => {};
 let onStatus = () => {};
+/* Transport-level accounting, surfaced as a normal log line. What left this
+ * phone had been inferred from what came back, and that inference was wrong
+ * twice today. */
+let onDiag = () => {};
 
 export function hasBluetooth() {
     return typeof navigator !== 'undefined' && !!navigator.bluetooth;
@@ -119,6 +123,7 @@ export async function connect(handlers = {}) {
     onLine = handlers.onLine || onLine;
     onChunk = handlers.onChunk || onChunk;
     onStatus = handlers.onStatus || onStatus;
+    onDiag = handlers.onDiag || onDiag;
 
     try {
         device = await navigator.bluetooth.requestDevice({
@@ -186,27 +191,48 @@ const wait = ms => new Promise(r => setTimeout(r, ms));
  * once per connection rather than once per line. */
 let mustSlice = false;
 
+/*
+ * Count what actually left, because so far nothing has.
+ *
+ * The byte-accounting probe came back on 2026-08-05 with the answer that ends
+ * every theory built on volume: THREE lines, 158 bytes, paced at 600 ms, did
+ * not arrive complete. Not scale, not cadence, not the CRLF arithmetic. And
+ * the bridge echoed the 28-byte first line while neither 65-byte line came
+ * back at all, which points at the writes themselves rather than at anything
+ * downstream of them.
+ *
+ * `writeValueWithoutResponse` resolving is not evidence that a write left —
+ * it can reject for an oversized value, and a rejection swallowed inside a
+ * paced loop looks exactly like a device that lost bytes. So every payload now
+ * reports what it managed, and a failed slice says so in the terminal instead
+ * of disappearing into the next 600 ms of silence.
+ *
+ * The whole-payload attempt is gone with it. It was speculative, the failure
+ * predates it, and while it is unproven it is one more thing that can differ
+ * between a line that arrives and a line that does not.
+ */
 async function writeChunks(bytes, kind) {
     if (!char) throw new Error('BLE not connected');
     onChunk(new TextDecoder().decode(bytes), kind);
 
-    if (!mustSlice && bytes.length > CHUNK) {
-        try {
-            await char.writeValueWithoutResponse(bytes);
-            return;
-        } catch {
-            /* Only the MTU can refuse this, and it refuses every line equally
-             * — so ask once and remember the answer. */
-            mustSlice = true;
-        }
-    }
-
+    let sent = 0;
+    let slices = 0;
     for (let i = 0; i < bytes.length; i += CHUNK) {
-        await char.writeValueWithoutResponse(bytes.slice(i, i + CHUNK));
+        const slice = bytes.slice(i, i + CHUNK);
+        try {
+            await char.writeValueWithoutResponse(slice);
+        } catch (err) {
+            onDiag(`TX FAILED after ${sent}B of ${bytes.length}B ` +
+                   `(slice ${slices + 1}): ${err.message}`);
+            throw err;
+        }
+        sent += slice.length;
+        slices++;
         /* The last chunk of a payload needs no gap after it — the caller's own
          * pacing, or its wait for a reply, covers that. */
         if (i + CHUNK < bytes.length) await wait(CHUNK_DRAIN_MS);
     }
+    if (kind === 'tx-raw') onDiag(`tx ${sent}B in ${slices} slices`);
 }
 
 /*

@@ -390,7 +390,9 @@ async function doConnect() {
          * write landed must still see the real bytes. */
         const onLine = line => { write(redact(line)); feed(line); };
         const onChunk = (text, dir) => rawAppend(text, dir);
-        const name = await link.connect({ onLine, onChunk, onStatus: setLink });
+        const onDiag = text => note(text);
+        const name = await link.connect(
+            { onLine, onChunk, onDiag, onStatus: setLink });
         if (name === null) { note('scan dismissed'); return; }
         note(`paired with ${name}`);
         if (state.bundle) {

@@ -527,13 +527,33 @@ function concatBytes(chunks) {
 }
 
 async function probeByteAccounting(io, target) {
-    const parts = target.parts.slice(0, 3);
+    /*
+     * ONE line, and nothing sent afterwards until it answers.
+     *
+     * The three-line probe did answer on 2026-08-05 — `+QFUPL: 158,7a65` —
+     * which settles that raw data reaches the modem and that an upload over
+     * BLE can complete. Two things about that answer make it useless as a
+     * measurement, and both are fixed here.
+     *
+     * It arrived about ten seconds after the last part, by which time four
+     * more commands had been sent; anything still owed to the upload would
+     * have been taken from them, so the stored content cannot be attributed.
+     * And `7a65` matches nothing — not the wire bytes, not the canonical
+     * bytes, no window of the certificate, no subset of its lines, and no
+     * combination with the commands that followed.
+     *
+     * Guessing the content from outside has been tried and did not converge.
+     * One line, its exact wire count declared, silence afterwards, and a
+     * window long enough for a late answer makes the result attributable to
+     * exactly one transmission — which is what bisecting needs.
+     */
+    const parts = target.parts.slice(0, 1);
     const wire = concatBytes(parts);
     const canonical = concatBytes(
         parts.map(p => concatBytes([p, new Uint8Array([0x0A])])));
     const declared = wire.length;
 
-    io.log(`byte-accounting probe: ${parts.length} lines, declaring the wire ` +
+    io.log(`byte-accounting probe: ${parts.length} line(s), declaring the wire ` +
            `count ${declared}`, 'note');
 
     await at(io, `AT+QFDEL="${PROBE_NAME}"`, 2000);
@@ -547,7 +567,11 @@ async function probeByteAccounting(io, target) {
     for (let i = 0; i < parts.length; i++) {
         const final = i === parts.length - 1;
         io.log(`[probe line ${i + 1}/${parts.length}]`, 'tx');
-        const replies = final ? reply(io, QFUPL_RE, 8000) : io.listen(60);
+        /* Nothing is sent after the last part until the modem answers or the
+         * ceiling expires. On 2026-08-05 the eight-second version gave up nine
+         * seconds early, and the commands sent in that gap went into the open
+         * upload as file content — which is why its checksum matched nothing. */
+        const replies = final ? reply(io, QFUPL_RE, 40000) : io.listen(60);
         await io.sendRaw(parts[i]);
         collected = collected.concat(await replies);
         if (!final) await pause(io, partDelayMs(parts[i].length, io.floorMs));
@@ -599,7 +623,7 @@ async function streamParts(io, target) {
          * after it had already succeeded — the cost of the second and third
          * file being written in a window that had already been spent. */
         const replies = final
-            ? reply(io, QFUPL_RE, 15000)
+            ? reply(io, QFUPL_RE, 40000)
             : io.listen(60);
         await io.sendRaw(part);
         collected = collected.concat(await replies);
