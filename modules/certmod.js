@@ -73,10 +73,31 @@ export function canonicalBytes(pemText) {
     return new TextEncoder().encode(pemLines(pemText).join('\r\n') + '\r\n');
 }
 
-/* What goes on the wire: one part per PEM line, each ending in a BARE CR. */
+/*
+ * What goes on the wire: one part per PEM line, terminated by CRLF.
+ *
+ * The reference writer sends a bare CR because the app it talks to truncates
+ * each console line at its first CR/LF and appends CRLF itself — so what the
+ * modem stores is `line + CRLF` either way, and a full CRLF risks the trailing
+ * LF draining as a second, empty line.
+ *
+ * This unit does not do that. Measured on 2026-08-05 with a one-line probe
+ * declaring its exact wire count: `+QFUPL: 28,6c53`, which is the checksum of
+ * `-----BEGIN CERTIFICATE-----` plus a bare CR — the terminator arrived
+ * untouched and nothing was appended. Every size this file declared was
+ * therefore one byte per line too large, 20 of them for the CA, and the modem
+ * sat waiting for bytes that were never coming. That is the whole of the
+ * silence: no `+QFUPL`, no stored file, and every retry talking into an upload
+ * that was still open.
+ *
+ * Sending CRLF makes the stored content the canonical bytes again, so the
+ * declared size and the checksum stay exactly what the proven USB run
+ * produced — `+QFUPL: 1208,5769` remains the acceptance test rather than
+ * becoming a second convention to keep straight.
+ */
 export function wireParts(pemText) {
     const enc = new TextEncoder();
-    return pemLines(pemText).map(l => enc.encode(l + '\r'));
+    return pemLines(pemText).map(l => enc.encode(l + '\r\n'));
 }
 
 /* XOR over 16-bit big-endian words; a trailing odd byte pairs with 0. This

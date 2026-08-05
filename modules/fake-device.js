@@ -149,9 +149,16 @@ export function makeFakeDevice(faults = {}, onEmit = null) {
     }
 
     /*
-     * The passthrough contract, implemented from the modem's side: each console
-     * line is truncated at its first CR/LF and CRLF is appended unconditionally.
-     * So a part sent as `<line>\r` is stored as `<line>\r\n`.
+     * The passthrough contract, implemented from the modem's side: what arrives
+     * is what is stored, byte for byte.
+     *
+     * This used to model the CR→CRLF expansion the reference firmware performs,
+     * and that model is exactly what let a 20-byte shortfall pass every test
+     * while the real unit sat waiting for the rest of a file. Measured
+     * 2026-08-05 with a one-line probe declaring its exact wire count: this
+     * unit forwards the terminator untouched (`+QFUPL: 28,6c53` for one line
+     * plus a bare CR). Storing verbatim is the only version that can catch a
+     * declared size the sender cannot actually deliver.
      */
     function onRaw(bytes) {
         if (!upload) return;
@@ -159,11 +166,7 @@ export function makeFakeDevice(faults = {}, onEmit = null) {
 
         const dropping = faults.dropPart === partIndex && !healed(upload.name);
         if (!dropping) {
-            const text = new TextDecoder().decode(bytes);
-            const line = text.split(/[\r\n]/)[0];
-            for (const b of new TextEncoder().encode(line + '\r\n')) {
-                upload.stored.push(b);
-            }
+            for (const b of bytes) upload.stored.push(b);
         }
 
         if (upload.stored.length >= upload.declaredSize) {
