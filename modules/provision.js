@@ -717,15 +717,37 @@ async function doCerts() {
          * an open load — see `radioOff` in certmod.js, which is the actual
          * countermeasure.
          *
-         * So this goes back to 600, which is not a guess: it is the value the
-         * one recorded success on this device used
-         * (`cli/logs/2026-07-12_20-36-00_daemon/raw.log`, `+QFUPL: 1208,5769`).
-         * Every remaining difference from that run has now been removed — bare
-         * CR parts, sliced writes, this pacing, and a 60-second QFUPL window —
-         * which leaves the missing antenna as the only thing that run had and
-         * this one does not.
+         * 2500, and this one IS measured rather than matched.
+         *
+         * With the echo gate removed the whole stream finally ran, three times,
+         * and answered identically each time: `+QFUPL: 389,041E`, seven lines
+         * echoed out of nineteen. The echoes were not scattered. They were
+         * parts 1, 4, 7, 10, 13, 16, 19 — one in three, no exceptions — and the
+         * stored size confirms nothing else arrived at all:
+         *
+         *     line 1   27 + CRLF  =  29
+         *     lines 4,7,10,13,16   64 + CRLF, five of them  = 330
+         *     line 19  28 + CRLF  =  30
+         *                            ---
+         *                            389   exactly what the modem reported
+         *
+         * So the console is not corrupting or truncating: it accepts one line
+         * and discards the next two outright, and it does so on a clock. At
+         * ~700 ms a line that puts its acceptance period at about 2.1 s, which
+         * is the number this replaces 600 with — rounded up, because landing
+         * one line short of the period costs the whole run.
+         *
+         * That also retires the last comparison to the 2026-07-12 success. Its
+         * 600 ms is not reproducible here and matching it was the wrong goal:
+         * a value copied from one recorded run is a guess with a citation,
+         * while this one comes from counting which lines survived.
+         *
+         * The cost is arithmetic: nineteen lines at 2.5 s is about 48 s a file,
+         * roughly two and a half minutes for all three. The idle window after
+         * `NB module power-off successful` runs some nine minutes, so it fits
+         * with room to spare.
          */
-        floorMs: 600,
+        floorMs: 2500,
         /*
          * `?probe=N` uploads the first N lines of the CA under a throwaway
          * name before writing anything, and gates them on the checksum of

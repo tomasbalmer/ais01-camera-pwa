@@ -16,8 +16,8 @@
  * cached shell — pull to refresh, or reinstall the app from the home screen.
  */
 
-export const VERSION = '0.45.0';
+export const VERSION = '0.46.0';
 
 /* One line, for the places that want context rather than just a number. */
-export const VERSION_NOTE = 'reads a mangled +QFUPL — a decapitated verdict ' +
-    'line was making a finished write look like silence';
+export const VERSION_NOTE = '2.5 s a line — the console accepts one line and ' +
+    'discards the next two, measured, not guessed';
