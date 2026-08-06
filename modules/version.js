@@ -16,8 +16,8 @@
  * cached shell — pull to refresh, or reinstall the app from the home screen.
  */
 
-export const VERSION = '0.35.0';
+export const VERSION = '0.36.0';
 
 /* One line, for the places that want context rather than just a number. */
-export const VERSION_NOTE = 'more time on the wire delivers more bytes, so ' +
-    'the pacing goes up to 1.5s a line';
+export const VERSION_NOTE = 'the radio sleeps during the write — it was ' +
+    'resetting mid-upload, not losing bytes';

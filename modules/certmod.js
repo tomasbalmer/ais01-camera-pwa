@@ -410,6 +410,7 @@ async function enterCertmod(io, attempts = 3) {
             io.log('echo is STILL ON — public material may be written, the ' +
                    'private key will not be', 'fail');
         }
+        await radioOff(io);
         return;
     }
     throw new Error('could not enter CERTMOD with a confirmed BG95 RDY');
@@ -441,6 +442,55 @@ async function enterCertmod(io, attempts = 3) {
  * locally answered nor one of the 58 table entries the app intercepts, so it
  * crosses into the BG95 and its echo is the modem's own.
  */
+/*
+ * Put the radio to sleep for the duration of the write.
+ *
+ * This unit never finds a network — every `Signal Strength` line it prints is
+ * 99 or 0, which is 3GPP for "not detectable" — so the BG95 spends the whole
+ * window hunting at full transmit power. On 2026-08-05 that showed up as the
+ * modem restarting in the MIDDLE of an upload:
+ *
+ *     23:16:36  APP RDY          <- part 9 of 20 had just gone out
+ *     23:17:24  C?AA?RDY
+ *
+ * and the file was left truncated wherever the reset caught it. Three runs, the
+ * same certificate, three different sizes reported by `AT+QFLST`:
+ *
+ *     600 ms/line, ~17 s   ->  557 B
+ *       0 ms/line,  ~8 s   ->  407 B
+ *     1500 ms/line, ~38 s  ->  203 B
+ *
+ * No relationship to pacing at all — the truncation point is wherever the
+ * modem happened to fall over. That is what makes this a power problem rather
+ * than a timing one, and why every cadence tried so far failed differently.
+ *
+ * `AT+CFUN=0` is minimum functionality: the radio stops, the AT interface and
+ * the file system keep working, which is exactly the subset an upload needs
+ * (`docs/hardware/05-modem-at-commands.md`). `AT+CFUN=1` puts it back.
+ *
+ * It is not fatal if it is refused — a modem that will not go quiet can still
+ * be written to, it is just likelier to fall over doing it, and the checksum
+ * gate will say so.
+ */
+async function radioOff(io) {
+    const seen = (await at(io, 'AT+CFUN=0', 6000)).join('\n');
+    if (/\bOK\b/.test(seen)) {
+        io.log('  radio off (AT+CFUN=0) — the modem stops hunting for a network '
+               + 'it cannot find, and stops resetting mid-upload', 'note');
+        io.radioOff = true;
+        return;
+    }
+    io.log('  AT+CFUN=0 was not confirmed — writing with the radio still on',
+           'note');
+    io.radioOff = false;
+}
+
+async function radioOn(io) {
+    if (!io.radioOff) return;
+    await at(io, 'AT+CFUN=1', 6000);
+    io.radioOff = false;
+}
+
 const ECHO_PROBE = 'ATI';
 
 async function silenceEcho(io, attempts = 3) {
@@ -843,6 +893,10 @@ export async function writeCerts(io, bundle, onProgress = () => {}) {
         }
         await listFiles(io);
     } finally {
+        /* Hand the radio back before leaving, so a unit that fails here is not
+         * also left in airplane mode. Cheap, and it runs on the failure path
+         * precisely because that is where it would otherwise be forgotten. */
+        try { await radioOn(io); } catch { /* the exit matters more */ }
         /* Always attempt the exit, including after a failure — leaving the unit
          * in passthrough is worse than the failure that got us here. */
         exited = await exitCertmod(io);
