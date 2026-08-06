@@ -806,7 +806,19 @@ const FINAL_DONE = new RegExp(`${QFUPL_RE.source}|${MODEM_GONE_RE.source}`, 'i')
  * with what it really stored. That number is evidence the old 40 s ceiling
  * always powered off just before hearing.
  */
-const ECHO_WAIT_MS = 3000;
+/*
+ * 8 s, not 3 — this is an instrument as much as a wait. Part 2's receipt has
+ * never arrived at all under gating (4/4 runs on 2026-08-06), and the open
+ * question is WHICH silence it is: a console that needs recovery time after
+ * its first forward into data mode would produce a LATE receipt; a console
+ * that is stuck waiting on a modem that answers nothing per line would
+ * produce none, ever. A late receipt inside this window answers that.
+ */
+const ECHO_WAIT_MS = 8000;
+/* Breathing room after each confirmed receipt before the next part — probes
+ * whether the console needs idle time after a dispatch, over and above the
+ * BLE round trip the receipt itself already cost. */
+const POST_RECEIPT_MS = 400;
 /* QFUPL's own idle timeout is 60 s from the last byte; the confession follows. */
 const CONFESSION_MS = 70000;
 
@@ -832,10 +844,18 @@ async function streamParts(io, target) {
         const replies = final
             ? reply(io, FINAL_DONE, CONFESSION_MS)
             : io.until(new RegExp(`^${escapeRe(wire)}$`), ECHO_WAIT_MS);
+        const sentAt = Date.now();
         await io.sendRaw(part);
         const seen = await replies;
         collected = collected.concat(seen);
         delivered += fb.length;
+
+        /* A receipt that arrives LATE is a finding, not a pass — it says the
+         * console recovers on a clock, and the clock's value is the fix. */
+        const tookMs = Date.now() - sentAt;
+        if (!final && tookMs > 1500 && seen.some(l => l === wire)) {
+            io.log(`  receipt for part ${i + 1} took ${tookMs}ms`, 'note');
+        }
 
         /* Stop the moment the firmware announces the power-off. Continuing
          * writes PEM into a closed port and waits for an answer that has no
@@ -866,6 +886,8 @@ async function streamParts(io, target) {
              * is exactly the retry the situation calls for. */
             return { got: parseQfupl(collected), gone: false };
         }
+
+        await pause(io, POST_RECEIPT_MS);
     }
     return { got: parseQfupl(collected), gone: false };
 }
