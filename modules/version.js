@@ -16,8 +16,8 @@
  * cached shell — pull to refresh, or reinstall the app from the home screen.
  */
 
-export const VERSION = '0.33.0';
+export const VERSION = '0.34.0';
 
 /* One line, for the places that want context rather than just a number. */
-export const VERSION_NOTE = 'every write is sliced and paced at 100ms — the ' +
-    'bridge was losing bytes, and CRs with them';
+export const VERSION_NOTE = 'the upload races the firmware own AT+CSQ poll, ' +
+    'so it is now short enough to fit between two';

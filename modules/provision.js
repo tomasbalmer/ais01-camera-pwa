@@ -640,9 +640,27 @@ async function doCerts() {
         sendRaw: link.sendRaw,
         listen,
         until,
-        /* The proven writer's `--part-delay` default, and for the reason given
-         * in `partDelayMs`: the firmware's single line buffer, not the wire. */
-        floorMs: 600,
+        /*
+         * The upload now races something, so it must be short.
+         *
+         * The firmware never stops talking to the BG95. Every `Signal Strength`
+         * line in the log is an `AT+CSQ` it sent itself — visible verbatim on
+         * 2026-08-05 at 23:02:46 — and one issued while the modem sits in QFUPL
+         * data mode lands INSIDE the file. `AT+QFLST` named the damage exactly:
+         *
+         *     +QFLST: "cacert.pem",557        <- 29 + 8x66, to the byte
+         *
+         * Nine whole lines, a clean boundary, and then nothing. That is not
+         * lost bytes; it is the transfer being interrupted, about eight seconds
+         * in, which is the firmware's polling interval.
+         *
+         * So the per-part pause is gone. It is not needed any more: the
+         * transport's own 100 ms slice pacing already gives the console 400 ms
+         * per 65-byte line to drain — comparable to this floor and applied
+         * where the drain actually happens. Dropping it takes the CA from ~17 s
+         * to ~8 s, which is what has to fit between two polls.
+         */
+        floorMs: 0,
         /*
          * `?probe=N` uploads the first N lines of the CA under a throwaway
          * name before writing anything, and gates them on the checksum of
