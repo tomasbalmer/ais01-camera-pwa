@@ -473,7 +473,17 @@ async function enterCertmod(io, attempts = 3) {
  * gate will say so.
  */
 async function radioOff(io) {
-    const seen = (await at(io, 'AT+CFUN=0', 6000)).join('\n');
+    /*
+     * Twenty seconds, not six.
+     *
+     * `AT+CFUN=0` does not just flip a flag — the modem detaches from the
+     * network first, and on a unit with no antenna it is detaching from a
+     * search that never succeeded. Six seconds was not enough on 2026-08-05:
+     * the command went out, no `OK` came back inside the window, and the write
+     * proceeded with the radio still on. The countermeasure was never actually
+     * applied, so that run tested nothing.
+     */
+    const seen = (await at(io, 'AT+CFUN=0', 20000)).join('\n');
     if (/\bOK\b/.test(seen)) {
         io.log('  radio off (AT+CFUN=0) — the modem stops hunting for a network '
                + 'it cannot find, and stops resetting mid-upload', 'note');
