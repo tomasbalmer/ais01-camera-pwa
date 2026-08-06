@@ -81,10 +81,14 @@ export const BG95_NAMES = {
  * checksum both derive from this same line list, so the declaration and the
  * integrity gate follow the rewrap automatically.
  *
- * If parts still die at 32 characters, the variable was never size — it is
- * "any part after the first", which is a different bug and a useful answer.
+ * They did still die at 32 characters — so the variable was never size, and
+ * the answer was elsewhere: the run was aborting itself on a missing echo two
+ * lines in. With that gate gone the whole stream flows, and the width goes
+ * back to 64 because that is what the reference writer used for the only
+ * completed write on record. Fewer, longer lines mean fewer dispatches for
+ * the console to lose, which is the direction the evidence now points.
  */
-export const BODY_CHARS_PER_LINE = 32;
+export const BODY_CHARS_PER_LINE = 64;
 /* The wrapping the proven USB run used, kept so the hardware vector in
  * `certmod.test.mjs` stays a comparison against a real modem. */
 export const PEM_CONVENTION_WIDTH = 64;
@@ -164,6 +168,31 @@ export function qfuplChecksum(bytes) {
 const QFUPL_RE = /\+QFUPL:\s*(\d+)\s*,\s*([0-9A-Fa-f]+)/;
 
 /*
+ * The same result, for a line whose head did not survive the trip.
+ *
+ * Observed twice on 2026-08-06, both times on the one line the whole write is
+ * judged by:
+ *
+ *     ?eUA1? 29,6653          should have been  +QFUPL: 29,6653
+ *     ?eUA1? 430,846          should have been  +QFUPL: 430,846
+ *
+ * Losing the head of a line is the failure this transport has shown all day in
+ * the other direction; this is it on the way back. The consequence is worse
+ * than a cosmetic one: `QFUPL_RE` needs the literal `+QFUPL:`, so a write that
+ * SUCCEEDED and reported `+QFUPL: 1242,5D64` would be read as no answer at
+ * all, retried over a slot that already held the correct file, and finally
+ * given up on. Any run today could have been that, and nobody would have
+ * known.
+ *
+ * So a line is also accepted when it ends in the exact shape of a result —
+ * decimal size, comma, one to four hex digits, nothing after it. That shape is
+ * specific enough not to collide with PEM base64 (which carries no comma) or
+ * with the firmware's own `[12345]...` lines (which carry no comma either).
+ * The strict form is still tried first and wins whenever it survived.
+ */
+const QFUPL_MANGLED_RE = /(?:^|\s)(\d{1,7})\s*,\s*([0-9A-Fa-f]{1,4})\s*$/;
+
+/*
  * The firmware announcing that it has taken the modem away.
  *
  * This is not an error the modem returns — it is the app's own cycle ending on
@@ -189,6 +218,19 @@ export function parseQfupl(lines) {
     for (let i = lines.length - 1; i >= 0; i--) {
         const m = QFUPL_RE.exec(lines[i]);
         if (m) return { size: parseInt(m[1], 10), checksum: parseInt(m[2], 16) };
+    }
+    /* Only once no intact result exists anywhere: a mangled head costs the
+     * literal marker but not the numbers, and the numbers are still checked
+     * against the expected size AND checksum before anything is believed. */
+    for (let i = lines.length - 1; i >= 0; i--) {
+        const m = QFUPL_MANGLED_RE.exec(lines[i]);
+        if (m) {
+            return {
+                size: parseInt(m[1], 10),
+                checksum: parseInt(m[2], 16),
+                mangled: true,
+            };
+        }
     }
     return null;
 }

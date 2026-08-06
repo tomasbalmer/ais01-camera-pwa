@@ -51,8 +51,12 @@ check('CA checksum is what the modem must echo',
  */
 check('declared size matches the wire image at the bench width',
       canonical.length, wireImage(parts).length);
-check('every part fits in two BLE slices',
-      parts.filter(p => p.length > 40).length, 0);
+/* One line, one BLE write — the shape `ble-transport.js` now sends and the
+ * shape the reference writer sent at `mtu - 3`. The 23-byte fallback MTU is
+ * the floor worth asserting against: anything under the negotiated 185 leaves
+ * the whole-line path intact. */
+check('every part fits in one write at the negotiated MTU',
+      parts.filter(p => p.length > 182).length, 0);
 
 /*
  * The terminator rule, decided by the firmware rather than by a probe.
