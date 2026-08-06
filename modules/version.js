@@ -16,8 +16,8 @@
  * cached shell — pull to refresh, or reinstall the app from the home screen.
  */
 
-export const VERSION = '0.40.0';
+export const VERSION = '0.41.0';
 
 /* One line, for the places that want context rather than just a number. */
-export const VERSION_NOTE = '32-char parts — every line now the two-slice shape ' +
-    'of the only part that has ever reached the modem';
+export const VERSION_NOTE = '32-char parts, and a row to type one AT command ' +
+    'without unplugging the transport under test';

@@ -147,6 +147,34 @@
             background: #0f172a; color: #cbd5e1; font-size: 13px;
         }
         .bar input { display: none; }
+
+        /*
+         * The manual AT row.
+         *
+         * Every stage on this screen is a canned sequence, which is right for
+         * provisioning and useless the moment the unit needs one command that
+         * nobody scripted — `AT+CSQTIME`, a `AT+CFG` read, a QFLST after a
+         * failed write. Without this the answer was "plug in the USB cable and
+         * use the CLI", i.e. abandon the transport under test to change a
+         * setting on it.
+         *
+         * It sends through the same `sendLine` as everything else, so the
+         * console line law applies unchanged and the reply lands in the same
+         * terminal as the rest of the session.
+         */
+        .at-row { flex: 0 0 auto; display: flex; gap: 6px; padding: 0 8px 8px; }
+        .at-row input {
+            flex: 1; min-height: 40px; padding: 0 10px;
+            border: 1px solid #334155; border-radius: 8px;
+            background: #0b1220; color: #e2e8f0;
+            font-family: ui-monospace, monospace; font-size: 13px;
+        }
+        .at-row input::placeholder { color: #475569; }
+        .at-row button {
+            flex: 0 0 88px; min-height: 40px;
+            border: 1px solid #334155; border-radius: 8px;
+            background: #0f172a; color: #cbd5e1; font-size: 13px;
+        }
     </style>
 </head>
 <body>
@@ -197,6 +225,17 @@
              too. -->
         <input id="bundle-input" type="file" webkitdirectory directory multiple>
         <button id="btn-connect">Connect BLE</button>
+    </div>
+
+    <!-- One command, sent as typed. The session has to be unlocked first: the
+         app answers `AT` and `AT?` itself but ignores everything else until the
+         password lands, so an unanswered command this early is a locked
+         console, not a wrong command. -->
+    <div class="at-row">
+        <input id="at-input" type="text" spellcheck="false"
+               autocapitalize="off" autocorrect="off"
+               placeholder="AT+CSQTIME=1">
+        <button id="at-send">SEND</button>
     </div>
 
     <div class="cheat">

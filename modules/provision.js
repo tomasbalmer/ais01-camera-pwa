@@ -147,6 +147,50 @@ async function doReset() {
     note('the AT window opens about 16 s after the boot banner');
 }
 
+/*
+ * One command, typed.
+ *
+ * The four stages are canned sequences, which is what provisioning wants and
+ * exactly wrong the moment a unit needs a command nobody scripted. On
+ * 2026-08-06 that command was `AT+CSQTIME=1` — the search window that decides
+ * how long the firmware hunts for a network before it powers the modem down,
+ * and therefore how long a bench session waits for the idle state a
+ * certificate write requires. Without this row the only way to change it was
+ * the USB cable and the CLI: unplug the transport under test to alter a
+ * setting on it.
+ *
+ * It goes out through the same `sendLine` as every other command, so the
+ * console line law (bare CR, no LF) is obeyed here for free, and the reply
+ * arrives in the same terminal as everything else rather than in a private
+ * result box. Whatever is typed is sent as typed — this is a console, not a
+ * form, and guessing at what the operator meant is how a console stops being
+ * one.
+ */
+async function sendManual() {
+    const input = el('at-input');
+    const text = input.value.trim();
+    if (!text) return;
+    if (!link.isConnected()) { fail('not connected'); return; }
+
+    write(text, 'tx');
+    /* Registered before the send: a fast device can answer inside the same
+     * batch, and a collector that starts afterwards is a collector that has
+     * already missed it. */
+    const replies = listen(3000);
+    try {
+        await link.sendLine(text);
+    } catch (err) {
+        fail(`send failed: ${err.message}`);
+        return;
+    }
+    const seen = await replies;
+    if (!seen.length) {
+        note('no answer — the console is locked until the password lands, ' +
+             'and the window is closed once the modem powers off');
+    }
+    input.select();
+}
+
 async function copyRawLog() {
     const text = rawLog || '(empty)';
     try {
@@ -798,6 +842,11 @@ export function initProvision() {
     restoreBundle();
 
     el('bundle-input').addEventListener('change', e => loadFiles(e.target.files));
+
+    el('at-send').addEventListener('click', sendManual);
+    el('at-input').addEventListener('keydown', e => {
+        if (e.key === 'Enter') sendManual();
+    });
 
     /* Scrolling away from the tail unpins; the marker is how the operator
      * knows they are no longer looking at the present. */
