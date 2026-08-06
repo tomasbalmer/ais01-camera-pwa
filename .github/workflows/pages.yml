@@ -35,11 +35,24 @@ permissions:
   pages: write
   id-token: write
 
-# One deploy at a time, and the newest push wins. Queued runs are cancelled
-# rather than left to time out — the behaviour whose absence caused this file.
+# One deploy at a time. A run that is already deploying is allowed to finish;
+# only runs still WAITING are superseded by a newer push.
+#
+# This said `cancel-in-progress: true` for its first afternoon, which was a
+# mistake and a costly one. The reasoning was "a wedged deploy should not block
+# the day", and the effect was the opposite: every push cancelled the deploy in
+# flight, and a deployment cancelled mid-flight is what leaves the Pages backend
+# holding one it thinks is still running — the state that produced
+# `Please cancel <sha> first or wait for it to complete` on 2026-08-06 and cost
+# an hour of pushing at a site that never updated.
+#
+# GitHub's own Pages template says false for exactly this reason: these are
+# production deployments and interrupting one has no safe outcome. The queue
+# already skips intermediate runs, so the newest commit still wins — it just
+# waits its turn instead of stepping on the one ahead of it.
 concurrency:
   group: pages
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   deploy:
