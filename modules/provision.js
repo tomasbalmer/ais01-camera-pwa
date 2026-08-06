@@ -654,13 +654,23 @@ async function doCerts() {
          * lost bytes; it is the transfer being interrupted, about eight seconds
          * in, which is the firmware's polling interval.
          *
-         * So the per-part pause is gone. It is not needed any more: the
-         * transport's own 100 ms slice pacing already gives the console 400 ms
-         * per 65-byte line to drain — comparable to this floor and applied
-         * where the drain actually happens. Dropping it takes the CA from ~17 s
-         * to ~8 s, which is what has to fit between two polls.
+         * That reading was wrong, and the next run said so with a number. The
+         * delivered count tracks the TIME the stream is given, not its distance
+         * from a poll:
+         *
+         *     600 ms/part, ~17 s of stream   ->  557 B   (29 + 8x66, clean)
+         *       0 ms/part,  ~8 s of stream   ->  407 B   (29 + 5x66 + 48, mid-line)
+         *
+         * Slower delivered more, and the faster run stopped in the middle of a
+         * line rather than between two. That is a drain limit somewhere below
+         * the wire rate — the firmware's console loop, not a race with AT+CSQ —
+         * and the 600 ms pause this replaced was doing real work.
+         *
+         * So the pacing goes UP, well past where it started. It is affordable
+         * for the first time: `AT+CSQTIME` turned a sixty-second window into
+         * minutes, and 1.5 s per line spends about 38 s of it.
          */
-        floorMs: 0,
+        floorMs: 1500,
         /*
          * `?probe=N` uploads the first N lines of the CA under a throwaway
          * name before writing anything, and gates them on the checksum of
