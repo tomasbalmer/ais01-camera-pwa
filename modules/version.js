@@ -16,8 +16,8 @@
  * cached shell — pull to refresh, or reinstall the app from the home screen.
  */
 
-export const VERSION = '0.39.1';
+export const VERSION = '0.40.0';
 
 /* One line, for the places that want context rather than just a number. */
-export const VERSION_NOTE = 'receipt probe — 8s receipt window, 400ms of air ' +
-    'after each receipt, and a stopwatch on every late one';
+export const VERSION_NOTE = '32-char parts — every line now the two-slice shape ' +
+    'of the only part that has ever reached the modem';

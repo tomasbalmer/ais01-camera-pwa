@@ -16,6 +16,7 @@
 import {
     AMAZON_ROOT_CA1, canonicalBytes, wireParts, qfuplChecksum,
     parseQfupl, hex4, partDelayMs,
+    BODY_CHARS_PER_LINE, PEM_CONVENTION_WIDTH,
 } from './certmod.js';
 import { checkPart, checkParts, wireImage } from './console-line-law.js';
 
@@ -31,9 +32,27 @@ const check = (name, actual, expected) => {
 const canonical = canonicalBytes(AMAZON_ROOT_CA1);
 const parts = wireParts(AMAZON_ROOT_CA1);
 
-/* The pair the modem itself produced. */
-check('CA canonical size is what QFUPL must be told', canonical.length, 1208);
-check('CA checksum is what the modem must echo', hex4(qfuplChecksum(canonical)), '5769');
+/*
+ * The pair the modem itself produced — at the 64-character wrapping that run
+ * used. It stays pinned to that width on purpose: it is the one assertion in
+ * this file backed by hardware, and re-deriving it from whatever width the
+ * bench is currently on would turn it into a tautology.
+ */
+const conventional = canonicalBytes(AMAZON_ROOT_CA1, PEM_CONVENTION_WIDTH);
+check('CA canonical size is what QFUPL must be told', conventional.length, 1208);
+check('CA checksum is what the modem must echo',
+      hex4(qfuplChecksum(conventional)), '5769');
+
+/*
+ * The bench wrapping is a different file, and the only claims that hold for
+ * any width are the internal ones: the declaration matches the wire image the
+ * console will produce, and no part exceeds the two BLE slices that are the
+ * shape of the only part ever observed to arrive.
+ */
+check('declared size matches the wire image at the bench width',
+      canonical.length, wireImage(parts).length);
+check('every part fits in two BLE slices',
+      parts.filter(p => p.length > 40).length, 0);
 
 /*
  * The terminator rule, decided by the firmware rather than by a probe.

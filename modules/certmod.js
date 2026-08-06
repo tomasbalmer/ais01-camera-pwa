@@ -63,16 +63,54 @@ export const BG95_NAMES = {
 
 /* ── Pure functions (mirror certs.py) ───────────────────────────────────── */
 
-function pemLines(pemText) {
-    const lines = pemText.trim().split('\n').map(l => l.replace(/\r+$/, ''));
-    if (!lines.length || !lines[0]) throw new Error('certificate is empty');
+/*
+ * Base64 characters per body line, and with it the shape of every part.
+ *
+ * 64 is the PEM convention, and on this link a 64-char line is 65 bytes in
+ * FOUR BLE slices. Across every run of 2026-08-06 exactly one part has ever
+ * reached the modem: part 1, `-----BEGIN CERTIFICATE-----`, 28 bytes in TWO
+ * slices. `AT+QFLST` confirmed it three times in a row on an idle unit —
+ * `"cacert.pem",29` — which is part 1 and nothing else. Part 2 does not
+ * arrive truncated; it does not arrive at all, and the console never echoes
+ * it, so it is not being swallowed by the app's command table either
+ * (`checkParts` returns clean for this certificate).
+ *
+ * That leaves the shape. 32 characters is 33 bytes in two slices, the shape
+ * of the only part that works, and it is still a valid PEM body — line length
+ * is a convention of RFC 7468, not a rule its parsers enforce. Size and
+ * checksum both derive from this same line list, so the declaration and the
+ * integrity gate follow the rewrap automatically.
+ *
+ * If parts still die at 32 characters, the variable was never size — it is
+ * "any part after the first", which is a different bug and a useful answer.
+ */
+export const BODY_CHARS_PER_LINE = 32;
+/* The wrapping the proven USB run used, kept so the hardware vector in
+ * `certmod.test.mjs` stays a comparison against a real modem. */
+export const PEM_CONVENTION_WIDTH = 64;
+
+function pemLines(pemText, width = BODY_CHARS_PER_LINE) {
+    const raw = pemText.trim().split('\n').map(l => l.replace(/\r+$/, ''));
+    if (!raw.length || !raw[0]) throw new Error('certificate is empty');
+
+    const lines = [];
+    for (const line of raw) {
+        /* The BEGIN/END armour is structural — never rewrapped. */
+        if (line.startsWith('-----') || line.length <= width) {
+            lines.push(line);
+            continue;
+        }
+        for (let i = 0; i < line.length; i += width) {
+            lines.push(line.slice(i, i + width));
+        }
+    }
     return lines;
 }
 
 /* What the BG95 STORES: every line terminated by canonical CRLF. Its length is
  * the size to declare to QFUPL; its checksum is the integrity gate. */
-export function canonicalBytes(pemText) {
-    return new TextEncoder().encode(pemLines(pemText).join('\r\n') + '\r\n');
+export function canonicalBytes(pemText, width) {
+    return new TextEncoder().encode(pemLines(pemText, width).join('\r\n') + '\r\n');
 }
 
 /*
@@ -106,9 +144,9 @@ export function canonicalBytes(pemText) {
  * part to destroy, and the stray CRLF arrives after the modem already has the
  * byte count it was promised. The one-line probe is structurally blind to it.
  */
-export function wireParts(pemText) {
+export function wireParts(pemText, width) {
     const enc = new TextEncoder();
-    return pemLines(pemText).map(l => enc.encode(l + '\r'));
+    return pemLines(pemText, width).map(l => enc.encode(l + '\r'));
 }
 
 /* XOR over 16-bit big-endian words; a trailing odd byte pairs with 0. This
