@@ -170,12 +170,6 @@
             font-family: ui-monospace, monospace; font-size: 13px;
         }
         .at-row input::placeholder { color: #475569; }
-        .at-row select {
-            flex: 1; min-height: 40px; padding: 0 8px;
-            border: 1px solid #334155; border-radius: 8px;
-            background: #0f172a; color: #cbd5e1; font-size: 13px;
-        }
-        .at-row button.on { border-color: #22c55e; color: #86efac; }
         .at-row button {
             flex: 0 0 88px; min-height: 40px;
             border: 1px solid #334155; border-radius: 8px;
@@ -231,15 +225,6 @@
              too. -->
         <input id="bundle-input" type="file" webkitdirectory directory multiple>
         <button id="btn-connect">Connect BLE</button>
-    </div>
-
-    <!-- Drive as the other source of the same device folder. Which folders
-         appear is a Drive sharing decision, made outside this app. -->
-    <div class="at-row">
-        <button id="btn-drive" style="flex:0 0 110px">DRIVE</button>
-        <select id="drive-folder" disabled>
-            <option value="">sign in to list device folders</option>
-        </select>
     </div>
 
     <!-- One command, sent as typed. The session has to be unlocked first: the

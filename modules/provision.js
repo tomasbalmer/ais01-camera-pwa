@@ -20,7 +20,6 @@ import {
     sendLine, sendRaw, disconnect,
 } from './ble-transport.js';
 import { writeCerts } from './certmod.js';
-import * as drive from './drive.js';
 import { VERSION, VERSION_NOTE } from './version.js';
 
 /*
@@ -391,45 +390,23 @@ async function loadFiles(fileList) {
 
     /* Folder pick preserves the directory name; a loose multi-select does not. */
     const relative = found.certificate.webkitRelativePath || '';
-    const folderName = relative ? relative.split('/')[0] : '';
+    const imei = (relative.match(/(\d{15})/) || [])[1] || null;
 
-    adoptBundle({
-        folderName,
-        password: await found.password.text(),
-        certificate: await found.certificate.text(),
-        private_key: await found.private_key.text(),
-    }, folderName || `${files.length} files`);
-}
-
-/*
- * One folder's three files become the loaded bundle — wherever they came from.
- *
- * A device folder read off Drive and one picked from the phone are the same
- * three files, so they must not become two slightly different bundles. This is
- * the only place that shape is built, and both callers hand it plain text.
- *
- * `folderName` is the only identity available: AWS names the PEMs after the
- * certificate ID, not the unit, so the IMEI exists in the folder name and
- * nowhere else in the material. That is also why a loose multi-select cannot
- * be checked against the unit and says so.
- */
-function adoptBundle({ folderName, password, certificate, private_key }, label) {
-    const imei = (String(folderName).match(/(\d{15})/) || [])[1] || null;
     const bundle = {
         imei,
         thing_name: imei ? `AIS01-CB-${imei}` : null,
-        password: String(password).split(/\r?\n/)[0].trim(),
-        certificate,
-        private_key,
+        password: (await found.password.text()).split(/\r?\n/)[0].trim(),
+        certificate: await found.certificate.text(),
+        private_key: await found.private_key.text(),
         mqtt: {},
     };
 
     if (!bundle.password) { fail('password.txt is empty'); return; }
 
     state.bundle = bundle;
-    rememberBundle(bundle, label);
+    rememberBundle(bundle, relative ? relative.split('/')[0] : 'loose files');
     el('imei').textContent = imei || '(unknown)';
-    ok(`loaded ${label}`);
+    ok(`loaded ${relative ? relative.split('/')[0] : files.length + ' files'}`);
     note(`  certificate ${bundle.certificate.length}B · key ${bundle.private_key.length}B`);
 
     if (!imei) {
@@ -502,110 +479,6 @@ async function loadBundleJson(file) {
     }
 }
 
-/* ── Drive ───────────────────────────────────────────────────────────────
- *
- * The same device folder, read from where it actually lives.
- *
- * Which folders appear is a Drive sharing decision and not a rule in this app:
- * the list is what the signed-in account can already see. That keeps the
- * access model somewhere a person can change it — share a folder, it shows up;
- * unshare it, it is gone — instead of in a deploy.
- *
- * The local picker stays. Drive needs a network and a bench does not always
- * have one.
- */
-let driveFolders = [];
-
-async function driveSignIn() {
-    if (!drive.isConfigured()) {
-        fail('Drive is not configured — set GOOGLE_CLIENT_ID in modules/config.js');
-        return;
-    }
-    try {
-        const token = await drive.signIn();
-        if (token === null) { note('Drive sign-in dismissed'); return; }
-        el('btn-drive').classList.add('on');
-        await refreshDriveFolders();
-    } catch (err) {
-        fail(`Drive sign-in failed: ${err.message}`);
-    }
-}
-
-async function refreshDriveFolders() {
-    const select = el('drive-folder');
-    try {
-        driveFolders = await drive.listDeviceFolders();
-    } catch (err) {
-        fail(`Drive: ${err.message}`);
-        return;
-    }
-    select.innerHTML = '';
-    const head = document.createElement('option');
-    head.value = '';
-    head.textContent = driveFolders.length
-        ? `${driveFolders.length} device folder(s) — pick one`
-        : 'no device folders shared with this account';
-    select.appendChild(head);
-    for (const f of driveFolders) {
-        const o = document.createElement('option');
-        o.value = f.id;
-        o.textContent = f.name;
-        select.appendChild(o);
-    }
-    select.disabled = !driveFolders.length;
-    ok(`Drive: ${driveFolders.length} device folder(s) visible`);
-
-    /* The unit already says who it is, so choose for the operator rather than
-     * asking them to match a fifteen-digit number by eye. This is the wrong-unit
-     * error prevented rather than merely detected. */
-    autoSelectDriveFolder();
-}
-
-function autoSelectDriveFolder() {
-    const advertised = link.deviceName();
-    const imei = advertised && (String(advertised).match(/(\d{15})/) || [])[1];
-    if (!imei) return;
-    const hit = driveFolders.find(f => f.name.includes(imei));
-    if (!hit) {
-        note(`Drive has no folder for ${imei} — is it shared with this account?`);
-        return;
-    }
-    el('drive-folder').value = hit.id;
-    note(`Drive: matched ${hit.name} to the connected unit`);
-    loadDriveFolder(hit.id);
-}
-
-async function loadDriveFolder(folderId) {
-    const folder = driveFolders.find(f => f.id === folderId);
-    if (!folder) return;
-    note(`Drive: reading ${folder.name}`);
-    try {
-        const files = await drive.listFolderFiles(folderId);
-        const found = {};
-        for (const [role, pattern] of FILE_ROLES) {
-            const hit = files.find(f => pattern.test(f.name));
-            if (hit) found[role] = hit;
-        }
-        const missing = FILE_ROLES.map(([r]) => r).filter(r => !found[r]);
-        if (missing.length) {
-            fail(`${folder.name} is missing: ${missing.join(', ')}`);
-            note(`  it has: ${files.map(f => f.name).join(', ') || '(nothing)'}`);
-            return;
-        }
-        /* Fetched in parallel: three small files over a phone connection, and
-         * the operator is holding a unit whose AT window is open. */
-        const [password, certificate, private_key] = await Promise.all([
-            drive.fileText(found.password.id),
-            drive.fileText(found.certificate.id),
-            drive.fileText(found.private_key.id),
-        ]);
-        adoptBundle({ folderName: folder.name, password, certificate, private_key },
-                    `${folder.name} (Drive)`);
-    } catch (err) {
-        fail(`Drive: ${err.message}`);
-    }
-}
-
 /* Refuse to write anything without a bundle that matches this unit. */
 function bundleReady() {
     if (!state.bundle) { fail('no bundle loaded'); return false; }
@@ -634,9 +507,6 @@ async function doConnect() {
             { onLine, onChunk, onDiag, onStatus: setLink });
         if (name === null) { note('scan dismissed'); return; }
         note(`paired with ${name}`);
-        /* The unit has just said who it is. If Drive is available, that is
-         * enough to pick its folder — no operator step, no IMEI read by eye. */
-        if (drive.isSignedIn() && driveFolders.length) autoSelectDriveFolder();
         if (state.bundle) {
             const problem = imeiMismatch(state.bundle);
             if (problem) fail(`WRONG UNIT — ${problem}`);
@@ -977,11 +847,6 @@ export function initProvision() {
     restoreBundle();
 
     el('bundle-input').addEventListener('change', e => loadFiles(e.target.files));
-
-    el('btn-drive').addEventListener('click', driveSignIn);
-    el('drive-folder').addEventListener('change', e => {
-        if (e.target.value) loadDriveFolder(e.target.value);
-    });
 
     el('at-send').addEventListener('click', sendManual);
     el('at-input').addEventListener('keydown', e => {
