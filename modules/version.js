@@ -16,8 +16,8 @@
  * cached shell — pull to refresh, or reinstall the app from the home screen.
  */
 
-export const VERSION = '0.47.0';
+export const VERSION = '0.48.0';
 
 /* One line, for the places that want context rather than just a number. */
-export const VERSION_NOTE = 'same behaviour, 286 fewer lines — the scaffolding ' +
-    'of every theory that turned out to be wrong is gone';
+export const VERSION_NOTE = 'device folders from Drive — shared with you means ' +
+    'visible here, and the connected unit picks its own';
