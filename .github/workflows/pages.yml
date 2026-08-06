@@ -1,0 +1,59 @@
+# Publish this PWA to GitHub Pages.
+#
+# This replaces the implicit `pages-build-deployment` pipeline that Pages runs
+# for a branch source, and it exists because of what that pipeline did on
+# 2026-08-06: a deployment stuck in `building` held the single Pages slot for
+# most of an hour. Every later push queued behind it and died — two runs at
+# `deployment_queued` for the full ten-minute timeout, one at `Deployment
+# cancelled` — and pushes stopped creating runs at all. Nothing said so
+# anywhere; the site simply kept serving the previous version while a bench
+# session tested code it believed it had deployed.
+#
+# Two properties here are the fix, and neither is available on the legacy path:
+#
+#   concurrency + cancel-in-progress   a new push supersedes the running
+#                                      deploy instead of waiting behind it, so
+#                                      one wedged run costs one push, not the
+#                                      rest of the day.
+#   an explicit workflow               the deploy has logs, a re-run button and
+#                                      a place to change the timeout.
+#
+# Actions are pinned by commit SHA, not by tag: a tag is a moving reference,
+# and a deploy pipeline is exactly where a silently-updated dependency is worst.
+# The tag each SHA corresponded to when pinned is in the comment beside it.
+
+name: Deploy PWA to Pages
+
+on:
+  push:
+    branches: [main]
+  # So a wedged deploy can be retried without an empty commit.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# One deploy at a time, and the newest push wins. Queued runs are cancelled
+# rather than left to time out — the behaviour whose absence caused this file.
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d  # v6.0.0
+      # The repo root IS the site — no build step, which is the whole point of
+      # this app being plain ES modules.
+      - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9  # v5.0.0
+        with:
+          path: .
+      - id: deployment
+        uses: actions/deploy-pages@cd2ce8fcbc39b97be8ca5fce6e763baed58fa128  # v5.0.0
