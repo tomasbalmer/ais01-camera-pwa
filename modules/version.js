@@ -16,8 +16,8 @@
  * cached shell — pull to refresh, or reinstall the app from the home screen.
  */
 
-export const VERSION = '0.41.0';
+export const VERSION = '0.42.0';
 
 /* One line, for the places that want context rather than just a number. */
-export const VERSION_NOTE = '32-char parts, and a row to type one AT command ' +
-    'without unplugging the transport under test';
+export const VERSION_NOTE = 'echo stays on for the public files — the only ' +
+    'condition under which a certificate has ever landed complete';

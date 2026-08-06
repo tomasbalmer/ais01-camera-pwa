@@ -443,11 +443,40 @@ async function enterCertmod(io, attempts = 3) {
          * So the outcome is recorded and enforced per file, rather than
          * stopping a write that discloses nothing. See `writeTarget`.
          */
-        io.echoOff = await silenceEcho(io);
-        if (!io.echoOff) {
-            io.log('echo is STILL ON — public material may be written, the ' +
-                   'private key will not be', 'fail');
-        }
+        /*
+         * Echo stays ON, and it is the point rather than an oversight.
+         *
+         * Measured 2026-08-06, on an idle unit, with every part wrapped to the
+         * 33-byte two-slice shape of the part that always arrives: part 1
+         * echoed and landed, part 2 produced nothing at all inside eight
+         * seconds, and `AT+QFLST` put the stored file at 29 bytes. Identical
+         * shape, identical pacing, opposite outcome — so the variable was
+         * never the size of a part. It is being the first one.
+         *
+         * The difference from the only run that ever completed
+         * (`cli/logs/2026-07-12_20-36-00_daemon/raw.log`, `+QFUPL: 1208,5769`)
+         * is visible in its first lines: `AT+QFUPL=...` comes back echoed.
+         * That run never silenced the modem. Every line of the certificate
+         * echoed there, one for one; here, with `ATE0` confirmed applied, only
+         * the first does. Whatever the mechanism — and the app firmware
+         * forwarding a line and then waiting on modem output is the obvious
+         * candidate — echo on is the condition under which this transfer has
+         * been observed to work, and echo off is the condition under which it
+         * never has.
+         *
+         * The confidentiality rule is unchanged and still enforced per file in
+         * `writeTarget`: the CA ships in this file's own source and the client
+         * certificate crosses every TLS handshake in the clear, so neither is
+         * disclosed by echoing. The private key is, and `secret: true` refuses
+         * it while `io.echoOff` is false. That refusal is now the expected
+         * outcome, not a failure — the key needs a path that does not depend
+         * on the echo, and this experiment is about finding out whether the
+         * echo is what carries the other two.
+         */
+        io.echoOff = false;
+        io.log('echo left ON deliberately — the run that completed had it on, ' +
+               'and only the first line arrives without it. Public material ' +
+               'only: the private key will be refused', 'note');
         await radioOff(io);
         return;
     }
@@ -1059,6 +1088,26 @@ export async function writeCerts(io, bundle, onProgress = () => {}) {
          * write. Reach for it when a file comes back silent — `?probe=1`. */
         if (io.probe) await probeByteAccounting(io, targets[0], io.probe, io.probeFrom);
         for (let i = 0; i < targets.length; i++) {
+            /*
+             * Silence the echo for the key, and only for the key.
+             *
+             * The confidentiality rule has not moved: nothing secret may cross
+             * a console that repeats it onto a phone screen. What moved is
+             * WHEN, because the echo turned out to be load-bearing for the
+             * transfer itself — see the note in `enterCertmod`. Public
+             * material therefore rides with the echo on, which is the only
+             * condition under which a certificate has ever been observed to
+             * land complete, and the modem is silenced here, immediately
+             * before the one file that cannot be shown.
+             *
+             * If the key then fails to transfer where the public files
+             * succeeded, that is not a regression to debug away — it is the
+             * hypothesis confirming itself, and it says the key needs a path
+             * that does not lean on the echo.
+             */
+            if (targets[i].secret && io.echoOff !== true) {
+                io.echoOff = await silenceEcho(io);
+            }
             await writeTarget(io, targets[i]);
             onProgress(i + 1, targets.length);
         }
