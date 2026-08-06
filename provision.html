@@ -93,16 +93,6 @@
             pointer-events: none;
         }
 
-        /* Static text. It never reacts and is never hidden — documentation
-           printed on the tool, not a state readout. */
-        .cheat {
-            flex: 0 0 auto;
-            padding: 8px 14px;
-            background: #1e293b; border-top: 1px solid #334155;
-            font-size: 12px; color: #cbd5e1; line-height: 1.4;
-        }
-        .cheat code { color: #fbbf24; font-family: ui-monospace, monospace; }
-
         .actions {
             flex: 0 0 auto;
             display: flex; gap: 6px; padding: 8px;
@@ -247,11 +237,6 @@
                autocapitalize="off" autocorrect="off"
                placeholder="AT+CSQTIME=1">
         <button id="at-send">SEND</button>
-    </div>
-
-    <div class="cheat">
-        Wait for <code>NBIOT has responded.</code> before login.
-        <code>Password Incorrect</code> this early means too soon, not wrong.
     </div>
 
     <div class="actions">
