@@ -203,34 +203,41 @@ async function keepConnected() {
 }
 
 /*
- * Send a payload WHOLE when the link allows it, and only fall back to slices.
+ * Always slice, and give the bridge room to breathe between slices.
  *
- * This is the one structural difference between the USB path that works and
- * the BLE path that does not. Over USB a 65-byte PEM line enters the console
- * UART as one continuous stream. Over BLE the same line left here as four
- * 20-byte writes, and BLE delivers each in its own connection event — so the
- * firmware, which assembles a console line up to its first CR before
- * forwarding it, was being handed a line in pieces with gaps between them.
+ * The BT24 takes bytes off the air instantly and pushes them to the STM32 over
+ * a 9600-baud UART: a 20-byte slice needs ~21 ms to drain. Anything that
+ * arrives before that has nowhere to go, and `writeValueWithoutResponse` — the
+ * only write this bridge tolerates — has no flow control to say so. The bytes
+ * are simply gone.
  *
- * On 2026-08-04 `AT+QFLST` was finally asked what the silence meant and
- * answered plainly: no such file. The modem never completed the transfer, so
- * the bytes were lost on the way IN — and not for want of bandwidth. The
- * stream averaged about 238 B/s against the bridge's 960, four times under
- * capacity, which rules out rate and leaves delivery shape.
+ * That is not a theory. On 2026-08-05 a certificate upload was caught in the
+ * act, echoed back by the device mid-transfer:
  *
- * `writeValueWithoutResponse` accepts up to the negotiated ATT MTU minus three,
- * which is 20 bytes only when nothing better was negotiated. Chrome routinely
- * gets far more, and a whole line then crosses in one event, arriving as the
- * uninterrupted run the firmware is expecting. The fallback keeps the old
- * behaviour for links that really are stuck at the minimum.
+ *     -----BEGIN CERTIFICATE-----      <- line 1, intact
+ *                                      <- line 2, gone entirely
+ *     ADA5MQ...BBBmF6b24gUm9vdCBDQ...MFowOTELM
+ *     |___ line 3 ___||___ line 4 ___||_ line 5
+ *
+ * Whole bytes disappear mid-stream, and when the byte that disappears is a CR
+ * two console lines merge. The firmware then never sees `line_ready`, keeps
+ * filling its single 300-byte buffer past the end, and the modem never receives
+ * the lines it was promised. That is the silence this path chased for weeks.
+ *
+ * Two consequences, and the second is why the first is affordable:
+ *
+ * 1. The whole-line write is gone. It was introduced on the theory that a line
+ *    crossing in one connection event would arrive as the uninterrupted run the
+ *    firmware wants; it did not fix the loss, and it hands the bridge 65 bytes
+ *    to drain at once — three times the margin the sliced path has.
+ * 2. The gap is 100 ms, not the 31 ms this computed. At 20 bytes per slice that
+ *    is a 4.8x drain margin instead of 1.5x. It costs ~6 s on a 1208-byte
+ *    certificate, which was unaffordable while the firmware's cycle gave us
+ *    seconds — and is nothing now that `AT+CSQTIME` buys minutes.
  */
-const CHUNK_DRAIN_MS = Math.ceil(CHUNK * 10 / 9600) + 10;
+const CHUNK_DRAIN_MS = 100;
 
 const wait = ms => new Promise(r => setTimeout(r, ms));
-
-/* Set on the first oversized write that the link refuses, so it is attempted
- * once per connection rather than once per line. */
-let mustSlice = false;
 
 /*
  * Count what actually left, because so far nothing has.
@@ -255,35 +262,6 @@ let mustSlice = false;
 async function writeChunks(bytes, kind) {
     if (!char) throw new Error('BLE not connected');
     onChunk(new TextDecoder().decode(bytes), kind);
-
-    /*
-     * Try the whole payload first, and say which way it went.
-     *
-     * Bisected 2026-08-05: line 1 alone (29 B, two 20-byte writes) arrives and
-     * verifies. Lines 1+2 (95 B, the second a 66-byte base64 line needing four
-     * writes) do not, with fifteen seconds of live modem to answer in. Five
-     * lines fail the same way. So it is not the pacing and not the count — it
-     * is what happens to a line that has to cross in four pieces instead of
-     * two.
-     *
-     * `writeValueWithoutResponse` accepts up to the negotiated ATT MTU minus
-     * three, and Chrome routinely negotiates far more than the 23-byte
-     * minimum. A whole line then arrives in one connection event, which is the
-     * shape the USB path has always had and this one never did.
-     */
-    if (!mustSlice && bytes.length > CHUNK) {
-        try {
-            await char.writeValueWithoutResponse(bytes);
-            if (kind === 'tx-raw') onDiag(`tx ${bytes.length}B whole`);
-            return;
-        } catch (err) {
-            /* Only the MTU refuses this, and it refuses every line equally —
-             * so ask once, remember, and say so. */
-            mustSlice = true;
-            onDiag(`whole-payload write refused (${err.message}) — slicing ` +
-                   `every payload from here`);
-        }
-    }
 
     let sent = 0;
     let slices = 0;
