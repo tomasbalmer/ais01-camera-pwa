@@ -45,6 +45,7 @@ export function makeFakeDevice(faults = {}, onEmit = null) {
     let upload = null;          /* { name, declaredSize, stored: [] } */
     let attempts = {};          /* per filename, to drive healAfter */
     let partIndex = 0;
+    let idleConfession = null;  /* the compressed QFUPL idle timeout */
 
     const emit = line => {
         emitted.push(line);
@@ -175,9 +176,21 @@ export function makeFakeDevice(faults = {}, onEmit = null) {
         partIndex++;
 
         const dropping = faults.dropPart === partIndex && !healed(upload.name);
+        const fb = forwardedBytes(bytes);
         if (!dropping) {
-            for (const b of forwardedBytes(bytes)) upload.stored.push(b);
+            for (const b of fb) upload.stored.push(b);
         }
+
+        /*
+         * The console's forwarding echo — the delivery receipt streamParts
+         * gates on. This is real behaviour, read off the live logs of
+         * 2026-08-06: every line the console dispatches comes back to the
+         * phone, and a line the console mangled comes back DECAPITATED — the
+         * tail without its head, which is exactly what the modem then stored.
+         * A dropped part therefore does not vanish silently; it confesses.
+         */
+        const line = String.fromCharCode(...fb.subarray(0, fb.length - 2));
+        emit(dropping ? line.slice(Math.min(20, line.length - 1)) : line);
 
         if (upload.ackMode && upload.stored.length >= upload.ackDue) {
             upload.ackDue += 1024;
@@ -185,12 +198,31 @@ export function makeFakeDevice(faults = {}, onEmit = null) {
         }
 
         if (upload.stored.length >= upload.declaredSize) {
+            clearTimeout(idleConfession);
             const stored = new Uint8Array(upload.stored);
             emit(`+QFUPL: ${stored.length},` +
                  qfuplChecksum(stored).toString(16).toUpperCase().padStart(4, '0'));
             emit('OK');
             upload = null;
+            return;
         }
+
+        /*
+         * The idle timeout, compressed. A real BG95 whose upload stalls closes
+         * it 60 s after the last byte and answers `+QFUPL:` with what it
+         * actually stored — the confession the aborted stream waits for. The
+         * semantics are what matters here, not the wall clock.
+         */
+        clearTimeout(idleConfession);
+        idleConfession = setTimeout(() => {
+            if (!upload) return;
+            const stored = new Uint8Array(upload.stored);
+            emit(`+QFUPL: ${stored.length},` +
+                 qfuplChecksum(stored).toString(16).toUpperCase().padStart(4, '0'));
+            emit('OK');
+            upload = null;
+        }, 400);
+        idleConfession.unref?.();
     }
 
     const io = {

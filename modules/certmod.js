@@ -474,18 +474,32 @@ async function enterCertmod(io, attempts = 3) {
  */
 async function radioOff(io) {
     /*
-     * Twenty seconds, not six.
+     * Four seconds, not twenty — the budget changed owners on 2026-08-06.
      *
-     * `AT+CFUN=0` does not just flip a flag — the modem detaches from the
-     * network first, and on a unit with no antenna it is detaching from a
-     * search that never succeeded. Six seconds was not enough on 2026-08-05:
-     * the command went out, no `OK` came back inside the window, and the write
-     * proceeded with the radio still on. The countermeasure was never actually
-     * applied, so that run tested nothing.
+     * The 20 s window (raised from 6 s on 2026-08-05) assumed the enemy was a
+     * slow detach: give `AT+CFUN=0` long enough and the countermeasure lands.
+     * Watched live on 2026-08-06, the enemy turned out to be a clock. On an
+     * unregistered unit the app firmware power-cycles the BG95 on its own
+     * NB-retry schedule — `NORMAL POWER DOWN`, then `RDY` — every 45–75 s,
+     * and entering CERTMOD starts a fresh modem life. Everything between that
+     * `RDY` and the last upload byte has to fit inside one life: the run of
+     * 2026-08-06 03:22 spent 20 s here, died at 1085/1208 B, and lost the
+     * race by two seconds.
+     *
+     * On this unit `AT+CFUN=0` has never answered at all — silence at 6 s,
+     * silence at 20 s, echo but no `OK` either time. Waiting longer buys
+     * nothing and costs exactly the seconds the write is short of. Four
+     * seconds keeps the attempt (a modem that CAN comply answers well within
+     * that) without funding it out of the upload's lifetime.
+     *
+     * Known risk, accepted: if a modem ever confirmed late, its stray `OK`
+     * would land in the next command's reply window. Both observed windows
+     * say this unit's silence is forever-silence, and the checksum gate is
+     * still behind everything this function fails to prevent.
      */
     for (const [cmd, what] of [['AT+CFUN=0', 'minimum functionality'],
                                ['AT+CFUN=4', 'transmit disabled']]) {
-        const seen = (await at(io, cmd, 20000)).join('\n');
+        const seen = (await at(io, cmd, 4000)).join('\n');
         if (/\bOK\b/.test(seen)) {
             io.log(`  radio off (${cmd}, ${what}) — the modem stops ` +
                    `transmitting into a missing antenna, which is what was ` +
@@ -760,88 +774,98 @@ async function listFiles(io) {
 const FINAL_DONE = new RegExp(`${QFUPL_RE.source}|${MODEM_GONE_RE.source}`, 'i');
 
 /*
- * ACK mode: the modem's own flow control, and the reason this path needed it.
+ * Echo receipts: the flow control this link actually has.
  *
- * Quectel's FILE application note (2.2.4, BG95/BG77/BG600L) states the purpose
- * in one sentence: "The ACK mode is provided to avoid the loss of data when
- * uploading a large file, IN CASE HARDWARE FLOW CONTROL DOES NOT WORK."
+ * Quectel's ACK mode (v0.38.0) never produced a single `A` here, and the run
+ * that worked — `cli/logs/2026-07-12_20-36-00_daemon/raw.log` — never asked
+ * for one. What that log DOES show, read side by side with the three failures
+ * of 2026-08-06, is a receipt printed for every line:
  *
- * That is exactly this link. `writeValueWithoutResponse` is the only write the
- * BT24 tolerates and it has no flow control at all, so nothing downstream can
- * ever say "stop, I am full" — which is why every cadence tried on 2026-08-05
- * failed differently and why `AT+QFLST` kept reporting a different truncation
- * point each run (557 B, 407 B, 203 B).
+ *     failing attempt:  one RX line per TWO parts sent, and each one is the
+ *                       TAIL of a part — the head is missing
+ *     +QFUPL: 59 / 231  (the modem's own count: most bytes never arrived)
  *
- * The protocol, verbatim from the note:
+ *     working attempt:  every part came back COMPLETE, one for one
+ *     +QFUPL: 1208,5769 (exact size, exact checksum)
  *
- *     3) MCU sends 1K bytes data, and then BG95 ... will respond with an A.
- *     4) MCU receives this A and then sends the next 1K bytes data;
- *     5) Repeat step 3) and 4) until the transfer is completed.
+ * The RX lines are not modem echo — `ATE0` is verified off before the write.
+ * They are the console's passthrough echoing WHAT IT FORWARDED to the BG95,
+ * which makes them delivery receipts from the actual bottleneck: the app
+ * firmware's line dispatcher (300-byte buffer, NUL at the first terminator,
+ * memset under whatever is still arriving — `console-line-law.js`). A part
+ * whose receipt is complete reached the modem complete. A part whose receipt
+ * is decapitated lost its head inside the console, and the modem is now short
+ * — sitting in data mode, counting, swallowing every later command as file
+ * content. That silence used to read as "the modem is gone".
  *
- * So the count that matters is what the MODEM receives, not what leaves the
- * phone: the app appends CRLF to every part, so a 65-byte wire line lands as
- * 66. `forwardedBytes` is what the law says arrives, and it is what we count.
+ * So the stream gates on the receipt: send a part, wait for its echo, and
+ * only then send the next. No cadence to tune — the console itself says when
+ * it has kept up. A missing or truncated receipt aborts the attempt at that
+ * part and then WAITS: the modem closes an idle upload on its own (the 60 s
+ * inter-packet timeout given in QFUPL) and confesses `+QFUPL: <size>,<chk>`
+ * with what it really stored. That number is evidence the old 40 s ceiling
+ * always powered off just before hearing.
  */
-const ACK_EVERY_BYTES = 1024;
-const ACK_RE = /^\s*A\s*$/;
+const ECHO_WAIT_MS = 3000;
+/* QFUPL's own idle timeout is 60 s from the last byte; the confession follows. */
+const CONFESSION_MS = 70000;
+
+const escapeRe = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 async function streamParts(io, target) {
     let collected = [];
-    /* Bytes the MODEM has taken in, and the boundary at which it owes us an A. */
+    /* What the law says has arrived, for the abort message. */
     let delivered = 0;
-    let ackDue = ACK_EVERY_BYTES;
 
     for (let i = 0; i < target.parts.length; i++) {
         const part = target.parts[i];
         const final = i === target.parts.length - 1;
+        /* Parts are encoded bytes (`wireParts`); the receipt to expect is the
+         * line as the console forwards it, without its terminator. */
+        const fb = forwardedBytes(part);
+        const wire = String.fromCharCode(...fb.subarray(0, fb.length - 2));
 
         io.log(`[${target.bg95Name} PEM part ${i + 1}/${target.parts.length} redacted]`,
                'tx');
-        /* The modem answers the moment it has the byte count it was promised,
-         * so the last part waits for that answer rather than for a fixed
-         * fifteen seconds. Every successful file used to spend those seconds
-         * after it had already succeeded — the cost of the second and third
-         * file being written in a window that had already been spent. */
-        const stored = forwardedBytes(part).length;
-        /* This part is the one that carries the modem past a 1K boundary, so
-         * the modem owes an `A` once it has taken it in — and nothing more may
-         * be sent until that A arrives. */
-        const owesAck = !final && delivered + stored >= ackDue;
-
+        /* The final part's receipt is the `+QFUPL` result itself — the modem
+         * answers the moment it has the byte count it was promised. */
         const replies = final
-            ? reply(io, FINAL_DONE, 40000)
-            : owesAck
-                ? io.until(ACK_RE, 15000)
-                : io.listen(60);
+            ? reply(io, FINAL_DONE, CONFESSION_MS)
+            : io.until(new RegExp(`^${escapeRe(wire)}$`), ECHO_WAIT_MS);
         await io.sendRaw(part);
-        collected = collected.concat(await replies);
-        delivered += stored;
+        const seen = await replies;
+        collected = collected.concat(seen);
+        delivered += fb.length;
 
         /* Stop the moment the firmware announces the power-off. Continuing
-         * writes PEM into a closed port and then waits out a 40 s ceiling for
-         * an answer that has no one to send it. */
+         * writes PEM into a closed port and waits for an answer that has no
+         * one to send it. */
         if (collected.some(l => MODEM_GONE_RE.test(l))) {
             io.log(`  the firmware took the NB module away at part ${i + 1}/` +
                    `${target.parts.length} — abandoning the stream`, 'fail');
             return { got: null, gone: true };
         }
 
-        if (owesAck) {
-            ackDue += ACK_EVERY_BYTES;
-            if (collected.some(l => ACK_RE.test(l))) {
-                io.log(`  ACK at ${delivered}B — the modem is asking for more`,
-                       'note');
-            } else {
-                /* Say it rather than sail past it. Without the A there is no
-                 * flow control left, which is the condition every truncated
-                 * run so far was written under. */
-                io.log(`  no ACK at ${delivered}B — continuing without flow ` +
-                       `control, which is how the earlier runs lost data`,
-                       'fail');
-            }
-        }
+        if (final) break;
 
-        if (!final) await pause(io, partDelayMs(part.length, io.floorMs));
+        if (!seen.some(l => l === wire)) {
+            const frag = seen.filter(l => l.length && wire.endsWith(l)).pop();
+            io.log(frag
+                ? `  part ${i + 1} receipt is truncated (${frag.length}/` +
+                  `${wire.length} chars) — the console dropped its head`
+                : `  no receipt for part ${i + 1} within ${ECHO_WAIT_MS / 1000}s`,
+                'fail');
+            io.log(`  stopping at ${delivered}B — letting the upload time out ` +
+                   `so the modem can say what it actually stored`, 'note');
+            const confession = await reply(io, FINAL_DONE, CONFESSION_MS);
+            collected = collected.concat(confession);
+            if (collected.some(l => MODEM_GONE_RE.test(l))) {
+                return { got: null, gone: true };
+            }
+            /* A partial +QFUPL here fails the size/checksum gate above, which
+             * is exactly the retry the situation calls for. */
+            return { got: parseQfupl(collected), gone: false };
+        }
     }
     return { got: parseQfupl(collected), gone: false };
 }
@@ -893,9 +917,13 @@ async function writeTarget(io, target, retries = 3) {
          * the transfer before it ended and every byte after the cutoff went
          * nowhere. Matching the proven value removes one more difference
          * between the run that worked and the runs that do not.
+         *
+         * No ackmode. The `,1` of v0.38.0 never yielded a single `A` through
+         * the console, and the proven run did not use it — the flow control
+         * here is the echo receipt, per streamParts.
          */
         const opened = await at(
-            io, `AT+QFUPL="${target.bg95Name}",${want.size},60,1`, 3000);
+            io, `AT+QFUPL="${target.bg95Name}",${want.size},60`, 3000);
 
         if (opened.some(l => MODEM_GONE_RE.test(l))) {
             throw new Error(modemGoneMessage(target));
