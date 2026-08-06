@@ -16,8 +16,8 @@
  * cached shell — pull to refresh, or reinstall the app from the home screen.
  */
 
-export const VERSION = '0.42.0';
+export const VERSION = '0.43.0';
 
 /* One line, for the places that want context rather than just a number. */
-export const VERSION_NOTE = 'echo stays on for the public files — the only ' +
-    'condition under which a certificate has ever landed complete';
+export const VERSION_NOTE = 'one line, one BLE write — matching the writer that ' +
+    'produced the only completed certificate on this device';

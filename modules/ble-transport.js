@@ -259,9 +259,54 @@ const wait = ms => new Promise(r => setTimeout(r, ms));
  * predates it, and while it is unproven it is one more thing that can differ
  * between a line that arrives and a line that does not.
  */
+/*
+ * One line, one write, whenever the link will take it.
+ *
+ * The whole-line write was here before and was removed on 2026-08-05 as
+ * unproven. It is back because the comparison that was missing then has since
+ * been made: `cli/ais01_cli/core/ble_transport.py` is the code that produced
+ * the only completed certificate write on this device
+ * (`cli/logs/2026-07-12_20-36-00_daemon/raw.log`, `+QFUPL: 1208,5769`, and
+ * `session.json` records `port: "ble:..."` — so it was this transport, not
+ * USB). It sizes every write at `mtu - 3`, and CoreBluetooth on this Mac
+ * negotiates an ATT MTU of 185. Every PEM line left that program as ONE write.
+ *
+ * This module was hard-coding 20 bytes, so the same line left as two or four
+ * writes a hundred milliseconds apart. Measured on 2026-08-06, part 1 arrives
+ * and part 2 never does, at 33 bytes as surely as at 65 — which is not a size
+ * effect and not the modem echo (tested, unchanged). A console that treats a
+ * gap mid-line as the end of what it was collecting would produce exactly
+ * that, and it is the one difference from the run that worked which had not
+ * been tried.
+ *
+ * Chrome rejects a write larger than the negotiated MTU rather than splitting
+ * it, and Web Bluetooth does not expose the MTU — so the size is discovered
+ * the only way available: attempt the whole line, and on rejection fall back
+ * to slices and remember the limit for next time.
+ */
+let wholeLineWrites = true;
+
 async function writeChunks(bytes, kind) {
     if (!char) throw new Error('BLE not connected');
     onChunk(new TextDecoder().decode(bytes), kind);
+
+    if (wholeLineWrites && bytes.length > CHUNK) {
+        try {
+            await char.writeValueWithoutResponse(bytes);
+            /* The gap follows every write here, including the last one —
+             * `INTER_CHUNK_GAP_S` in the reference writer is unconditional,
+             * and the drain it pays for is the same drain either way. */
+            await wait(CHUNK_DRAIN_MS);
+            if (kind === 'tx-raw') onDiag(`tx ${bytes.length}B in 1 write`);
+            return;
+        } catch (err) {
+            /* Too large for this link's MTU. Say so once, then slice for the
+             * rest of the session rather than failing a write per line. */
+            wholeLineWrites = false;
+            onDiag(`whole-line write refused (${bytes.length}B): ` +
+                   `${err.message} — slicing at ${CHUNK}B from here on`);
+        }
+    }
 
     let sent = 0;
     let slices = 0;
@@ -276,9 +321,7 @@ async function writeChunks(bytes, kind) {
         }
         sent += slice.length;
         slices++;
-        /* The last chunk of a payload needs no gap after it — the caller's own
-         * pacing, or its wait for a reply, covers that. */
-        if (i + CHUNK < bytes.length) await wait(CHUNK_DRAIN_MS);
+        await wait(CHUNK_DRAIN_MS);
     }
     if (kind === 'tx-raw') onDiag(`tx ${sent}B in ${slices} slices`);
 }
