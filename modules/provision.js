@@ -367,8 +367,15 @@ async function loadFiles(fileList) {
     const files = Array.from(fileList || []);
     if (!files.length) return;
 
-    /* A prepared bundle still works — it is what a Drive-based flow hands out
-     * and there is no reason to break it. */
+    /*
+     * The prepared bundle, and on a phone the only sensible choice.
+     *
+     * The picker cannot ask Drive for a folder — cloud providers expose files
+     * — so the directory name that carries the IMEI never arrives, and with it
+     * goes the check that this material belongs to this unit. One
+     * `AIS01-CB-<IMEI>.json` from `ais01 certs bundle` puts the IMEI back
+     * INSIDE the artefact, where a file pick cannot lose it.
+     */
     const json = files.find(f => /\.json$/i.test(f.name));
     if (json && files.length === 1) return loadBundleJson(json);
 
@@ -384,11 +391,15 @@ async function loadFiles(fileList) {
         el('imei').textContent = '—';
         fail(`missing from the selection: ${missing.join(', ')}`);
         note(`picked ${files.length} file(s): ${files.map(f => f.name).join(', ')}`);
-        note('Select the whole device folder, including password.txt.');
+        note('Pick AIS01-CB-<IMEI>.json, or all three files including');
+        note('password.txt.');
         return;
     }
 
-    /* Folder pick preserves the directory name; a loose multi-select does not. */
+    /* A folder pick preserves the directory name and a file pick does not, so
+     * this path has an IMEI only on a desktop browser that still offers one.
+     * The warning below is not boilerplate: it is the difference between a
+     * checked write and an unchecked one. */
     const relative = found.certificate.webkitRelativePath || '';
     const imei = (relative.match(/(\d{15})/) || [])[1] || null;
 

@@ -211,19 +211,30 @@
     </main>
 
     <div class="bar">
-        <label for="bundle-input">Load device folder</label>
+        <label for="bundle-input">Load bundle</label>
         <!-- No `accept` filter on purpose. iOS Files greys out .json on some
              versions, which looks like the file is missing rather than
              filtered — and the file always arrives from somewhere we do not
              control (AirDrop, Drive, a download). The parser rejects anything
              that is not a bundle, with a reason, which is the better place to
              be strict. -->
-        <!-- webkitdirectory picks the whole folder in one gesture and, unlike a
-             loose multi-select, preserves the directory name — which is the
-             only place the IMEI exists. `multiple` is the fallback for browsers
-             without it; loadFiles() handles either, and a prepared .json bundle
-             too. -->
-        <input id="bundle-input" type="file" webkitdirectory directory multiple>
+        <!-- No `webkitdirectory`, and that is the whole point of this input.
+             Asking for a DIRECTORY is what kept Drive out: the phone's own
+             picker already offers Drive as a source, but cloud providers
+             expose files, not folders, so a directory request shows the
+             technician an empty Drive. Asking for files lets them browse
+             straight into it, with no OAuth, no API key and no account to
+             configure.
+
+             The cost is the IMEI. AWS names the PEMs after the certificate ID,
+             so with loose files the unit's identity exists only in the folder
+             name that a file pick discards — and the wrong-unit check goes
+             with it. The prepared bundle is the answer: `ais01 certs bundle`
+             writes one AIS01-CB-<IMEI>.json carrying the IMEI, the password
+             and both PEMs, so a single tap in Drive keeps the check alive.
+             loadFiles() still accepts loose files, and still says the check is
+             off when it gets them. -->
+        <input id="bundle-input" type="file" multiple>
         <button id="btn-connect">Connect BLE</button>
     </div>
 
