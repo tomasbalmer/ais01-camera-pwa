@@ -16,8 +16,8 @@
  * cached shell — pull to refresh, or reinstall the app from the home screen.
  */
 
-export const VERSION = '0.37.0';
+export const VERSION = '0.38.0';
 
 /* One line, for the places that want context rather than just a number. */
-export const VERSION_NOTE = 'every difference from the one run that worked ' +
-    'is gone, and the radio sleeps for the write';
+export const VERSION_NOTE = 'ACK mode — the modem now says when it is ready ' +
+    'for more, instead of us guessing';

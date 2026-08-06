@@ -30,7 +30,7 @@
  *    terminal is on screen, in a photo, over a shoulder.
  */
 
-import { checkParts, wireImage } from './console-line-law.js';
+import { checkParts, forwardedBytes, wireImage } from './console-line-law.js';
 
 /* Public, identical on every unit — so it ships here rather than per device. */
 export const AMAZON_ROOT_CA1 = `-----BEGIN CERTIFICATE-----
@@ -759,8 +759,38 @@ async function listFiles(io) {
  * modem is leaving, which is equally final and arrives much sooner. */
 const FINAL_DONE = new RegExp(`${QFUPL_RE.source}|${MODEM_GONE_RE.source}`, 'i');
 
+/*
+ * ACK mode: the modem's own flow control, and the reason this path needed it.
+ *
+ * Quectel's FILE application note (2.2.4, BG95/BG77/BG600L) states the purpose
+ * in one sentence: "The ACK mode is provided to avoid the loss of data when
+ * uploading a large file, IN CASE HARDWARE FLOW CONTROL DOES NOT WORK."
+ *
+ * That is exactly this link. `writeValueWithoutResponse` is the only write the
+ * BT24 tolerates and it has no flow control at all, so nothing downstream can
+ * ever say "stop, I am full" — which is why every cadence tried on 2026-08-05
+ * failed differently and why `AT+QFLST` kept reporting a different truncation
+ * point each run (557 B, 407 B, 203 B).
+ *
+ * The protocol, verbatim from the note:
+ *
+ *     3) MCU sends 1K bytes data, and then BG95 ... will respond with an A.
+ *     4) MCU receives this A and then sends the next 1K bytes data;
+ *     5) Repeat step 3) and 4) until the transfer is completed.
+ *
+ * So the count that matters is what the MODEM receives, not what leaves the
+ * phone: the app appends CRLF to every part, so a 65-byte wire line lands as
+ * 66. `forwardedBytes` is what the law says arrives, and it is what we count.
+ */
+const ACK_EVERY_BYTES = 1024;
+const ACK_RE = /^\s*A\s*$/;
+
 async function streamParts(io, target) {
     let collected = [];
+    /* Bytes the MODEM has taken in, and the boundary at which it owes us an A. */
+    let delivered = 0;
+    let ackDue = ACK_EVERY_BYTES;
+
     for (let i = 0; i < target.parts.length; i++) {
         const part = target.parts[i];
         const final = i === target.parts.length - 1;
@@ -772,11 +802,20 @@ async function streamParts(io, target) {
          * fifteen seconds. Every successful file used to spend those seconds
          * after it had already succeeded — the cost of the second and third
          * file being written in a window that had already been spent. */
+        const stored = forwardedBytes(part).length;
+        /* This part is the one that carries the modem past a 1K boundary, so
+         * the modem owes an `A` once it has taken it in — and nothing more may
+         * be sent until that A arrives. */
+        const owesAck = !final && delivered + stored >= ackDue;
+
         const replies = final
             ? reply(io, FINAL_DONE, 40000)
-            : io.listen(60);
+            : owesAck
+                ? io.until(ACK_RE, 15000)
+                : io.listen(60);
         await io.sendRaw(part);
         collected = collected.concat(await replies);
+        delivered += stored;
 
         /* Stop the moment the firmware announces the power-off. Continuing
          * writes PEM into a closed port and then waits out a 40 s ceiling for
@@ -785,6 +824,21 @@ async function streamParts(io, target) {
             io.log(`  the firmware took the NB module away at part ${i + 1}/` +
                    `${target.parts.length} — abandoning the stream`, 'fail');
             return { got: null, gone: true };
+        }
+
+        if (owesAck) {
+            ackDue += ACK_EVERY_BYTES;
+            if (collected.some(l => ACK_RE.test(l))) {
+                io.log(`  ACK at ${delivered}B — the modem is asking for more`,
+                       'note');
+            } else {
+                /* Say it rather than sail past it. Without the A there is no
+                 * flow control left, which is the condition every truncated
+                 * run so far was written under. */
+                io.log(`  no ACK at ${delivered}B — continuing without flow ` +
+                       `control, which is how the earlier runs lost data`,
+                       'fail');
+            }
         }
 
         if (!final) await pause(io, partDelayMs(part.length, io.floorMs));
@@ -841,7 +895,7 @@ async function writeTarget(io, target, retries = 3) {
          * between the run that worked and the runs that do not.
          */
         const opened = await at(
-            io, `AT+QFUPL="${target.bg95Name}",${want.size},60`, 3000);
+            io, `AT+QFUPL="${target.bg95Name}",${want.size},60,1`, 3000);
 
         if (opened.some(l => MODEM_GONE_RE.test(l))) {
             throw new Error(modemGoneMessage(target));
