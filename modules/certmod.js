@@ -893,36 +893,28 @@ const escapeRe = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 async function streamParts(io, target) {
     let collected = [];
-    /* What the law says has arrived, for the abort message. */
-    let delivered = 0;
+    let receipted = 0;
 
     for (let i = 0; i < target.parts.length; i++) {
         const part = target.parts[i];
         const final = i === target.parts.length - 1;
-        /* Parts are encoded bytes (`wireParts`); the receipt to expect is the
+        /* Parts are encoded bytes (`wireParts`); the echo to look for is the
          * line as the console forwards it, without its terminator. */
         const fb = forwardedBytes(part);
         const wire = String.fromCharCode(...fb.subarray(0, fb.length - 2));
 
         io.log(`[${target.bg95Name} PEM part ${i + 1}/${target.parts.length} redacted]`,
                'tx');
-        /* The final part's receipt is the `+QFUPL` result itself — the modem
-         * answers the moment it has the byte count it was promised. */
+        /* The final part waits for the `+QFUPL` result — the modem answers the
+         * moment it has the byte count it was promised. Every other part waits
+         * out its pacing and nothing else. */
         const replies = final
             ? reply(io, FINAL_DONE, CONFESSION_MS)
-            : io.until(new RegExp(`^${escapeRe(wire)}$`), ECHO_WAIT_MS);
-        const sentAt = Date.now();
+            : io.listen(Math.max(60, partDelayMs(part.length, io.floorMs)));
         await io.sendRaw(part);
         const seen = await replies;
         collected = collected.concat(seen);
-        delivered += fb.length;
-
-        /* A receipt that arrives LATE is a finding, not a pass — it says the
-         * console recovers on a clock, and the clock's value is the fix. */
-        const tookMs = Date.now() - sentAt;
-        if (!final && tookMs > 1500 && seen.some(l => l === wire)) {
-            io.log(`  receipt for part ${i + 1} took ${tookMs}ms`, 'note');
-        }
+        if (seen.some(l => l === wire)) receipted++;
 
         /* Stop the moment the firmware announces the power-off. Continuing
          * writes PEM into a closed port and waits for an answer that has no
@@ -932,30 +924,31 @@ async function streamParts(io, target) {
                    `${target.parts.length} — abandoning the stream`, 'fail');
             return { got: null, gone: true };
         }
-
-        if (final) break;
-
-        if (!seen.some(l => l === wire)) {
-            const frag = seen.filter(l => l.length && wire.endsWith(l)).pop();
-            io.log(frag
-                ? `  part ${i + 1} receipt is truncated (${frag.length}/` +
-                  `${wire.length} chars) — the console dropped its head`
-                : `  no receipt for part ${i + 1} within ${ECHO_WAIT_MS / 1000}s`,
-                'fail');
-            io.log(`  stopping at ${delivered}B — letting the upload time out ` +
-                   `so the modem can say what it actually stored`, 'note');
-            const confession = await reply(io, FINAL_DONE, CONFESSION_MS);
-            collected = collected.concat(confession);
-            if (collected.some(l => MODEM_GONE_RE.test(l))) {
-                return { got: null, gone: true };
-            }
-            /* A partial +QFUPL here fails the size/checksum gate above, which
-             * is exactly the retry the situation calls for. */
-            return { got: parseQfupl(collected), gone: false };
-        }
-
-        await pause(io, POST_RECEIPT_MS);
     }
+
+    /*
+     * The echo count is reported, never acted on.
+     *
+     * It was acted on for most of 2026-08-06: a part whose echo did not come
+     * back inside a few seconds aborted the attempt, on the theory that the
+     * echo was a per-line delivery receipt. The theory did not survive
+     * testing — the echo behaves the same with the modem's own echo on and
+     * off, and part 2 is silent under every part size, slicing and pacing
+     * tried — but the abort outlived it, and it was the abort that ended each
+     * run two lines in. Twelve windows were spent watching a stream stop
+     * itself.
+     *
+     * The reference writer (`cli/ais01_cli/commands/certs.py`, the only code
+     * that has completed this write) never looks at the echo at all. It sends
+     * every line on a fixed 600 ms cadence and lets the modem's own
+     * `+QFUPL: <size>,<checksum>` be the judge, because that number is
+     * computed over what was actually stored and nothing else can be. This
+     * now does the same, and keeps the count only because a run that lands
+     * with 2 echoes and one that lands with 37 are worth telling apart in
+     * the log afterwards.
+     */
+    io.log(`  ${receipted}/${target.parts.length - 1} lines echoed back ` +
+           `(diagnostic only — the +QFUPL checksum is the verdict)`, 'note');
     return { got: parseQfupl(collected), gone: false };
 }
 
