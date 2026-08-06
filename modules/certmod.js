@@ -483,16 +483,26 @@ async function radioOff(io) {
      * proceeded with the radio still on. The countermeasure was never actually
      * applied, so that run tested nothing.
      */
-    const seen = (await at(io, 'AT+CFUN=0', 20000)).join('\n');
-    if (/\bOK\b/.test(seen)) {
-        io.log('  radio off (AT+CFUN=0) — the modem stops hunting for a network '
-               + 'it cannot find, and stops resetting mid-upload', 'note');
-        io.radioOff = true;
-        return;
+    for (const [cmd, what] of [['AT+CFUN=0', 'minimum functionality'],
+                               ['AT+CFUN=4', 'transmit disabled']]) {
+        const seen = (await at(io, cmd, 20000)).join('\n');
+        if (/\bOK\b/.test(seen)) {
+            io.log(`  radio off (${cmd}, ${what}) — the modem stops ` +
+                   `transmitting into a missing antenna, which is what was ` +
+                   `resetting it mid-upload`, 'note');
+            io.radioOff = cmd === 'AT+CFUN=0' ? 1 : 4;
+            return;
+        }
+        /* `ERROR` means this firmware does not take it and the next form is
+         * worth a try; silence means the modem is not answering at all, and a
+         * second command will not change that. */
+        if (!/ERROR/i.test(seen)) break;
+        io.log(`  ${cmd} refused — trying the weaker form`, 'note');
     }
-    io.log('  AT+CFUN=0 was not confirmed — writing with the radio still on',
-           'note');
-    io.radioOff = false;
+    io.log('  radio could not be silenced — writing with it still on, which on ' +
+           'a unit with no antenna is the condition that truncates the file',
+           'fail');
+    io.radioOff = 0;
 }
 
 async function radioOn(io) {
@@ -814,15 +824,24 @@ async function writeTarget(io, target, retries = 3) {
 
         /*
          * The third argument is how long the modem will sit in data mode
-         * waiting for the rest of the file. The reference uses 100 s, which
-         * over USB is never reached; over BLE a short transfer leaves the
-         * modem consuming everything sent afterwards — on 2026-08-04 the two
-         * retries never saw `CONNECT` because their commands were being eaten
-         * as file content. 20 s is comfortably past a complete transfer and
-         * gives the rest of the window back when one is not.
+         * waiting for the rest of the file, and it is 60 because that is what
+         * the run that WORKED used.
+         *
+         * `cli/logs/2026-07-12_20-36-00_daemon/raw.log` is the only recorded
+         * success on this device — BLE, this certificate, `+QFUPL: 1208,5769`
+         * confirmed by `+QFLST: "cacert.pem",1208` — and it opened with:
+         *
+         *     AT+QFUPL="cacert.pem",1208,60
+         *
+         * This had been lowered to 20 to stop a finished upload from eating the
+         * commands sent after it. That reasoning was sound and the number was
+         * not: at 1.5 s a line the stream runs 34 s, so the modem was abandoning
+         * the transfer before it ended and every byte after the cutoff went
+         * nowhere. Matching the proven value removes one more difference
+         * between the run that worked and the runs that do not.
          */
         const opened = await at(
-            io, `AT+QFUPL="${target.bg95Name}",${want.size},20`, 3000);
+            io, `AT+QFUPL="${target.bg95Name}",${want.size},60`, 3000);
 
         if (opened.some(l => MODEM_GONE_RE.test(l))) {
             throw new Error(modemGoneMessage(target));

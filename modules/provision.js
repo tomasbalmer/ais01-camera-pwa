@@ -666,11 +666,22 @@ async function doCerts() {
          * the wire rate — the firmware's console loop, not a race with AT+CSQ —
          * and the 600 ms pause this replaced was doing real work.
          *
-         * So the pacing goes UP, well past where it started. It is affordable
-         * for the first time: `AT+CSQTIME` turned a sixty-second window into
-         * minutes, and 1.5 s per line spends about 38 s of it.
+         * Neither reading survived. 1.5 s a line delivered 203 B, the worst of
+         * the three, and the log finally showed why the numbers wander: the
+         * modem RESTARTS mid-upload, leaving the file truncated wherever the
+         * reset caught it. This unit has no antenna, so every transmit is into
+         * an open load — see `radioOff` in certmod.js, which is the actual
+         * countermeasure.
+         *
+         * So this goes back to 600, which is not a guess: it is the value the
+         * one recorded success on this device used
+         * (`cli/logs/2026-07-12_20-36-00_daemon/raw.log`, `+QFUPL: 1208,5769`).
+         * Every remaining difference from that run has now been removed — bare
+         * CR parts, sliced writes, this pacing, and a 60-second QFUPL window —
+         * which leaves the missing antenna as the only thing that run had and
+         * this one does not.
          */
-        floorMs: 1500,
+        floorMs: 600,
         /*
          * `?probe=N` uploads the first N lines of the CA under a throwaway
          * name before writing anything, and gates them on the checksum of

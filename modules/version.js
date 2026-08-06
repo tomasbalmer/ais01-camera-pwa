@@ -16,8 +16,8 @@
  * cached shell — pull to refresh, or reinstall the app from the home screen.
  */
 
-export const VERSION = '0.36.1';
+export const VERSION = '0.37.0';
 
 /* One line, for the places that want context rather than just a number. */
-export const VERSION_NOTE = 'the radio sleeps during the write — it was ' +
-    'resetting mid-upload, not losing bytes';
+export const VERSION_NOTE = 'every difference from the one run that worked ' +
+    'is gone, and the radio sleeps for the write';
