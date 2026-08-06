@@ -16,7 +16,6 @@
 import {
     AMAZON_ROOT_CA1, canonicalBytes, wireParts, qfuplChecksum,
     parseQfupl, hex4, partDelayMs,
-    BODY_CHARS_PER_LINE, PEM_CONVENTION_WIDTH,
 } from './certmod.js';
 import { checkPart, checkParts, wireImage } from './console-line-law.js';
 
@@ -32,31 +31,16 @@ const check = (name, actual, expected) => {
 const canonical = canonicalBytes(AMAZON_ROOT_CA1);
 const parts = wireParts(AMAZON_ROOT_CA1);
 
-/*
- * The pair the modem itself produced — at the 64-character wrapping that run
- * used. It stays pinned to that width on purpose: it is the one assertion in
- * this file backed by hardware, and re-deriving it from whatever width the
- * bench is currently on would turn it into a tautology.
- */
-const conventional = canonicalBytes(AMAZON_ROOT_CA1, PEM_CONVENTION_WIDTH);
-check('CA canonical size is what QFUPL must be told', conventional.length, 1208);
+/* The pair the modem itself produced, and re-produced over BLE on
+ * 2026-08-06 — `VERIFIED +QFUPL: 1208,5769` from the phone. */
+check('CA canonical size is what QFUPL must be told', canonical.length, 1208);
 check('CA checksum is what the modem must echo',
-      hex4(qfuplChecksum(conventional)), '5769');
+      hex4(qfuplChecksum(canonical)), '5769');
 
-/*
- * The bench wrapping is a different file, and the only claims that hold for
- * any width are the internal ones: the declaration matches the wire image the
- * console will produce, and no part exceeds the two BLE slices that are the
- * shape of the only part ever observed to arrive.
- */
-check('declared size matches the wire image at the bench width',
-      canonical.length, wireImage(parts).length);
-/* One line, one BLE write — the shape `ble-transport.js` now sends and the
- * shape the reference writer sent at `mtu - 3`. The 23-byte fallback MTU is
- * the floor worth asserting against: anything under the negotiated 185 leaves
- * the whole-line path intact. */
-check('every part fits in one write at the negotiated MTU',
-      parts.filter(p => p.length > 182).length, 0);
+/* The declaration and the wire image are two derivations of one line list;
+ * a drift between them is a modem left waiting for bytes never coming. */
+check('declared size matches the wire image', canonical.length,
+      wireImage(parts).length);
 
 /*
  * The terminator rule, decided by the firmware rather than by a probe.

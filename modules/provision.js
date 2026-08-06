@@ -748,23 +748,6 @@ async function doCerts() {
          * with room to spare.
          */
         floorMs: 2500,
-        /*
-         * `?probe=N` uploads the first N lines of the CA under a throwaway
-         * name before writing anything, and gates them on the checksum of
-         * exactly those N lines.
-         *
-         * It is a bisector. One line lands; twenty do not, with all 1208 bytes
-         * proven to have left the phone and fourteen seconds of modem left to
-         * answer in. Somewhere between the two the console starts dropping
-         * lines, and the count that first fails is worth more than any theory
-         * about why — it turns "raise the pacing and see" into a number.
-         */
-        probe: Number(new URLSearchParams(location.search).get('probe')) || 0,
-        /* `?from=M` starts the probe at line M+1. Line 1 is 29 bytes of ASCII
-         * and every other line is 66 of base64, so a probe that always starts
-         * at the beginning can never say whether a second line or a longer one
-         * is what breaks. */
-        probeFrom: Number(new URLSearchParams(location.search).get('from')) || 0,
         log: (text, kind) => write(text, kind === 'ok' ? 'ok'
             : kind === 'fail' ? 'fail' : kind === 'tx' ? 'tx' : 'note'),
     };

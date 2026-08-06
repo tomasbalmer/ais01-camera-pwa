@@ -15,7 +15,7 @@
  *   writes. FFE2 accepts writes and silently does NOT relay them to the UART.
  *   Pick the characteristic by its `notify` property, never by index.
  *
- *   Writes go out in 20-byte chunks via writeValueWithoutResponse. The
+ *   Writes go out via writeValueWithoutResponse, one payload per call. The
  *   with-response variant hangs Chrome's BLE reconnect on this module — it is
  *   not a fallback, it is a defect. Do not add it here.
  *
@@ -24,7 +24,6 @@
  */
 
 const SERVICE_UUID = 0xFFE0;
-const CHUNK = 20;
 
 /* BT24 advertises under the unit's IMEI; the rest are older/paired names. */
 const NAME_PREFIXES = ['8683', '8691', 'BT24', 'Dragino', 'AIS01'];
@@ -224,16 +223,13 @@ async function keepConnected() {
  * filling its single 300-byte buffer past the end, and the modem never receives
  * the lines it was promised. That is the silence this path chased for weeks.
  *
- * Two consequences, and the second is why the first is affordable:
+ * 100 ms, not the ~21 ms the drain alone needs. The margin is affordable —
+ * about two seconds across a certificate — and buying margin on a link with no
+ * flow control is the only thing that can be bought here.
  *
- * 1. The whole-line write is gone. It was introduced on the theory that a line
- *    crossing in one connection event would arrive as the uninterrupted run the
- *    firmware wants; it did not fix the loss, and it hands the bridge 65 bytes
- *    to drain at once — three times the margin the sliced path has.
- * 2. The gap is 100 ms, not the 31 ms this computed. At 20 bytes per slice that
- *    is a 4.8x drain margin instead of 1.5x. It costs ~6 s on a 1208-byte
- *    certificate, which was unaffordable while the firmware's cycle gave us
- *    seconds — and is nothing now that `AT+CSQTIME` buys minutes.
+ * It is not, however, what made the write land. The console's own acceptance
+ * period is measured in seconds and lives in `io.floorMs` (provision.js); this
+ * value only keeps one write from treading on the next.
  */
 const CHUNK_DRAIN_MS = 100;
 
@@ -260,70 +256,34 @@ const wait = ms => new Promise(r => setTimeout(r, ms));
  * between a line that arrives and a line that does not.
  */
 /*
- * One line, one write, whenever the link will take it.
+ * One line, one write.
  *
- * The whole-line write was here before and was removed on 2026-08-05 as
- * unproven. It is back because the comparison that was missing then has since
- * been made: `cli/ais01_cli/core/ble_transport.py` is the code that produced
- * the only completed certificate write on this device
- * (`cli/logs/2026-07-12_20-36-00_daemon/raw.log`, `+QFUPL: 1208,5769`, and
- * `session.json` records `port: "ble:..."` — so it was this transport, not
- * USB). It sizes every write at `mtu - 3`, and CoreBluetooth on this Mac
- * negotiates an ATT MTU of 185. Every PEM line left that program as ONE write.
- *
- * This module was hard-coding 20 bytes, so the same line left as two or four
- * writes a hundred milliseconds apart. Measured on 2026-08-06, part 1 arrives
- * and part 2 never does, at 33 bytes as surely as at 65 — which is not a size
- * effect and not the modem echo (tested, unchanged). A console that treats a
- * gap mid-line as the end of what it was collecting would produce exactly
- * that, and it is the one difference from the run that worked which had not
- * been tried.
+ * `cli/ais01_cli/core/ble_transport.py` writes at `mtu - 3`, and
+ * CoreBluetooth negotiates an ATT MTU of 185 here, so every PEM line left the
+ * reference writer as a single write. This module was hard-coding 20 bytes and
+ * sending the same line as two or four writes a tenth of a second apart, which
+ * is a difference with no reason behind it.
  *
  * Chrome rejects a write larger than the negotiated MTU rather than splitting
- * it, and Web Bluetooth does not expose the MTU — so the size is discovered
- * the only way available: attempt the whole line, and on rejection fall back
- * to slices and remember the limit for next time.
+ * it, and Web Bluetooth does not expose the MTU. A part is one PEM line — 66
+ * bytes at most — so it fits with room to spare on any link this app has seen,
+ * and a rejection here is worth failing loudly on rather than degrading
+ * quietly into a slicing path that no hardware run has exercised.
  */
-let wholeLineWrites = true;
-
 async function writeChunks(bytes, kind) {
     if (!char) throw new Error('BLE not connected');
     onChunk(new TextDecoder().decode(bytes), kind);
 
-    if (wholeLineWrites && bytes.length > CHUNK) {
-        try {
-            await char.writeValueWithoutResponse(bytes);
-            /* The gap follows every write here, including the last one —
-             * `INTER_CHUNK_GAP_S` in the reference writer is unconditional,
-             * and the drain it pays for is the same drain either way. */
-            await wait(CHUNK_DRAIN_MS);
-            if (kind === 'tx-raw') onDiag(`tx ${bytes.length}B in 1 write`);
-            return;
-        } catch (err) {
-            /* Too large for this link's MTU. Say so once, then slice for the
-             * rest of the session rather than failing a write per line. */
-            wholeLineWrites = false;
-            onDiag(`whole-line write refused (${bytes.length}B): ` +
-                   `${err.message} — slicing at ${CHUNK}B from here on`);
-        }
+    try {
+        await char.writeValueWithoutResponse(bytes);
+    } catch (err) {
+        onDiag(`TX FAILED (${bytes.length}B): ${err.message}`);
+        throw err;
     }
-
-    let sent = 0;
-    let slices = 0;
-    for (let i = 0; i < bytes.length; i += CHUNK) {
-        const slice = bytes.slice(i, i + CHUNK);
-        try {
-            await char.writeValueWithoutResponse(slice);
-        } catch (err) {
-            onDiag(`TX FAILED after ${sent}B of ${bytes.length}B ` +
-                   `(slice ${slices + 1}): ${err.message}`);
-            throw err;
-        }
-        sent += slice.length;
-        slices++;
-        await wait(CHUNK_DRAIN_MS);
-    }
-    if (kind === 'tx-raw') onDiag(`tx ${sent}B in ${slices} slices`);
+    /* The gap is unconditional, as `INTER_CHUNK_GAP_S` is in the reference
+     * writer: it pays for the UART drain on the far side of the bridge. */
+    await wait(CHUNK_DRAIN_MS);
+    if (kind === 'tx-raw') onDiag(`tx ${bytes.length}B`);
 }
 
 /*

@@ -1,33 +1,37 @@
 /*
- * CERTMOD certificate write — port of the proven v1.3 path.
+ * CERTMOD certificate write — Dragino v1.3, over BLE from the phone.
  *
- * Reference: AIS01-CB-LTE `cli/ais01_cli/commands/certs.py`, whose pure
- * functions are unit-tested against real modem vectors and whose live run on
- * 2026-07-13 produced `+QFUPL: 1208,5769` for the Amazon root CA over USB.
- * That pair is the acceptance test for this file: the same certificate over
- * BLE must echo the same size and checksum.
+ * Proven 2026-08-06 against unit 869181072714122: all three files accepted on
+ * the first attempt, `+QFUPL: 1208,5769` for the Amazon root CA — the same
+ * pair `cli/ais01_cli/commands/certs.py` produced, and the acceptance test for
+ * this file.
  *
- * Four things here are load-bearing and were learned the hard way. Changing
- * any of them silently corrupts a certificate that still reports success:
+ * Four things are load-bearing. Changing any of them silently corrupts a
+ * certificate that still reports success:
  *
- * 1. PARTS ARE PER LINE, AND PACED. The STM32 console has a single 300-byte
- *    line buffer with no queue — anything arriving before the main loop drains
- *    it is discarded outright. This is what destroys a large verbatim burst,
- *    and it is why pacing is not a BLE concession: the USB path needs it too.
+ * 1. THE CADENCE. The console accepts one line and discards the next two, on a
+ *    clock of roughly two seconds. It is the whole problem — every other
+ *    suspect (part size, BLE slicing, modem echo, ACK mode, antenna) was tested
+ *    and cleared. `io.floorMs` in provision.js carries the number, and
+ *    `streamParts` explains how it was measured.
  *
- * 2. THE TERMINATOR IS A LONE `\r`. The app truncates each console line at its
+ * 2. THE UNIT MUST BE IDLE. Write after `NB module power-off successful`, not
+ *    during a cycle. Mid-cycle the modem is taken away underneath the upload
+ *    and the failure reads as a dead device.
+ *
+ * 3. THE TERMINATOR IS A LONE `\r`. The app truncates each console line at its
  *    first CR/LF and appends CRLF unconditionally before forwarding, so the
  *    modem stores exactly `part + CRLF`. A full CRLF sends a SECOND terminator
- *    byte into a handler that raises `line_ready` on either one — see
+ *    into a handler that raises `line_ready` on either one — see
  *    `console-line-law.js`, and `wireParts` for what that cost.
  *
- * 3. WHAT IS STORED IS NOT WHAT IS SENT. `+QFUPL` describes the canonical-CRLF
- *    content, so the size declared to QFUPL and the checksum gated on come
- *    from `canonicalBytes`, never from the wire bytes.
+ * 4. WHAT IS STORED IS NOT WHAT IS SENT. `+QFUPL` describes the canonical-CRLF
+ *    content, so the size declared and the checksum gated on come from
+ *    `canonicalBytes`, never from the wire bytes.
  *
- * 4. ECHO OFF BEFORE ANY KEY MATERIAL MOVES. `ATE0` must be confirmed or this
- *    refuses to stream. On a phone this matters more than on a laptop: the
- *    terminal is on screen, in a photo, over a shoulder.
+ * Echo is a confidentiality matter and nothing more: it is left on for the two
+ * public files and silenced immediately before the private key. It was once
+ * thought to carry the transfer; it does not.
  */
 
 import { checkParts, forwardedBytes, wireImage } from './console-line-law.js';
@@ -63,58 +67,16 @@ export const BG95_NAMES = {
 
 /* ── Pure functions (mirror certs.py) ───────────────────────────────────── */
 
-/*
- * Base64 characters per body line, and with it the shape of every part.
- *
- * 64 is the PEM convention, and on this link a 64-char line is 65 bytes in
- * FOUR BLE slices. Across every run of 2026-08-06 exactly one part has ever
- * reached the modem: part 1, `-----BEGIN CERTIFICATE-----`, 28 bytes in TWO
- * slices. `AT+QFLST` confirmed it three times in a row on an idle unit —
- * `"cacert.pem",29` — which is part 1 and nothing else. Part 2 does not
- * arrive truncated; it does not arrive at all, and the console never echoes
- * it, so it is not being swallowed by the app's command table either
- * (`checkParts` returns clean for this certificate).
- *
- * That leaves the shape. 32 characters is 33 bytes in two slices, the shape
- * of the only part that works, and it is still a valid PEM body — line length
- * is a convention of RFC 7468, not a rule its parsers enforce. Size and
- * checksum both derive from this same line list, so the declaration and the
- * integrity gate follow the rewrap automatically.
- *
- * They did still die at 32 characters — so the variable was never size, and
- * the answer was elsewhere: the run was aborting itself on a missing echo two
- * lines in. With that gate gone the whole stream flows, and the width goes
- * back to 64 because that is what the reference writer used for the only
- * completed write on record. Fewer, longer lines mean fewer dispatches for
- * the console to lose, which is the direction the evidence now points.
- */
-export const BODY_CHARS_PER_LINE = 64;
-/* The wrapping the proven USB run used, kept so the hardware vector in
- * `certmod.test.mjs` stays a comparison against a real modem. */
-export const PEM_CONVENTION_WIDTH = 64;
-
-function pemLines(pemText, width = BODY_CHARS_PER_LINE) {
-    const raw = pemText.trim().split('\n').map(l => l.replace(/\r+$/, ''));
-    if (!raw.length || !raw[0]) throw new Error('certificate is empty');
-
-    const lines = [];
-    for (const line of raw) {
-        /* The BEGIN/END armour is structural — never rewrapped. */
-        if (line.startsWith('-----') || line.length <= width) {
-            lines.push(line);
-            continue;
-        }
-        for (let i = 0; i < line.length; i += width) {
-            lines.push(line.slice(i, i + width));
-        }
-    }
+function pemLines(pemText) {
+    const lines = pemText.trim().split('\n').map(l => l.replace(/\r+$/, ''));
+    if (!lines.length || !lines[0]) throw new Error('certificate is empty');
     return lines;
 }
 
 /* What the BG95 STORES: every line terminated by canonical CRLF. Its length is
  * the size to declare to QFUPL; its checksum is the integrity gate. */
-export function canonicalBytes(pemText, width) {
-    return new TextEncoder().encode(pemLines(pemText, width).join('\r\n') + '\r\n');
+export function canonicalBytes(pemText) {
+    return new TextEncoder().encode(pemLines(pemText).join('\r\n') + '\r\n');
 }
 
 /*
@@ -148,9 +110,9 @@ export function canonicalBytes(pemText, width) {
  * part to destroy, and the stray CRLF arrives after the modem already has the
  * byte count it was promised. The one-line probe is structurally blind to it.
  */
-export function wireParts(pemText, width) {
+export function wireParts(pemText) {
     const enc = new TextEncoder();
-    return pemLines(pemText, width).map(l => enc.encode(l + '\r'));
+    return pemLines(pemText).map(l => enc.encode(l + '\r'));
 }
 
 /* XOR over 16-bit big-endian words; a trailing odd byte pairs with 0. This
@@ -225,11 +187,7 @@ export function parseQfupl(lines) {
     for (let i = lines.length - 1; i >= 0; i--) {
         const m = QFUPL_MANGLED_RE.exec(lines[i]);
         if (m) {
-            return {
-                size: parseInt(m[1], 10),
-                checksum: parseInt(m[2], 16),
-                mangled: true,
-            };
+            return { size: parseInt(m[1], 10), checksum: parseInt(m[2], 16) };
         }
     }
     return null;
@@ -486,39 +444,22 @@ async function enterCertmod(io, attempts = 3) {
          * stopping a write that discloses nothing. See `writeTarget`.
          */
         /*
-         * Echo stays ON, and it is the point rather than an oversight.
+         * The echo is left on here and silenced later, per file.
          *
-         * Measured 2026-08-06, on an idle unit, with every part wrapped to the
-         * 33-byte two-slice shape of the part that always arrives: part 1
-         * echoed and landed, part 2 produced nothing at all inside eight
-         * seconds, and `AT+QFLST` put the stored file at 29 bytes. Identical
-         * shape, identical pacing, opposite outcome — so the variable was
-         * never the size of a part. It is being the first one.
+         * It was once believed to carry the transfer — the run that completed
+         * had it on, and with `ATE0` applied only the first line ever arrived.
+         * That was a coincidence of two variables moving together: the real
+         * cause was the cadence (see `streamParts`), and the echo turned out
+         * to make no difference either way once the pacing was right.
          *
-         * The difference from the only run that ever completed
-         * (`cli/logs/2026-07-12_20-36-00_daemon/raw.log`, `+QFUPL: 1208,5769`)
-         * is visible in its first lines: `AT+QFUPL=...` comes back echoed.
-         * That run never silenced the modem. Every line of the certificate
-         * echoed there, one for one; here, with `ATE0` confirmed applied, only
-         * the first does. Whatever the mechanism — and the app firmware
-         * forwarding a line and then waiting on modem output is the obvious
-         * candidate — echo on is the condition under which this transfer has
-         * been observed to work, and echo off is the condition under which it
-         * never has.
-         *
-         * The confidentiality rule is unchanged and still enforced per file in
-         * `writeTarget`: the CA ships in this file's own source and the client
-         * certificate crosses every TLS handshake in the clear, so neither is
-         * disclosed by echoing. The private key is, and `secret: true` refuses
-         * it while `io.echoOff` is false. That refusal is now the expected
-         * outcome, not a failure — the key needs a path that does not depend
-         * on the echo, and this experiment is about finding out whether the
-         * echo is what carries the other two.
+         * What survives is the confidentiality rule, unchanged in substance
+         * and only moved in time. The CA ships in this file's own source and
+         * the client certificate crosses every TLS handshake in the clear, so
+         * echoing them discloses nothing. The private key is different, and
+         * `writeCerts` silences the modem immediately before it — close to the
+         * one file that needs it, rather than over the whole session.
          */
         io.echoOff = false;
-        io.log('echo left ON deliberately — the run that completed had it on, ' +
-               'and only the first line arrives without it. Public material ' +
-               'only: the private key will be refused', 'note');
         await radioOff(io);
         return;
     }
@@ -772,100 +713,6 @@ async function explainSilence(io, target, want) {
 }
 
 /*
- * Ask the modem how it counts what we send it.
- *
- * The write has been failing with silence, and silence has exactly one
- * meaning: the modem has not yet received the byte count it was promised, so
- * it is still waiting. What it cannot tell us is WHY — twenty bytes short
- * because the firmware did not append the LF it is supposed to append, or
- * short by an arbitrary amount because the link dropped some.
- *
- * This settles it in about two seconds. Three PEM lines are sent under a
- * throwaway name, declaring the size they occupy ON THE WIRE — a count the
- * modem reaches whether or not anything is added on the way, so it always
- * answers. The checksum in that answer says which content actually arrived:
- *
- *   checksum(wire)             the firmware forwards the bare CR untouched
- *   checksum(canonical[0..n])  the firmware appends LF, as it is documented to
- *   neither                    bytes were lost, and this is a link problem
- *
- * `cacert.pem` is never touched by any of it.
- */
-const PROBE_NAME = 'wpprobe.txt';
-
-async function probeByteAccounting(io, target, lineCount, from = 0) {
-    /*
-     * Upload the first N lines under a throwaway name and gate them on the
-     * checksum of exactly those N lines.
-     *
-     * One line lands. Twenty do not — with all 1208 bytes proven by the
-     * transport to have left the phone, and fourteen seconds of live modem
-     * left to answer in, which is seven times what a completed upload takes.
-     * The console is dropping lines somewhere between one and twenty, and the
-     * count at which it starts is worth more than any theory about why: it
-     * turns "raise the pacing and see" into a number.
-     *
-     * Nothing is sent after the last part until the modem answers. The
-     * three-line version talked over its own upload and stored the commands
-     * as file content, which is how it produced a checksum that matched
-     * nothing at all.
-     */
-    /*
-     * Declare and gate on what the modem STORES, not on what leaves the phone.
-     * With a bare-CR terminator those differ by one byte per line, and the
-     * difference is not cosmetic: declaring the wire count leaves the modem
-     * waiting for bytes that are never coming, which is indistinguishable from
-     * the line loss this probe exists to measure.
-     */
-    const parts = target.parts.slice(from, from + Math.max(1, lineCount));
-    const expect = wireImage(parts);
-    const declared = expect.length;
-
-    /*
-     * `from` exists because every probe so far started at line 1, and line 1 is
-     * 29 bytes of ASCII while every other line is 66 bytes of base64. One line
-     * verifies and two do not, so the failure is either the second line or the
-     * length of it — and starting at line 1 can never tell those apart. This is
-     * the isolation that should have been run three probes ago.
-     */
-    io.log(`line-loss probe: lines ${from + 1}..${from + parts.length} of ` +
-           `${target.parts.length}, ${declared}B, gated on ` +
-           `${hex4(qfuplChecksum(expect))}`, 'note');
-
-    await at(io, `AT+QFDEL="${PROBE_NAME}"`, 2000);
-    const opened = await at(io, `AT+QFUPL="${PROBE_NAME}",${declared},30`, 3000);
-    if (!opened.some(l => l.includes('CONNECT'))) {
-        io.log('  probe could not open an upload — inconclusive', 'fail');
-        return;
-    }
-
-    let collected = [];
-    for (let i = 0; i < parts.length; i++) {
-        const final = i === parts.length - 1;
-        io.log(`[probe line ${i + 1}/${parts.length}]`, 'tx');
-        const replies = final ? reply(io, QFUPL_RE, 40000) : io.listen(60);
-        await io.sendRaw(parts[i]);
-        collected = collected.concat(await replies);
-        if (!final) await pause(io, partDelayMs(parts[i].length, io.floorMs));
-    }
-
-    const got = parseQfupl(collected);
-    if (!got) {
-        io.log(`  VERDICT: ${parts.length} lines did NOT arrive complete — the ` +
-               `console drops lines at this count`, 'fail');
-    } else if (got.size === declared && got.checksum === qfuplChecksum(expect)) {
-        io.log(`  VERDICT: ${parts.length} lines arrived intact ` +
-               `(+QFUPL: ${got.size},${hex4(got.checksum)}) — try more`, 'ok');
-    } else {
-        io.log(`  VERDICT: completed as ${got.size},${hex4(got.checksum)} but ` +
-               `expected ${declared},${hex4(qfuplChecksum(expect))} — the bytes ` +
-               `arrived altered rather than short`, 'fail');
-    }
-
-    await at(io, `AT+QFDEL="${PROBE_NAME}"`, 2000);
-}
-
-/*
  * Inventory, after the writes. The reference is explicit that this is evidence
  * and not an integrity gate — the checksums above remain the only proof of
  * correct stored content. It is here because "the file exists on the modem with
@@ -883,55 +730,29 @@ async function listFiles(io) {
 const FINAL_DONE = new RegExp(`${QFUPL_RE.source}|${MODEM_GONE_RE.source}`, 'i');
 
 /*
- * Echo receipts: the flow control this link actually has.
+ * The upload cadence, and why it is the only thing that ever mattered.
  *
- * Quectel's ACK mode (v0.38.0) never produced a single `A` here, and the run
- * that worked — `cli/logs/2026-07-12_20-36-00_daemon/raw.log` — never asked
- * for one. What that log DOES show, read side by side with the three failures
- * of 2026-08-06, is a receipt printed for every line:
+ * The console accepts one line and discards the next two. Measured
+ * 2026-08-06 from three identical attempts that answered
+ * `+QFUPL: 389,041E`: the lines that came back echoed were parts 1, 4, 7,
+ * 10, 13, 16 and 19 — one in three, no exceptions — and the stored size
+ * accounts for exactly those and nothing else (29 + 5x66 + 30 = 389). So
+ * the loss is not corruption or truncation; whole lines are dropped, on a
+ * clock, and the fix is to send slower than that clock. `io.floorMs` in
+ * provision.js carries the number.
  *
- *     failing attempt:  one RX line per TWO parts sent, and each one is the
- *                       TAIL of a part — the head is missing
- *     +QFUPL: 59 / 231  (the modem's own count: most bytes never arrived)
+ * The echo is kept in view but never acted on. It was acted on for most of
+ * that day — a line whose echo did not return aborted the attempt — and
+ * since the abort fired on part 2, no run ever reached the end and the
+ * one-in-three pattern stayed invisible. Counting the echoes is what
+ * finally showed it; stopping on them is what hid it.
  *
- *     working attempt:  every part came back COMPLETE, one for one
- *     +QFUPL: 1208,5769 (exact size, exact checksum)
- *
- * The RX lines are not modem echo — `ATE0` is verified off before the write.
- * They are the console's passthrough echoing WHAT IT FORWARDED to the BG95,
- * which makes them delivery receipts from the actual bottleneck: the app
- * firmware's line dispatcher (300-byte buffer, NUL at the first terminator,
- * memset under whatever is still arriving — `console-line-law.js`). A part
- * whose receipt is complete reached the modem complete. A part whose receipt
- * is decapitated lost its head inside the console, and the modem is now short
- * — sitting in data mode, counting, swallowing every later command as file
- * content. That silence used to read as "the modem is gone".
- *
- * So the stream gates on the receipt: send a part, wait for its echo, and
- * only then send the next. No cadence to tune — the console itself says when
- * it has kept up. A missing or truncated receipt aborts the attempt at that
- * part and then WAITS: the modem closes an idle upload on its own (the 60 s
- * inter-packet timeout given in QFUPL) and confesses `+QFUPL: <size>,<chk>`
- * with what it really stored. That number is evidence the old 40 s ceiling
- * always powered off just before hearing.
+ * The verdict is the modem's own `+QFUPL: <size>,<checksum>`, because that
+ * number is computed over what was actually stored and no observation from
+ * this end can be.
  */
-/*
- * 8 s, not 3 — this is an instrument as much as a wait. Part 2's receipt has
- * never arrived at all under gating (4/4 runs on 2026-08-06), and the open
- * question is WHICH silence it is: a console that needs recovery time after
- * its first forward into data mode would produce a LATE receipt; a console
- * that is stuck waiting on a modem that answers nothing per line would
- * produce none, ever. A late receipt inside this window answers that.
- */
-const ECHO_WAIT_MS = 8000;
-/* Breathing room after each confirmed receipt before the next part — probes
- * whether the console needs idle time after a dispatch, over and above the
- * BLE round trip the receipt itself already cost. */
-const POST_RECEIPT_MS = 400;
-/* QFUPL's own idle timeout is 60 s from the last byte; the confession follows. */
+/* QFUPL's own idle timeout is 60 s from the last byte; the result follows. */
 const CONFESSION_MS = 70000;
-
-const escapeRe = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 async function streamParts(io, target) {
     let collected = [];
@@ -968,29 +789,11 @@ async function streamParts(io, target) {
         }
     }
 
-    /*
-     * The echo count is reported, never acted on.
-     *
-     * It was acted on for most of 2026-08-06: a part whose echo did not come
-     * back inside a few seconds aborted the attempt, on the theory that the
-     * echo was a per-line delivery receipt. The theory did not survive
-     * testing — the echo behaves the same with the modem's own echo on and
-     * off, and part 2 is silent under every part size, slicing and pacing
-     * tried — but the abort outlived it, and it was the abort that ended each
-     * run two lines in. Twelve windows were spent watching a stream stop
-     * itself.
-     *
-     * The reference writer (`cli/ais01_cli/commands/certs.py`, the only code
-     * that has completed this write) never looks at the echo at all. It sends
-     * every line on a fixed 600 ms cadence and lets the modem's own
-     * `+QFUPL: <size>,<checksum>` be the judge, because that number is
-     * computed over what was actually stored and nothing else can be. This
-     * now does the same, and keeps the count only because a run that lands
-     * with 2 echoes and one that lands with 37 are worth telling apart in
-     * the log afterwards.
-     */
-    io.log(`  ${receipted}/${target.parts.length - 1} lines echoed back ` +
-           `(diagnostic only — the +QFUPL checksum is the verdict)`, 'note');
+    /* Reported, never acted on — see the note above the cadence. The count
+     * separates a run that echoed every line from one that echoed a third of
+     * them, which is the difference between correct pacing and silent loss. */
+    io.log(`  ${receipted}/${target.parts.length} lines echoed back ` +
+           `(diagnostic — the +QFUPL checksum is the verdict)`, 'note');
     return { got: parseQfupl(collected), gone: false };
 }
 
@@ -1119,9 +922,6 @@ export async function writeCerts(io, bundle, onProgress = () => {}) {
     let exited = false;
     await enterCertmod(io);
     try {
-        /* Opt-in, because it spends window on a question rather than on the
-         * write. Reach for it when a file comes back silent — `?probe=1`. */
-        if (io.probe) await probeByteAccounting(io, targets[0], io.probe, io.probeFrom);
         for (let i = 0; i < targets.length; i++) {
             /*
              * Silence the echo for the key, and only for the key.

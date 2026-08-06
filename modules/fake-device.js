@@ -138,19 +138,11 @@ export function makeFakeDevice(faults = {}, onEmit = null) {
             return;
         }
         if (cmd.startsWith('AT+QFUPL=')) {
-            const m = /AT\+QFUPL="([^"]+)",(\d+)(?:,(\d+))?(?:,(\d+))?/.exec(cmd);
+            const m = /AT\+QFUPL="([^"]+)",(\d+)(?:,(\d+))?/.exec(cmd);
             if (!m) { emit('ERROR'); return; }
             const name = m[1];
             attempts[name] = (attempts[name] || 0) + 1;
-            /* The fourth argument is ACK mode. In mode 1 the modem answers `A`
-             * every kilobyte it takes in, and the sender must wait for it — the
-             * flow control this link has no other way to get (Quectel FILE
-             * application note 2.2.4). Modelling it here is what lets the
-             * simulator exercise the waiting, not just the sending. */
-            upload = {
-                name, declaredSize: parseInt(m[2], 10), stored: [],
-                ackMode: m[4] === '1', ackDue: 1024,
-            };
+            upload = { name, declaredSize: parseInt(m[2], 10), stored: [] };
             partIndex = 0;
             emit('CONNECT');
             return;
@@ -191,11 +183,6 @@ export function makeFakeDevice(faults = {}, onEmit = null) {
          */
         const line = String.fromCharCode(...fb.subarray(0, fb.length - 2));
         emit(dropping ? line.slice(Math.min(20, line.length - 1)) : line);
-
-        if (upload.ackMode && upload.stored.length >= upload.ackDue) {
-            upload.ackDue += 1024;
-            emit('A');
-        }
 
         if (upload.stored.length >= upload.declaredSize) {
             clearTimeout(idleConfession);
