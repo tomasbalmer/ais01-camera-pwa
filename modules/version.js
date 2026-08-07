@@ -16,8 +16,8 @@
  * cached shell — pull to refresh, or reinstall the app from the home screen.
  */
 
-export const VERSION = '0.49.0';
+export const VERSION = '0.49.1';
 
 /* One line, for the places that want context rather than just a number. */
-export const VERSION_NOTE = '④ reads the cycle over the link it already has: ' +
-    'a CONNACK from AWS IoT is the proof the certificate works';
+export const VERSION_NOTE = 'the door names the place you are standing in, '
+    + 'and shows nothing that belongs to a session that has not started';

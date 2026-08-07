@@ -20,8 +20,15 @@
             display: flex; flex-direction: column; align-items: center;
             justify-content: center; gap: 14px; padding: 24px 20px;
         }
-        .job-title {
-            margin: 0 0 6px; color: #94a3b8; font-size: 15px; font-weight: 500;
+        /* The one line that is not a choice: what this is, and which build.
+           It stands in for the status bar this screen no longer shows — a
+           screenshot of a door still has to say which version it came from. */
+        .job-brand {
+            width: 100%; max-width: 320px; margin-bottom: 4px;
+            display: flex; align-items: baseline; justify-content: space-between;
+        }
+        .job-brand-name {
+            color: #e2e8f0; font-size: 15px; font-weight: 600; letter-spacing: 0.5px;
         }
         .job-btn {
             width: 100%; max-width: 320px; padding: 18px 20px;
@@ -31,6 +38,12 @@
             -webkit-tap-highlight-color: transparent;
         }
         .job-btn:active { background: #334155; }
+        /* The place reads first because it is the thing already true when the
+           screen opens — you are standing somewhere before you decide anything. */
+        .job-btn-where {
+            font-size: 11px; font-weight: 600; letter-spacing: 1.2px;
+            color: #64748b;
+        }
         .job-btn-main { font-size: 16px; font-weight: 600; }
         .job-btn-sub  { font-size: 12px; color: #94a3b8; }
         .job-back {
@@ -41,6 +54,9 @@
             margin-top: 18px; font-size: 11px; color: #475569;
             font-family: ui-monospace, Menlo, monospace; text-align: center;
         }
+        /* In the brand row it sits on the same baseline as the name, so the
+           18px that separated it from the buttons below would push it off. */
+        .job-brand .app-version-line { margin-top: 0; }
     </style>
     <script>
     // Cache-bust: append timestamp to CSS/JS so browser always fetches fresh
@@ -70,8 +86,11 @@
         <style>@keyframes splash-load{0%{transform:scaleX(0)}50%{transform:scaleX(1)}100%{transform:scaleX(0);transform-origin:right}}</style>
     </div>
 
-    <!-- Top status bar -->
-    <header id="topbar">
+    <!-- Top status bar. Hidden here rather than by the script that opens the
+         door, because the script runs after a module import and the bar would
+         be painted, then removed — a flicker on every launch. The calibration
+         tunnel turns it back on as it opens. -->
+    <header id="topbar" style="display:none;">
         <div id="status-dot"></div>
         <div id="stats">Disconnected</div>
         <button id="btn-stop" onclick="stopConnection()" aria-label="Disconnect">
@@ -167,21 +186,31 @@
 
               Asking "how do you connect" first let someone land in a flow
               waiting for banners their unit will never print. Transport cannot
-              be the discriminator anyway — Bluetooth serves both. The device
-              can, and it is the one thing the person always knows for certain,
-              because they are holding it.
+              be the discriminator anyway — Bluetooth serves both.
+
+              The fork is still the device. What is written on the cards is the
+              PLACE, because that is what the person can check without looking
+              anything up: at the meter with a camera in front of them, or at a
+              bench with a node and a laptop. The question this screen used to
+              ask — "which device do you have?" — was answered by the two
+              answers under it, so it was a question in the way of its own
+              reply.
             -->
             <div id="job-chooser">
-                <p class="job-title">Which device do you have?</p>
+                <div class="job-brand">
+                    <span class="job-brand-name">AIS01</span>
+                    <span id="app-version-job" class="app-version-line"></span>
+                </div>
                 <button id="job-calibrate" class="job-btn">
-                    <span class="job-btn-main">Calibrate camera</span>
-                    <span class="job-btn-sub">at the meter</span>
+                    <span class="job-btn-where">AT THE METER</span>
+                    <span class="job-btn-main">Calibrate the camera</span>
+                    <span class="job-btn-sub">aim, focus, set the reading box</span>
                 </button>
                 <button id="job-provision" class="job-btn">
-                    <span class="job-btn-main">Configure node</span>
-                    <span class="job-btn-sub">at the bench · BLE</span>
+                    <span class="job-btn-where">AT THE BENCH</span>
+                    <span class="job-btn-main">Provision a node</span>
+                    <span class="job-btn-sub">certificates and MQTT, over BLE</span>
                 </button>
-                <p id="app-version-job" class="app-version-line"></p>
             </div>
 
             <!-- Phase 1: Choose connection method. Hidden until the job is
@@ -661,13 +690,27 @@
          */
         const jobs = document.getElementById('job-chooser');
         const transports = document.getElementById('connect-chooser');
+
+        /*
+         * The status bar belongs to a session, and on this screen there is no
+         * session to have a status. It reported "Disconnected" — the only thing
+         * it can ever say here — next to a menu whose Device Log is empty until
+         * a device exists. Both read as something being wrong before anything
+         * has been attempted, so the door shows neither and the tunnel behind
+         * it shows both, unchanged.
+         */
+        const topbar = document.getElementById('topbar');
+        const setChrome = on => { if (topbar) topbar.style.display = on ? '' : 'none'; };
+
         const showJobs = () => {
             jobs.style.display = 'flex';
             transports.style.display = 'none';
+            setChrome(false);
         };
         document.getElementById('job-calibrate').onclick = () => {
             jobs.style.display = 'none';
             transports.style.display = 'flex';
+            setChrome(true);
         };
         document.getElementById('job-provision').onclick = () => {
             location.href = 'provision.html';
@@ -675,9 +718,11 @@
         document.getElementById('job-back').onclick = showJobs;
 
         /* ?mock drives the calibration flow directly — keep it landing where
-         * it always did rather than behind a door it never expected. */
+         * it always did rather than behind a door it never expected, status bar
+         * included. */
         if (new URLSearchParams(location.search).has('mock')) {
             jobs.style.display = 'none';
+            setChrome(true);
         }
 
         const splash = document.getElementById('splash');
