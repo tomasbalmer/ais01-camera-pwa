@@ -138,7 +138,24 @@ export async function connect(handlers = {}) {
         throw err;
     }
 
-    device.addEventListener('gattserverdisconnected', () => {
+    watchDrops(device);
+
+    /* From here the link is ours to keep. Only an explicit disconnect gives it
+     * up — everything else is the unit sleeping, and it comes back. */
+    wantLink = true;
+    await attach();
+    onStatus('connected', device.name || '');
+    return device.name || '(unnamed)';
+}
+
+/* One listener per device object, however many times we adopt it. */
+const watched = new WeakSet();
+
+function watchDrops(d) {
+    if (watched.has(d)) return;
+    watched.add(d);
+    d.addEventListener('gattserverdisconnected', () => {
+        if (d !== device) return;   /* a device we let go of; not our link */
         char = null;
         rxBuffer = '';
         /* Expected, not a failure: the BT24 drops the link after ~60 s idle and
@@ -147,11 +164,65 @@ export async function connect(handlers = {}) {
         onStatus('disconnected', 'BT24 idle timeout or device asleep');
         keepConnected();
     });
+}
 
-    /* From here the link is ours to keep. Only an explicit disconnect gives it
-     * up — everything else is the unit sleeping, and it comes back. */
+/*
+ * Re-attach to a unit this browser already has permission for, with no chooser.
+ *
+ * Reloading the page is not a rare event here — it is how you pick up a new
+ * build, and every cert-write iteration ends in one. The permission survives
+ * the reload; only the `device` object does not, so the link came back through
+ * the native picker: a dialog, a list, a tap, per iteration, for a unit already
+ * chosen once.
+ *
+ * `getDevices()` returns the granted ones. It needs no gesture and cannot
+ * surprise anyone — nothing appears that was not already permitted.
+ *
+ * `prefer` is the IMEI from the loaded bundle, and it is a guard rather than a
+ * convenience: on a bench with several granted units, adopting "the first one"
+ * would silently point the app at the wrong unit. Without it, adoption only
+ * happens when the choice is unambiguous — one known unit, no decision to get
+ * wrong.
+ *
+ * Returns the device name on success and null when there is nothing to adopt
+ * (no API, no known unit, no unambiguous pick) — every one of which means "use
+ * the picker". A unit that is known but does not answer throws, because that is
+ * a unit that is asleep, and the picker will not find it either.
+ */
+export async function adopt(handlers = {}, prefer = null) {
+    if (!hasBluetooth() || !navigator.bluetooth.getDevices) return null;
+
+    let known;
+    try {
+        known = (await navigator.bluetooth.getDevices()).filter(d => d.name);
+    } catch {
+        return null;   /* older permissions backend — the picker still works */
+    }
+
+    const pick = prefer
+        ? known.find(d => d.name.includes(prefer))
+        : (known.length === 1 ? known[0] : null);
+    if (!pick) return null;
+
+    onLine = handlers.onLine || onLine;
+    onChunk = handlers.onChunk || onChunk;
+    onStatus = handlers.onStatus || onStatus;
+    onDiag = handlers.onDiag || onDiag;
+
+    device = pick;
+    watchDrops(device);
     wantLink = true;
-    await attach();
+    onStatus('reconnecting', `adopting ${device.name}`);
+    try {
+        await attach();
+    } catch (err) {
+        /* Leave nothing half-adopted behind: `keepConnected` would otherwise
+         * chase a unit the caller never got to hear about. */
+        wantLink = false;
+        device = null;
+        onStatus('disconnected', '');
+        throw err;
+    }
     onStatus('connected', device.name || '');
     return device.name || '(unnamed)';
 }
