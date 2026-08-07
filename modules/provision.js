@@ -16,7 +16,7 @@
  */
 
 import {
-    hasBluetooth, connect, reconnect, isConnected, deviceName,
+    hasBluetooth, connect, adopt, reconnect, isConnected, deviceName,
     sendLine, sendRaw, disconnect,
 } from './ble-transport.js';
 import { writeCerts } from './certmod.js';
@@ -28,7 +28,8 @@ import { VERSION, VERSION_NOTE } from './version.js';
  * they must not contain a branch for being tested.
  */
 const link = {
-    connect, reconnect, isConnected, deviceName, sendLine, sendRaw, disconnect,
+    connect, adopt, reconnect, isConnected, deviceName, sendLine, sendRaw,
+    disconnect,
 };
 
 /* Everything below is app state. None of it describes the device. */
@@ -39,6 +40,7 @@ const state = {
     redacting: false,  /* key material may be on the wire — see redact() */
     rawView: false,    /* terminal shows the verbatim stream instead */
     busy: false,       /* a stage's own loop is running */
+    verifying: null,   /* ④ is watching the stream — {stop} while armed */
     mock: false,       /* ?mock — simulated device, no radio */
 };
 
@@ -330,6 +332,10 @@ const collectors = new Set();
 function feed(line) {
     for (const c of collectors) {
         c.lines.push(line);
+        /* A collector that reports as it goes rather than at the end. Nothing
+         * else about a collector changes: it still ends on `test`, or on its
+         * own timeout, or never. */
+        if (c.each) c.each(line);
         /* An expected marker ends the wait immediately. A fixed window has to be
          * long enough for the slowest case and is then that long for every case
          * — which is how a two-second budget met a marker that arrived in four. */
@@ -364,9 +370,11 @@ function until(pattern, ms) {
 /*
  * The per-stage mark. Its wording is deliberately uneven across stages: only
  * ② and ④ carry evidence strong enough to be called proof — a checksum the
- * modem computed over what it stored, and the platform seeing an uplink. ① and
- * ③ get an amber mark that says what was observed and nothing more, because a
- * green tick on "OK was returned" would be a claim this app cannot support.
+ * modem computed over what it stored, and a CONNACK from AWS IoT, which is only
+ * issued to a certificate that is registered, active, attached to a policy and
+ * matched by its key. ① and ③ get an amber mark that says what was observed and
+ * nothing more, because a green tick on "OK was returned" would be a claim this
+ * app cannot support.
  */
 function setMark(stage, text, kind = 'weak') {
     const mark = el(`mark-${stage}`);
@@ -593,8 +601,26 @@ async function doConnect() {
         const onLine = line => { write(redact(line)); feed(line); };
         const onChunk = (text, dir) => rawAppend(text, dir);
         const onDiag = text => note(text);
-        const name = await link.connect(
-            { onLine, onChunk, onDiag, onStatus: setLink });
+        const handlers = { onLine, onChunk, onDiag, onStatus: setLink };
+
+        /* A unit already granted to this origin needs no picker, and after a
+         * reload that is every unit we have been talking to. The bundle's IMEI
+         * decides which one, so a bench with several cannot adopt the wrong
+         * one; with no bundle it only adopts when there is a single choice. */
+        let name = null;
+        try {
+            name = await link.adopt(
+                handlers, state.bundle ? state.bundle.imei : null);
+            if (name) note(`re-adopted ${name} — no picker`);
+        } catch (err) {
+            /* Every failure here falls through to the picker, which is what
+             * this button did before adoption existed. A shortcut that can turn
+             * into a dead end is worse than no shortcut: this one can only save
+             * a tap or cost nothing. */
+            note(`adoption failed (${err.message}) — falling back to the picker`);
+        }
+        if (!name) name = await link.connect(handlers);
+
         if (name === null) { note('scan dismissed'); return; }
         note(`paired with ${name}`);
         if (state.bundle) {
@@ -864,12 +890,108 @@ async function doCerts() {
     }
 }
 
+/* ── ④ VERIFY ─────────────────────────────────────────────────────────────
+ *
+ * What the device says about its own cycle, over the link that is already open.
+ *
+ * The check this stage wanted was the platform's: ask a backend whether an
+ * uplink arrived for this IMEI. There is no backend, and a phone cannot hold
+ * AWS credentials to ask directly — so this asks the only witness present.
+ *
+ * That witness is better than it sounds, because of ONE line. `Successfully
+ * connected to the server` is printed after AWS IoT returns CONNACK, and AWS
+ * IoT only returns CONNACK to a client whose certificate is registered, ACTIVE,
+ * attached to a policy, and whose private key matched the TLS handshake. Every
+ * failure mode of a certificate write ends before that line. Nothing else the
+ * device prints carries that weight.
+ *
+ * `Upload data successfully` does NOT: `MQOS=0` means QoS 0, so there is no
+ * PUBACK to wait for and the line means "the modem sent it". The distinction is
+ * kept in the wording rather than smoothed over — this stage exists to stop a
+ * unit being called provisioned on the strength of an OK.
+ *
+ * This stage sends nothing. It watches. The RESET button is next to it.
+ */
+const PUBLISH_EVIDENCE = [
+    [/\*+Upload start/i,                             'cycle started'],
+    [/Configure the path of CA certificate/i,        'read the CA it stored'],
+    [/Configure the path of client certificate/i,    'read the client cert it stored'],
+    [/Configure the path of client private key/i,    'read the private key it stored'],
+    [/Opened the MQTT client network successfully/i, 'reached the broker (TCP)'],
+    [/Successfully connected to the server/i,        'AWS IoT ACCEPTED THIS CERTIFICATE'],
+    [/Upload data successfully/i,                    'data sent (QoS 0 — the broker does not ack it)'],
+    [/\*+End of upload\*+/i,                         'cycle closed'],
+];
+
+const CONNECTED = 5;   /* index of the line that proves the certificate */
+const SENT = 6;
+
+/* The ceiling is one duty cycle plus slack, because a technician who does not
+ * press RESET is waiting for the natural one. */
+function verifyBudgetMs() {
+    const tdc = state.bundle && state.bundle.mqtt && state.bundle.mqtt.tdc;
+    return ((Number(tdc) || 1200) + 180) * 1000;
+}
+
 function doVerify() {
-    setMark('verify', 'no backend', 'fail');
-    fail('④ RESET & VERIFY needs the backend check that does not exist yet.');
-    note('Interim: reset the unit, wait one cycle, and confirm in AWS IoT that');
-    note(`${state.bundle ? state.bundle.imei : 'this IMEI'} published.`);
-    note('Do NOT call a unit provisioned because the writes returned OK.');
+    /* Armed twice is a second watcher on the same stream. The second tap stops
+     * the first instead. */
+    if (state.verifying) {
+        state.verifying.stop();
+        return;
+    }
+
+    const seen = new Set();
+    const collector = { lines: [], each: line => {
+        PUBLISH_EVIDENCE.forEach(([pattern, meaning], i) => {
+            if (seen.has(i) || !pattern.test(line)) return;
+            seen.add(i);
+            write(`④ ${meaning}`, i === CONNECTED ? 'ok' : 'note');
+            setMark('verify', `${seen.size}/${PUBLISH_EVIDENCE.length}`, 'run');
+            /* Stop at the verdict, or when the cycle closes without one —
+             * a failed cycle is diagnosable now, not in twenty minutes. */
+            if ((seen.has(CONNECTED) && seen.has(SENT))
+                || i === PUBLISH_EVIDENCE.length - 1) finish();
+        });
+    } };
+
+    const finish = () => {
+        if (!state.verifying) return;
+        clearTimeout(timer);
+        collectors.delete(collector);
+        state.verifying = null;
+
+        if (seen.has(CONNECTED) && seen.has(SENT)) {
+            setMark('verify', 'published ✓', 'ok');
+            ok('④ AWS IoT accepted this unit\'s certificate and the reading left ' +
+               'the modem.');
+            note('QoS 0 has no delivery receipt: confirm the uplink landed in ' +
+                 `AWS IoT for ${state.bundle ? state.bundle.imei : 'this IMEI'}.`);
+        } else if (seen.has(0)) {
+            setMark('verify', 'no MQTT', 'fail');
+            fail('④ The cycle ran and never connected to the server.');
+            note(seen.has(4)
+                ? 'It reached the broker and was refused: the certificate is ' +
+                  'not registered/active/attached, or the key does not match it.'
+                : 'It never reached the broker: network, APN or SERVADDR — not ' +
+                  'the certificates.');
+            note('SNI=0 and MQOS=0 are the two settings that fail silently here.');
+        } else {
+            setMark('verify', 'nothing seen', 'weak');
+            fail('④ No cycle was observed before the budget ran out.');
+            note('The link only carries lines while the unit is awake, so a ' +
+                 'cycle that ran while BLE was re-attaching can be missed.');
+        }
+    };
+
+    const timer = setTimeout(finish, verifyBudgetMs());
+    state.verifying = { stop: finish };
+    collectors.add(collector);
+
+    setMark('verify', 'watching', 'run');
+    note(`④ Watching for a publish, up to ${Math.round(verifyBudgetMs() / 60000)} ` +
+         'min. Press RESET to start a cycle now, or wait for the next one.');
+    note('Tap ④ again to stop watching and report what was seen.');
 }
 
 /* ── Wiring ──────────────────────────────────────────────────────────── */
@@ -905,6 +1027,8 @@ async function installMock(kind) {
     state.mock = true;
 
     link.connect = async () => { up = true; setLink('connected', 'simulated'); return 'MOCK-869181072714122'; };
+    /* Nothing to adopt without a radio — the mock always takes the connect path. */
+    link.adopt = async () => null;
     link.reconnect = async () => { up = true; };
     link.isConnected = () => up;
     link.deviceName = () => 'MOCK-869181072714122';
