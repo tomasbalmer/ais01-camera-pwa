@@ -496,10 +496,9 @@ function setLink(status, detail) {
     foot.className = up ? 'live' : 'live off';
     foot.lastChild.textContent = up ? 'live' : status;
 
-    /* The button names what tapping it will do next, so the hunt is never a
-     * state you are stuck in without a visible way out. */
-    el('btn-connect').textContent = up ? 'Disconnect'
-        : status === 'reconnecting' ? 'Stop looking' : 'Connect BLE';
+    /* The pair button exists for the first pairing and nothing else: once a
+     * unit is granted, adoption is automatic and there is nothing to press. */
+    el('pair-row').hidden = up || status === 'reconnecting';
 
     if (detail) note(`link ${status}${detail ? ' — ' + detail : ''}`);
 }
@@ -660,6 +659,7 @@ function forgetBundle() {
     try { localStorage.removeItem(REMEMBERED); } catch { /* nothing to undo */ }
     state.bundle = null;
     el('imei').textContent = '—';
+    setMark('bundle', '', 'weak');
     note('bundle forgotten — load the next unit\'s material');
 }
 
@@ -671,6 +671,7 @@ function restoreBundle() {
 
     state.bundle = saved.bundle;
     el('imei').textContent = saved.bundle.imei || '(unknown)';
+    setMark('bundle', 'remembered', 'ok');
     ok(`remembered ${saved.label} — stored in this browser, not in the app`);
     note('  tap FORGET before provisioning a different unit');
 }
@@ -682,11 +683,13 @@ async function loadBundleJson(file) {
         rememberBundle(bundle, file.name);
         el('imei').textContent = bundle.imei;
         ok(`bundle loaded: ${file.name}`);
+        setMark('bundle', bundle.imei.slice(-6), 'ok');
         const problem = imeiMismatch(bundle);
         if (problem) fail(`WRONG UNIT — ${problem}`);
     } catch (err) {
         state.bundle = null;
         el('imei').textContent = '—';
+        setMark('bundle', 'rejected', 'fail');
         fail(`bundle rejected: ${err.message}`);
     }
 }
@@ -702,23 +705,24 @@ function bundleReady() {
 
 /* ── Actions ─────────────────────────────────────────────────────────── */
 
-async function doConnect() {
+/*
+ * Attach, and keep attaching.
+ *
+ * Called with no gesture when the page loads and there is a granted unit to
+ * adopt, and from the pair button the one time there is not. There is nothing
+ * to press afterwards: the link comes and goes with the duty cycle, which is
+ * the device's business and not a decision anyone needs to confirm.
+ *
+ * A disconnect button was in the way of that. It offered to break the one thing
+ * the app spends its effort keeping, and the only thing it was ever used for
+ * was as a place to press when the link was already down.
+ */
+async function doConnect(fromTap = false) {
     if (!state.mock && !hasBluetooth()) {
-        fail('This browser has no Web Bluetooth. On iOS use Bluefy.');
+        if (fromTap) fail('This browser has no Web Bluetooth. On iOS use Bluefy.');
         return;
     }
-    /*
-     * One button, three states, because the link has three: up, hunting, off.
-     * The hunt is unbounded by design — the unit is asleep most of a duty cycle
-     * — so the way out of it has to be the same button that started it.
-     */
-    if (link.isConnected()) { await link.disconnect(); setLink('disconnected'); return; }
-    if (link.isHunting()) {
-        link.stopHunting();
-        setLink('disconnected');
-        you('Stopped looking. Tap CONNECT when the unit is awake.');
-        return;
-    }
+    if (link.isConnected() || link.isHunting()) return;
 
     try {
         /* Redact for the screen only — the collectors that decide whether a
@@ -744,6 +748,17 @@ async function doConnect() {
              * into a dead end is worse than no shortcut: this one can only save
              * a tap or cost nothing. */
             note(`adoption failed (${err.message}) — falling back to the picker`);
+        }
+
+        /*
+         * The picker is the one call the browser refuses outside a user
+         * gesture, so the automatic path stops here rather than throwing a
+         * SecurityError at a page that just loaded. Nothing to adopt means the
+         * pair button, which is exactly the gesture it is asking for.
+         */
+        if (!name && !fromTap) {
+            el('pair-row').hidden = false;
+            return;
         }
         if (!name) name = await link.connect(handlers);
 
@@ -1191,7 +1206,8 @@ export function initProvision() {
         try { return await fn(...args); } finally { endPhase(phase); }
     };
 
-    el('btn-connect').addEventListener('click', doConnect);
+    el('btn-connect').addEventListener('click', () => doConnect(true));
+    el('btn-bundle').addEventListener('click', () => el('bundle-input').click());
     el('btn-login').addEventListener('click', staged('① LOGIN', doLogin));
     el('btn-certs').addEventListener('click', staged('② CERTS', doCerts));
     el('btn-verify').addEventListener('click', doVerify);
@@ -1238,6 +1254,30 @@ export function initProvision() {
 
     if (!hasBluetooth()) {
         fail('No Web Bluetooth in this browser. On iOS use Bluefy.');
+        el('pair-row').hidden = false;
+        return;
     }
-    note('Load the unit bundle, then connect.');
+    you('Load the unit bundle with ⓪.');
+
+    /*
+     * Attach on load, with nobody pressing anything.
+     *
+     * `getDevices()` and a re-attach need no user gesture — only the chooser
+     * does — so the whole reason a connect button existed applies exactly once
+     * per browser. If there is nothing granted to adopt, `doConnect` finds
+     * nothing, does not open a picker without being asked, and the pair row
+     * stays up waiting for the tap that legitimately needs a person.
+     *
+     * The hunt runs while this screen is open, and only while it is: a phone
+     * waking its radio every 1.2 s for a page nobody is looking at is a battery
+     * complaint waiting to happen.
+     */
+    {
+        doConnect();
+        document.addEventListener('visibilitychange', () => {
+            if (document.visibilityState === 'visible') doConnect();
+            else link.stopHunting();
+        });
+    }
+
 }

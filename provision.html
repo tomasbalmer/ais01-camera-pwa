@@ -388,9 +388,25 @@
         </div>
     </main>
 
-    <div class="bar">
-        <label for="bundle-input">Load bundle</label>
-        <!-- No `accept` filter on purpose. iOS Files greys out .json on some
+    <!--
+      One button, and only until it has been pressed once, ever.
+
+      Adopting a unit this browser already has permission for needs no user
+      gesture, so once a unit has been paired the app attaches by itself and
+      keeps trying while it sleeps — which is what the daemon does, and the
+      daemon has no connect button. Opening the chooser is the one thing the
+      browser insists a person start, so that is the one thing left here, and
+      it hides the moment there is something to adopt instead.
+    -->
+    <div class="bar" id="pair-row" hidden>
+        <button id="btn-connect">Pair unit</button>
+    </div>
+
+    <!-- The bundle input lives outside the row that hides: a `display:none`
+         input still opens its picker from ⓪, but a hidden ancestor is a
+         needless risk for the one control a session cannot start without.
+
+         No `accept` filter on purpose. iOS Files greys out .json on some
              versions, which looks like the file is missing rather than
              filtered — and the file always arrives from somewhere we do not
              control (AirDrop, Drive, a download). The parser rejects anything
@@ -410,11 +426,9 @@
              with it. The prepared bundle is the answer: `ais01 certs bundle`
              writes one AIS01-CB-<IMEI>.json carrying the IMEI, the password
              and both PEMs, so a single tap in Drive keeps the check alive.
-             loadFiles() still accepts loose files, and still says the check is
-             off when it gets them. -->
-        <input id="bundle-input" type="file" multiple>
-        <button id="btn-connect">Connect BLE</button>
-    </div>
+         loadFiles() still accepts loose files, and still says the check is
+         off when it gets them. -->
+    <input id="bundle-input" type="file" multiple hidden>
 
     <!-- One command, sent as typed. The session has to be unlocked first: the
          app answers `AT` and `AT?` itself but ignores everything else until the
@@ -427,7 +441,16 @@
         <button id="at-send">SEND</button>
     </div>
 
+    <!--
+      The bundle is step zero, not a separate row above the steps.
+      Nothing below it can run without it — ① needs the password it carries and
+      ② needs the PEMs — so it belongs in the same sequence, in the position
+      that says "before anything else", wearing the same mark the others wear.
+    -->
     <div class="actions">
+        <button id="btn-bundle">
+            <span class="label">⓪&nbsp;BUNDLE</span><span id="mark-bundle" class="mark"></span>
+        </button>
         <button id="btn-login">
             <span class="label">①&nbsp;LOGIN</span><span id="mark-login" class="mark"></span>
         </button>
