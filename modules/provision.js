@@ -35,10 +35,12 @@ const link = {
 /* Everything below is app state. None of it describes the device. */
 const state = {
     bundle: null,
-    pinned: true,      /* terminal follows the tail */
+    /* One pin per pane. They are both on screen now, so scrolling back through
+     * the raw stream to check a line must not stop the annotated one from
+     * following the device. */
+    pinned: { annotated: true, raw: true },
     pendingDeltas: null, /* config deltas awaiting a confirming second tap */
     redacting: false,  /* key material may be on the wire — see redact() */
-    rawView: false,    /* terminal shows the verbatim stream instead */
     busy: false,       /* a stage's own loop is running */
     verifying: null,   /* ④ is watching the stream — {stop} while armed */
     mock: false,       /* ?mock — simulated device, no radio */
@@ -73,8 +75,10 @@ const el = id => document.getElementById(id);
  * drops blank lines and holds partial fragments until a newline arrives. All of
  * that is useful and none of it is evidence.
  *
- * So the bytes are kept separately, exactly as they arrived, and the terminal
- * is one of two ways to look at them.
+ * So the bytes are kept separately, exactly as they arrived, and shown beside
+ * the annotated view rather than instead of it — the split the CLI dashboard
+ * uses, for the same reason: the reading is what you act on, the raw stream is
+ * what settles an argument about it, and you should not have to choose.
  *
  * One asymmetry, on purpose: RX is verbatim, TX is not. What we sent we already
  * know, and reproducing the PEM bytes would put a private key on the screen and
@@ -172,37 +176,27 @@ function rawAppend(text, dir) {
     }
     rawLog += text;
     if (rawLog.length > RAW_CAP) rawLog = rawLog.slice(-RAW_CAP);
-    if (state.rawView) renderRaw();
-}
-
-function renderRaw() {
-    const out = el('terminal-raw');
-    out.textContent = rawLog || '(nothing received yet)';
-    if (state.pinned) tail(out);
+    renderRaw();
 }
 
 /*
- * The two views are two elements, and switching only changes which one is
- * hidden. Nothing is cleared and nothing is replayed, because both panes are
- * written to at all times — including while they are hidden.
+ * The raw pane is on screen at all times now, so it is painted at all times —
+ * and painting it is assigning up to a megabyte of text to one element.
  *
- * This used to be one element rendered two ways, which meant every toggle
- * destroyed the view it was leaving: RAW overwrote the annotated lines, and
- * coming back started from an empty screen. On a bench that is the log of the
- * boot you are in the middle of, gone for having looked at it.
+ * A boot delivers that in a burst of small chunks, so the work is coalesced to
+ * one paint per frame: the buffer is already complete in memory when the frame
+ * runs, and nobody can read faster than the screen refreshes anyway. Without
+ * this the cost is per chunk, which is per BLE notification.
  */
-function setRawView(on) {
-    state.rawView = on;
-    el('raw-toggle').textContent = on ? 'ANNOTATED' : 'RAW';
-    el('terminal').hidden = on;
-    el('terminal-raw').hidden = !on;
-
-    /* A hidden element has no scroll height, so neither pane can be tailed
-     * while it is off screen — the one coming back is re-pinned here. The raw
-     * pane is also re-rendered here rather than on every chunk, since printing
-     * a megabyte buffer nobody is looking at is work for nothing. */
-    if (on) renderRaw();
-    else if (state.pinned) tail(el('terminal'));
+let rawPaint = 0;
+function renderRaw() {
+    if (rawPaint) return;
+    rawPaint = requestAnimationFrame(() => {
+        rawPaint = 0;
+        const out = el('terminal-raw');
+        out.textContent = rawLog || '(nothing received yet)';
+        if (state.pinned.raw) tail(out);
+    });
 }
 
 function tail(out) { out.scrollTop = out.scrollHeight; }
@@ -310,9 +304,7 @@ function write(text, kind = 'rx') {
     /* Bounded: a bench session runs for hours across many boots. */
     while (out.childElementCount > 2000) out.removeChild(out.firstChild);
 
-    /* Writing continues while this pane is hidden — only the scroll does not,
-     * because a hidden element has no height to scroll. setRawView re-pins. */
-    if (state.pinned && !out.hidden) tail(out);
+    if (state.pinned.annotated) tail(out);
 }
 
 function note(text) { write(text, 'note'); }
@@ -1058,7 +1050,6 @@ export function initProvision() {
         return doStageConfig();
     });
 
-    el('raw-toggle').addEventListener('click', () => setRawView(!state.rawView));
     el('copy-log').addEventListener('click', copyRawLog);
     el('btn-reset').addEventListener('click', doReset);
     el('btn-forget').addEventListener('click', forgetBundle);
@@ -1071,15 +1062,19 @@ export function initProvision() {
         if (e.key === 'Enter') sendManual();
     });
 
-    /* Scrolling away from the tail unpins; the marker is how the operator
-     * knows they are no longer looking at the present. */
-    for (const id of ['terminal', 'terminal-raw']) {
+    /* Scrolling away from the tail unpins that pane; the marker is how the
+     * operator knows they are no longer looking at the present. It reports the
+     * annotated pane, which is the one the stages talk through — the raw pane
+     * unpins quietly, since going back through it is the normal way to read it. */
+    for (const [id, pane] of [['terminal', 'annotated'], ['terminal-raw', 'raw']]) {
         const out = el(id);
         out.addEventListener('scroll', () => {
             const atBottom =
                 out.scrollHeight - out.scrollTop - out.clientHeight < 24;
-            state.pinned = atBottom;
-            el('live').style.visibility = atBottom ? 'visible' : 'hidden';
+            state.pinned[pane] = atBottom;
+            if (pane === 'annotated') {
+                el('live').style.visibility = atBottom ? 'visible' : 'hidden';
+            }
         });
     }
 

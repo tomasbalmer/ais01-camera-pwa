@@ -16,8 +16,8 @@
  * cached shell — pull to refresh, or reinstall the app from the home screen.
  */
 
-export const VERSION = '0.49.5';
+export const VERSION = '0.50.0';
 
 /* One line, for the places that want context rather than just a number. */
-export const VERSION_NOTE = 'the bar is the calibration bar now, rule for '
-    + 'rule: a dot for the link, one grey line, an icon button';
+export const VERSION_NOTE = 'both logs at once, the way the CLI dashboard '
+    + 'shows them: raw serial beside the reading, never instead of it';
