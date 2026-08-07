@@ -195,6 +195,9 @@ function renderRaw() {
         rawPaint = 0;
         const out = el('terminal-raw');
         out.textContent = rawLog || '(nothing received yet)';
+        /* The foot measures the stream: a count that stops moving is the first
+         * sign of a link that is up and carrying nothing. */
+        el('raw-count').textContent = rawLog ? rawLog.split('\n').length : 0;
         if (state.pinned.raw) tail(out);
     });
 }
@@ -218,6 +221,8 @@ async function doReset() {
     if (!link.isConnected()) { fail('not connected'); return; }
     write('ATZ', 'tx');
     await link.sendLine('ATZ');
+    /* The one boot we cause, so it is the one we can draw without being told. */
+    divider('reset', 'RESET SENT');
     note('restarting — the link will drop and come back on its own');
     note('the AT window opens about 16 s after the boot banner');
 }
@@ -294,12 +299,41 @@ function stamp() {
  * correlate what they sent with what came back by timestamp, which is exactly
  * the work this design moved off them.
  */
+/*
+ * Every row says who is speaking, the way the dashboard's History does.
+ *
+ * Colour is status and the badge is source, and they are independent on
+ * purpose: a green line can be the device reporting success or this app
+ * concluding it, and those are not the same claim. `OK` from a modem is a
+ * receipt; "3/3 verified" is a deduction we made from three checksums. Reading
+ * a log to find out why a unit failed means telling those apart, and until now
+ * they were the same shade of green.
+ */
+const VOICE = { rx: 'DEV', tx: 'CMD', ok: 'SYS', fail: 'SYS', note: 'SYS', you: 'YOU' };
+
 function write(text, kind = 'rx') {
     const out = el('terminal');
+    const voice = VOICE[kind] || 'SYS';
     const line = document.createElement('div');
-    line.className = `line line-${kind}`;
-    line.textContent = `${stamp()} ${kind === 'tx' ? '> ' : ''}${text}`;
+    line.className = `line line-${kind} voice-${voice.toLowerCase()}`;
+
+    /* Built as elements with textContent, never markup: every one of these
+     * strings can be a line the device sent. */
+    const t = document.createElement('span');
+    t.className = 't';
+    t.textContent = stamp();
+    const v = document.createElement('span');
+    v.className = 'v';
+    v.textContent = voice;
+    const m = document.createElement('span');
+    m.className = 'm';
+    m.textContent = text;
+    line.append(t, v, m);
     out.appendChild(line);
+
+    /* A failure anywhere inside a stage is the stage's verdict, immediately and
+     * permanently — the header cannot go back to amber once something broke. */
+    if (kind === 'fail') failPhase();
 
     /* Bounded: a bench session runs for hours across many boots. */
     while (out.childElementCount > 2000) out.removeChild(out.firstChild);
@@ -310,6 +344,69 @@ function write(text, kind = 'rx') {
 function note(text) { write(text, 'note'); }
 function fail(text) { write(text, 'fail'); }
 function ok(text) { write(text, 'ok'); }
+/* Something for the person to do with their hands: press RESET, plug it in,
+ * pick a bundle. It is the one voice the app cannot act on itself. */
+function you(text) { write(text, 'you'); }
+
+/* ── Phases ──────────────────────────────────────────────────────────────
+ *
+ * A stage opens a section whose header carries the section's verdict: amber
+ * while it runs, green when it closes with nothing broken, red from the first
+ * failure inside it. The rows keep the detail; the header is what you scan.
+ */
+let phaseEl = null;
+let phaseFailed = false;
+
+function startPhase(label) {
+    const out = el('terminal');
+    phaseEl = document.createElement('div');
+    phaseEl.className = 'phase';
+    phaseEl.textContent = label;
+    phaseFailed = false;
+    out.appendChild(phaseEl);
+    if (state.pinned.annotated) tail(out);
+}
+
+function failPhase() {
+    if (!phaseEl) return;
+    phaseFailed = true;
+    phaseEl.classList.remove('is-ok');
+    phaseEl.classList.add('is-fail');
+}
+
+function endPhase() {
+    if (phaseEl && !phaseFailed) phaseEl.classList.add('is-ok');
+    phaseEl = null;
+}
+
+/* ── Boot dividers ───────────────────────────────────────────────────────
+ *
+ * Where the cycle starts and ends, drawn where the raw log draws it, so a line
+ * can be placed in the boot it belongs to. Two come from the device and one
+ * from us, because a reset is the one boot we cause.
+ */
+const BOOT_MARKS = [
+    [/Echo mode turned off successfully/i, 'wake', 'DEVICE AWAKE'],
+    [/NB module power-off successful/i,    'end',  'ASLEEP'],
+];
+let lastDivider = '';
+
+function watchBoot(line) {
+    for (const [pattern, kind, label] of BOOT_MARKS) {
+        if (pattern.test(line)) { divider(kind, label); return; }
+    }
+}
+
+function divider(kind, label) {
+    if (kind === lastDivider) return;   /* the same boundary said twice */
+    lastDivider = kind;
+    const out = el('terminal');
+    const d = document.createElement('div');
+    d.className = `divider ${kind}`;
+    d.textContent = `${label} · ${stamp()}`;
+    out.appendChild(d);
+    if (state.pinned.annotated) tail(out);
+}
 
 /* ── Confirmation ────────────────────────────────────────────────────────
  *
@@ -380,6 +477,12 @@ function setLink(status, detail) {
     const dot = el('link-state');
     dot.className = `dot link-${status}`;
     dot.title = `BLE ${status}`;
+
+    const foot = el('raw-live');
+    const up = status === 'connected';
+    foot.className = up ? 'live' : 'live off';
+    foot.lastChild.textContent = up ? 'live' : status;
+
     if (detail) note(`link ${status}${detail ? ' — ' + detail : ''}`);
 }
 
@@ -591,7 +694,8 @@ async function doConnect() {
     try {
         /* Redact for the screen only — the collectors that decide whether a
          * write landed must still see the real bytes. */
-        const onLine = line => { write(redact(line)); feed(line); };
+        /* The boundary is drawn before the line that announced it. */
+        const onLine = line => { watchBoot(line); write(redact(line)); feed(line); };
         const onChunk = (text, dir) => rawAppend(text, dir);
         const onDiag = text => note(text);
         const handlers = { onLine, onChunk, onDiag, onStatus: setLink };
@@ -975,16 +1079,18 @@ function doVerify() {
             note('The link only carries lines while the unit is awake, so a ' +
                  'cycle that ran while BLE was re-attaching can be missed.');
         }
+        endPhase();
     };
 
     const timer = setTimeout(finish, verifyBudgetMs());
     state.verifying = { stop: finish };
     collectors.add(collector);
 
+    startPhase('④ VERIFY');
     setMark('verify', 'watching', 'run');
-    note(`④ Watching for a publish, up to ${Math.round(verifyBudgetMs() / 60000)} ` +
-         'min. Press RESET to start a cycle now, or wait for the next one.');
-    note('Tap ④ again to stop watching and report what was seen.');
+    note(`Watching for a publish, up to ${Math.round(verifyBudgetMs() / 60000)} min.`);
+    you('Press RESET to start a cycle now, or wait for the next one. Tap ④ ' +
+        'again to stop watching and report what was seen.');
 }
 
 /* ── Wiring ──────────────────────────────────────────────────────────── */
@@ -1013,6 +1119,7 @@ async function installMock(kind) {
 
     const fake = makeFakeDevice(faults, line => {
         rawAppend(line + '\r\n');
+        watchBoot(line);
         write(redact(line));
         feed(line);
     });
@@ -1039,16 +1146,29 @@ export function initProvision() {
     el('app-version').textContent = `v${VERSION}`;
     note(`AIS01 End node configuration v${VERSION} — ${VERSION_NOTE}`);
 
+    /*
+     * A stage's rows belong to that stage, so the section is opened and closed
+     * around the whole run — here, at the seam, rather than inside four stage
+     * bodies that are about the device and not about the log.
+     *
+     * ④ is not wrapped: it arms a watcher and returns, and its verdict arrives
+     * minutes later. It opens and closes its own section around the watch.
+     */
+    const staged = (label, fn) => async (...args) => {
+        startPhase(label);
+        try { return await fn(...args); } finally { endPhase(); }
+    };
+
     el('btn-connect').addEventListener('click', doConnect);
-    el('btn-login').addEventListener('click', doLogin);
-    el('btn-certs').addEventListener('click', doCerts);
+    el('btn-login').addEventListener('click', staged('① LOGIN', doLogin));
+    el('btn-certs').addEventListener('click', staged('② CERTS', doCerts));
     el('btn-verify').addEventListener('click', doVerify);
 
-    el('btn-config').addEventListener('click', () => {
+    el('btn-config').addEventListener('click', staged('③ CONFIG', () => {
         if (state.pendingDeltas) return doApplyConfig();
         if (!state.bundle) return doReadConfig();
         return doStageConfig();
-    });
+    }));
 
     el('copy-log').addEventListener('click', copyRawLog);
     el('btn-reset').addEventListener('click', doReset);

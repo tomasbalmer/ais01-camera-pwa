@@ -124,14 +124,104 @@
             font-size: 9px; font-weight: 600; letter-spacing: 0.1em;
             color: var(--muted); border-bottom: 1px solid #1e293b;
         }
-        .pane-annotated { order: 1; }
-        .pane-raw       { order: 2; border-top: 1px solid #1e293b; }
+        .pane-head.legend {
+            display: flex; align-items: center; gap: 5px;
+            letter-spacing: 0; font-weight: 500; flex-wrap: wrap;
+        }
+        .pane-head.legend .v {
+            padding: 0 4px; border: 1px solid #334155; border-radius: 3px;
+            font-size: 9px; font-weight: 700;
+        }
+        .pane-head.legend .v + * { margin-right: 4px; }
+        /* Same element here, descendant in a row — hence the second set. */
+        .pane-head.legend .voice-dev { color: #cbd5e1; }
+        .pane-head.legend .voice-cmd { color: #7dd3fc; border-color: #0e7490;
+                                       background: #0e749022; }
+        .pane-head.legend .voice-sys { color: #64748b; }
+        .pane-head.legend .voice-you { color: #fbbf24; border-color: #b4530966;
+                                       background: #b4530922; }
+        /* The raw stream is a narrow sidebar with a foot that measures it, not
+           half the screen: it is the thing you check, not the thing you read. */
+        .pane-annotated { order: 1; flex: 1 1 auto; }
+        .pane-raw       { order: 2; flex: 0 0 34%; border-top: 1px solid #1e293b; }
         @media (min-width: 700px) {
             main { flex-direction: row; }
-            .pane-raw       { order: 1; border-top: none;
+            .pane-raw       { order: 1; flex: 0 0 300px; border-top: none;
                               border-right: 1px solid #1e293b; }
             .pane-annotated { order: 2; }
         }
+        .log-foot {
+            flex: 0 0 auto; height: 28px; padding: 0 12px;
+            display: flex; align-items: center; justify-content: space-between;
+            border-top: 1px solid #1e293b;
+            font-size: 10px; color: var(--muted);
+        }
+        .log-foot .live { display: inline-flex; align-items: center; gap: 6px; }
+        .log-foot .live .dot { width: 6px; height: 6px; border-radius: 50%;
+            background: #22c55e; box-shadow: 0 0 6px #22c55e; }
+        .log-foot .off .dot { background: var(--muted); box-shadow: none; }
+        #raw-count { font-variant-numeric: tabular-nums; }
+
+        /*
+         * ── The reading, as the dashboard writes it ──────────────────────
+         *
+         * Three things, taken from cli/ais01_cli/dashboard/index.html:
+         *
+         * VOICES. Every row says who is speaking — the device, us, the app's
+         * own verdict, or you. Colour alone cannot: a green line could be the
+         * device reporting success or the app concluding it, and those are not
+         * the same claim.
+         *
+         * PHASE HEADERS. A stage opens a section whose colour is the section's
+         * verdict: amber while it runs, green when it closes clean, red the
+         * instant any row inside it fails — and it stays red. The header is the
+         * verdict, the rows keep the detail.
+         *
+         * BOOT DIVIDERS. The cycle boundaries, drawn where the raw log draws
+         * them, so a line can be placed in the boot it belongs to.
+         */
+        .line { display: flex; gap: 8px; align-items: baseline; }
+        .line .t { flex: 0 0 auto; color: #475569; }
+        .line .v {
+            flex: 0 0 auto; min-width: 26px; padding: 0 4px;
+            border: 1px solid #334155; border-radius: 3px;
+            font-size: 9px; font-weight: 700; letter-spacing: 0.06em;
+            text-align: center; color: var(--muted);
+        }
+        .line .m { flex: 1 1 auto; min-width: 0; }
+        .voice-dev .v { color: #cbd5e1; }
+        .voice-cmd .v { color: #7dd3fc; border-color: #0e7490; background: #0e749022; }
+        .voice-sys .v { color: #64748b; }
+        .voice-you .v { color: #fbbf24; border-color: #b4530966; background: #b4530922; }
+
+        .phase {
+            margin: 10px 0 4px; padding: 5px 8px;
+            display: flex; align-items: center; gap: 7px;
+            border: 1px solid #334155; border-radius: 4px;
+            background: rgba(255,255,255,0.025);
+            font-size: 10px; font-weight: 800; letter-spacing: 0.07em;
+            text-transform: uppercase; color: #fbbf24;
+        }
+        .phase::before {
+            content: ""; width: 7px; height: 7px; border-radius: 50%;
+            background: currentColor; box-shadow: 0 0 7px currentColor;
+        }
+        .phase.is-ok   { color: #4ade80; }
+        .phase.is-fail { color: #f87171; }
+
+        .divider {
+            display: flex; align-items: center; gap: 8px;
+            margin: 14px 0 8px;
+            font-size: 9px; font-weight: 700; letter-spacing: 0.1em;
+            color: #38bdf8;
+        }
+        .divider::before, .divider::after {
+            content: ""; flex: 1; height: 1px; background: rgba(56,189,248,0.4);
+        }
+        .divider.reset { color: #22d3ee; }
+        .divider.reset::before, .divider.reset::after { background: rgba(34,211,238,0.5); }
+        .divider.end { color: #a78bfa; }
+        .divider.end::before, .divider.end::after { background: rgba(167,139,250,0.5); }
         #terminal, #terminal-raw {
             flex: 1 1 auto; min-height: 0;
             overflow-y: auto; padding: 8px 12px 20px;
@@ -260,12 +350,26 @@
 
     <main>
         <section class="pane pane-annotated">
-            <div class="pane-head">READING</div>
+            <div class="pane-head">HISTORY</div>
+            <!-- Who is speaking, spelled out once. A row's colour is its
+                 status; its badge is its source, and the two are independent:
+                 the device reporting success and the app concluding it are not
+                 the same claim. -->
+            <div class="pane-head legend">
+                <span class="v voice-dev">DEV</span> device
+                <span class="v voice-cmd">CMD</span> sent
+                <span class="v voice-sys">SYS</span> verdict
+                <span class="v voice-you">YOU</span> your move
+            </div>
             <div id="terminal"></div>
         </section>
         <section class="pane pane-raw">
             <div class="pane-head">RAW SERIAL</div>
             <pre id="terminal-raw"></pre>
+            <div class="log-foot">
+                <span id="raw-live" class="live off"><span class="dot"></span>waiting</span>
+                <span><span id="raw-count">0</span> lines</span>
+            </div>
         </section>
         <!-- Controls sit on the log they act on. SHARE hands the whole raw
              buffer to whoever has to diagnose it, which on a bench is not the

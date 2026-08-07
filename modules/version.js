@@ -16,8 +16,8 @@
  * cached shell — pull to refresh, or reinstall the app from the home screen.
  */
 
-export const VERSION = '0.50.0';
+export const VERSION = '0.51.0';
 
 /* One line, for the places that want context rather than just a number. */
-export const VERSION_NOTE = 'both logs at once, the way the CLI dashboard '
-    + 'shows them: raw serial beside the reading, never instead of it';
+export const VERSION_NOTE = 'the log says who is speaking: DEV, CMD, SYS or '
+    + 'YOU, in stage sections that carry their own verdict';
