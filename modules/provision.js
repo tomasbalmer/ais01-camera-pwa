@@ -1044,7 +1044,7 @@ export function initProvision() {
     /* First line of every session, so it lands in any screenshot sent back
      * from a bench. A log without a version is a log you cannot place. */
     el('app-version').textContent = `v${VERSION}`;
-    note(`AIS01 Provision v${VERSION} — ${VERSION_NOTE}`);
+    note(`AIS01 End node configuration v${VERSION} — ${VERSION_NOTE}`);
 
     el('btn-connect').addEventListener('click', doConnect);
     el('btn-login').addEventListener('click', doLogin);

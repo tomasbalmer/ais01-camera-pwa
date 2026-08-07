@@ -16,8 +16,8 @@
  * cached shell — pull to refresh, or reinstall the app from the home screen.
  */
 
-export const VERSION = '0.49.3';
+export const VERSION = '0.49.4';
 
 /* One line, for the places that want context rather than just a number. */
-export const VERSION_NOTE = 'the door is two words and a chevron each: the '
-    + 'decision is which unit is in your hand, not a paragraph about it';
+export const VERSION_NOTE = 'the configuration screen wears the same bar as '
+    + 'the calibration one: one row, one baseline, a surface of its own';

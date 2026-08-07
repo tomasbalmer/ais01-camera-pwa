@@ -9,7 +9,7 @@
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
     <meta http-equiv="Pragma" content="no-cache">
     <meta http-equiv="Expires" content="0">
-    <title>AIS01 Provision</title>
+    <title>AIS01 End node configuration</title>
     <link rel="icon" type="image/svg+xml" href="waterplan-icon.svg">
     <link rel="apple-touch-icon" href="waterplan-icon.svg">
     <link rel="manifest" href="manifest.json">
@@ -30,22 +30,50 @@
         }
         body { display: flex; flex-direction: column; }
 
+        /*
+         * One bar, one row, same shape as the calibration page's `#topbar`:
+         * 44px tall, a border underneath, everything on a single baseline.
+         *
+         * It was two stacked rows — title and link, then IMEI and version — and
+         * two rows of chrome above a log is a header that behaves like content.
+         * The colour is the one difference from calibration, and it is the same
+         * decision: there the bar is #0f172a against a black viewer, so it
+         * separates itself. Here the page is already #0f172a, so the bar takes
+         * the palette's next surface up (#1e293b) to stay a bar rather than the
+         * top of the log.
+         */
         header {
-            padding: 10px 14px 8px;
-            border-bottom: 1px solid #1e293b;
             flex: 0 0 auto;
+            height: 44px; padding: 0 12px;
+            display: flex; align-items: center; gap: 10px;
+            background: #1e293b;
+            border-bottom: 1px solid #334155;
         }
-        .row { display: flex; align-items: center; justify-content: space-between; }
-        .title { font-size: 15px; font-weight: 600; }
-        .link { font-size: 13px; font-variant-numeric: tabular-nums; }
+        .back {
+            color: #64748b; text-decoration: none; font-size: 17px; line-height: 1;
+        }
+        /* The only thing here that may be clipped: on a narrow phone something
+           has to give, and the name of the screen you are already looking at is
+           the most redundant thing in the row. */
+        .title {
+            font-size: 13px; font-weight: 600;
+            white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+            min-width: 0;
+        }
+        .imei {
+            font-size: 12px; color: #94a3b8; white-space: nowrap;
+            font-family: ui-monospace, "SF Mono", Menlo, monospace;
+        }
+        .imei b { color: #e2e8f0; font-weight: 500; }
+        .bar-gap { flex: 1 1 auto; }
+        .link { font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; }
         .link-connected { color: #4ade80; }
         .link-reconnecting { color: #fbbf24; }
         .link-disconnected { color: #64748b; }
-        .meta {
-            margin-top: 4px; font-size: 13px; color: #94a3b8;
+        .version {
+            font-size: 11px; color: #475569; white-space: nowrap;
             font-family: ui-monospace, "SF Mono", Menlo, monospace;
         }
-        .meta b { color: #e2e8f0; font-weight: 500; }
 
         /* The terminal is the instrument, so it takes every spare pixel. */
         main { flex: 1 1 auto; position: relative; min-height: 0; }
@@ -169,13 +197,12 @@
 </head>
 <body>
     <header>
-        <div class="row">
-            <span class="title"><a href="index.html"
-                style="color:#64748b;text-decoration:none;">←</a>
-                AIS01 Provision</span>
-            <span id="link-state" class="link link-disconnected">○ BLE</span>
-        </div>
-        <div class="meta">IMEI <b id="imei">—</b><span id="app-version" style="float:right;color:#475569;"></span></div>
+        <a class="back" href="index.html" aria-label="Back">←</a>
+        <span class="title">AIS01 End node configuration</span>
+        <span class="imei">IMEI <b id="imei">—</b></span>
+        <span class="bar-gap"></span>
+        <span id="link-state" class="link link-disconnected">○ BLE</span>
+        <span id="app-version" class="version"></span>
     </header>
 
     <main>
