@@ -17,7 +17,7 @@
 
 import {
     hasBluetooth, connect, adopt, reconnect, isConnected, deviceName,
-    sendLine, sendRaw, disconnect,
+    isHunting, stopHunting, sendLine, sendRaw, disconnect,
 } from './ble-transport.js';
 import { writeCerts } from './certmod.js';
 import { VERSION, VERSION_NOTE } from './version.js';
@@ -28,8 +28,8 @@ import { VERSION, VERSION_NOTE } from './version.js';
  * they must not contain a branch for being tested.
  */
 const link = {
-    connect, adopt, reconnect, isConnected, deviceName, sendLine, sendRaw,
-    disconnect,
+    connect, adopt, reconnect, isConnected, deviceName, isHunting, stopHunting,
+    sendLine, sendRaw, disconnect,
 };
 
 /* Everything below is app state. None of it describes the device. */
@@ -354,29 +354,42 @@ function you(text) { write(text, 'you'); }
  * while it runs, green when it closes with nothing broken, red from the first
  * failure inside it. The rows keep the detail; the header is what you scan.
  */
-let phaseEl = null;
-let phaseFailed = false;
+/*
+ * Sections can overlap, so each one is a handle its opener holds rather than a
+ * single "current phase" variable. ④ arms a watcher and stays open for up to a
+ * duty cycle; tapping ② during that is normal, and with one shared variable
+ * the second section would take the first's place and leave ④ amber for good.
+ *
+ * A failure belongs to the innermost section running when it happened — the
+ * one that was doing something — not to a watcher that happens to be open.
+ */
+const openPhases = [];
 
 function startPhase(label) {
     const out = el('terminal');
-    phaseEl = document.createElement('div');
-    phaseEl.className = 'phase';
-    phaseEl.textContent = label;
-    phaseFailed = false;
-    out.appendChild(phaseEl);
+    const node = document.createElement('div');
+    node.className = 'phase';
+    node.textContent = label;
+    out.appendChild(node);
     if (state.pinned.annotated) tail(out);
+    const handle = { node, failed: false };
+    openPhases.push(handle);
+    return handle;
 }
 
 function failPhase() {
-    if (!phaseEl) return;
-    phaseFailed = true;
-    phaseEl.classList.remove('is-ok');
-    phaseEl.classList.add('is-fail');
+    const handle = openPhases[openPhases.length - 1];
+    if (!handle) return;
+    handle.failed = true;
+    handle.node.classList.remove('is-ok');
+    handle.node.classList.add('is-fail');
 }
 
-function endPhase() {
-    if (phaseEl && !phaseFailed) phaseEl.classList.add('is-ok');
-    phaseEl = null;
+function endPhase(handle) {
+    if (!handle) return;
+    const i = openPhases.indexOf(handle);
+    if (i >= 0) openPhases.splice(i, 1);
+    if (!handle.failed) handle.node.classList.add('is-ok');
 }
 
 /* ── Boot dividers ───────────────────────────────────────────────────────
@@ -482,6 +495,11 @@ function setLink(status, detail) {
     const up = status === 'connected';
     foot.className = up ? 'live' : 'live off';
     foot.lastChild.textContent = up ? 'live' : status;
+
+    /* The button names what tapping it will do next, so the hunt is never a
+     * state you are stuck in without a visible way out. */
+    el('btn-connect').textContent = up ? 'Disconnect'
+        : status === 'reconnecting' ? 'Stop looking' : 'Connect BLE';
 
     if (detail) note(`link ${status}${detail ? ' — ' + detail : ''}`);
 }
@@ -689,7 +707,18 @@ async function doConnect() {
         fail('This browser has no Web Bluetooth. On iOS use Bluefy.');
         return;
     }
+    /*
+     * One button, three states, because the link has three: up, hunting, off.
+     * The hunt is unbounded by design — the unit is asleep most of a duty cycle
+     * — so the way out of it has to be the same button that started it.
+     */
     if (link.isConnected()) { await link.disconnect(); setLink('disconnected'); return; }
+    if (link.isHunting()) {
+        link.stopHunting();
+        setLink('disconnected');
+        you('Stopped looking. Tap CONNECT when the unit is awake.');
+        return;
+    }
 
     try {
         /* Redact for the screen only — the collectors that decide whether a
@@ -1038,6 +1067,7 @@ function doVerify() {
         return;
     }
 
+    const phase = startPhase('④ VERIFY');
     const seen = new Set();
     const collector = { lines: [], each: line => {
         PUBLISH_EVIDENCE.forEach(([pattern, meaning], i) => {
@@ -1079,14 +1109,13 @@ function doVerify() {
             note('The link only carries lines while the unit is awake, so a ' +
                  'cycle that ran while BLE was re-attaching can be missed.');
         }
-        endPhase();
+        endPhase(phase);
     };
 
     const timer = setTimeout(finish, verifyBudgetMs());
     state.verifying = { stop: finish };
     collectors.add(collector);
 
-    startPhase('④ VERIFY');
     setMark('verify', 'watching', 'run');
     note(`Watching for a publish, up to ${Math.round(verifyBudgetMs() / 60000)} min.`);
     you('Press RESET to start a cycle now, or wait for the next one. Tap ④ ' +
@@ -1127,8 +1156,11 @@ async function installMock(kind) {
     state.mock = true;
 
     link.connect = async () => { up = true; setLink('connected', 'simulated'); return 'MOCK-869181072714122'; };
-    /* Nothing to adopt without a radio — the mock always takes the connect path. */
+    /* Nothing to adopt and nothing to hunt without a radio — the mock always
+     * takes the connect path and is up the moment it is asked. */
     link.adopt = async () => null;
+    link.isHunting = () => false;
+    link.stopHunting = () => {};
     link.reconnect = async () => { up = true; };
     link.isConnected = () => up;
     link.deviceName = () => 'MOCK-869181072714122';
@@ -1155,8 +1187,8 @@ export function initProvision() {
      * minutes later. It opens and closes its own section around the watch.
      */
     const staged = (label, fn) => async (...args) => {
-        startPhase(label);
-        try { return await fn(...args); } finally { endPhase(); }
+        const phase = startPhase(label);
+        try { return await fn(...args); } finally { endPhase(phase); }
     };
 
     el('btn-connect').addEventListener('click', doConnect);

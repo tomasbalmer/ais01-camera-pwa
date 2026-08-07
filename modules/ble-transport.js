@@ -143,7 +143,14 @@ export async function connect(handlers = {}) {
     /* From here the link is ours to keep. Only an explicit disconnect gives it
      * up — everything else is the unit sleeping, and it comes back. */
     wantLink = true;
-    await attach();
+    try {
+        await attach();
+    } catch {
+        /* Chosen but asleep: hunt, exactly as after a drop. Same reason as in
+         * `adopt` — a unit that is not answering yet is not an error. */
+        keepConnected();
+        return device.name || '(unnamed)';
+    }
     onStatus('connected', device.name || '');
     return device.name || '(unnamed)';
 }
@@ -215,13 +222,19 @@ export async function adopt(handlers = {}, prefer = null) {
     onStatus('reconnecting', `adopting ${device.name}`);
     try {
         await attach();
-    } catch (err) {
-        /* Leave nothing half-adopted behind: `keepConnected` would otherwise
-         * chase a unit the caller never got to hear about. */
-        wantLink = false;
-        device = null;
-        onStatus('disconnected', '');
-        throw err;
+    } catch {
+        /*
+         * A granted unit that does not answer is a unit that is asleep, and it
+         * will advertise again at the end of its duty cycle. That is not a
+         * failure to report back to the caller — it is the normal state of a
+         * bench, and the reason the CLI has no connect button at all: its
+         * daemon simply keeps trying.
+         *
+         * So the hunt starts here rather than an error being thrown, and the
+         * caller hears about it as a link status like any other.
+         */
+        keepConnected();
+        return device.name || '(unnamed)';
     }
     onStatus('connected', device.name || '');
     return device.name || '(unnamed)';
@@ -265,11 +278,35 @@ async function keepConnected() {
             break;
         } catch {
             /* Asleep, or still shutting down. Neither is an error to report —
-             * the status line already says `reconnecting`. */
-            await wait(Math.min(1000 + attempt * 250, 4000));
+             * the status line already says `reconnecting`.
+             *
+             * The interval is short and stays short, for the reason the CLI
+             * daemon gives at the same retry (`broker._run_owner_ble`): the
+             * BT24 advertises for eight to fifteen seconds after a reset, and
+             * that window is the whole opportunity. Backing off past it turns
+             * a reconnect into a coin toss. */
+            await wait(1200);
         }
     }
     reattaching = false;
+}
+
+/* Is the loop above running — i.e. is the app hunting for a unit that is not
+ * answering yet? The caller needs it to offer a way out of the hunt. */
+export function isHunting() {
+    return reattaching;
+}
+
+/*
+ * Give up on purpose.
+ *
+ * The hunt is unbounded, so the operator needs one action that ends it — the
+ * same action that started it, which is why the button is a toggle. Without
+ * this the only way to stop a phone quietly waking its radio every 1.2 s would
+ * be to close the tab.
+ */
+export function stopHunting() {
+    wantLink = false;
 }
 
 /*
