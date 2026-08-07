@@ -20,32 +20,44 @@
             display: flex; flex-direction: column; align-items: center;
             justify-content: center; gap: 14px; padding: 24px 20px;
         }
-        /* The one line that is not a choice: what this is, and which build.
-           It stands in for the status bar this screen no longer shows — a
-           screenshot of a door still has to say which version it came from. */
-        .job-brand {
-            width: 100%; max-width: 320px; margin-bottom: 4px;
-            display: flex; align-items: baseline; justify-content: space-between;
-        }
+        /* The name of the thing in your hand, so the door says what it opens. */
         .job-brand-name {
-            color: #e2e8f0; font-size: 15px; font-weight: 600; letter-spacing: 0.5px;
+            margin: 0 0 4px; color: #e2e8f0;
+            font-size: 15px; font-weight: 600; letter-spacing: 0.5px;
         }
+        /*
+         * These read as panels unless they are given the two things a phone
+         * uses to tell a button from a box: a surface that sits above the page
+         * rather than in it, and something on the right that says it leads
+         * somewhere. Flat cards on a dark background are indistinguishable from
+         * the information panels this app is otherwise full of.
+         */
         .job-btn {
-            width: 100%; max-width: 320px; padding: 18px 20px;
-            display: flex; flex-direction: column; align-items: flex-start; gap: 4px;
-            border: 1px solid #334155; border-radius: 12px;
-            background: #1e293b; color: #e2e8f0; text-align: left;
+            position: relative;
+            width: 100%; max-width: 320px; padding: 16px 40px 16px 20px;
+            display: flex; flex-direction: column; align-items: flex-start; gap: 2px;
+            border: 1px solid #475569; border-radius: 12px;
+            background: #273549; color: #e2e8f0; text-align: left;
+            box-shadow: inset 0 1px 0 rgba(255,255,255,0.06),
+                        0 2px 8px rgba(0,0,0,0.35);
             -webkit-tap-highlight-color: transparent;
         }
-        .job-btn:active { background: #334155; }
+        .job-btn::after {
+            content: '›';
+            position: absolute; right: 18px; top: 50%; transform: translateY(-52%);
+            color: #94a3b8; font-size: 22px; line-height: 1;
+        }
+        /* Pressed = down: the shadow goes away, the surface darkens. */
+        .job-btn:active {
+            background: #1e293b; box-shadow: none; transform: translateY(1px);
+        }
         /* The place reads first because it is the thing already true when the
            screen opens — you are standing somewhere before you decide anything. */
         .job-btn-where {
             font-size: 11px; font-weight: 600; letter-spacing: 1.2px;
-            color: #64748b;
+            color: #94a3b8;
         }
-        .job-btn-main { font-size: 16px; font-weight: 600; }
-        .job-btn-sub  { font-size: 12px; color: #94a3b8; }
+        .job-btn-main { font-size: 17px; font-weight: 600; }
         .job-back {
             align-self: flex-start; margin-bottom: 10px; padding: 6px 2px;
             background: none; border: none; color: #64748b; font-size: 13px;
@@ -54,9 +66,13 @@
             margin-top: 18px; font-size: 11px; color: #475569;
             font-family: ui-monospace, Menlo, monospace; text-align: center;
         }
-        /* In the brand row it sits on the same baseline as the name, so the
-           18px that separated it from the buttons below would push it off. */
-        .job-brand .app-version-line { margin-top: 0; }
+        /* Pinned to the bottom of the screen rather than trailing the buttons:
+           it must be findable without being part of the choice. Hidden with the
+           door, since a fixed child of a hidden parent is hidden too. */
+        #job-chooser .app-version-line {
+            position: fixed; left: 0; right: 0; bottom: 14px;
+            margin-top: 0; text-align: center;
+        }
     </style>
     <script>
     // Cache-bust: append timestamp to CSS/JS so browser always fetches fresh
@@ -197,20 +213,22 @@
               reply.
             -->
             <div id="job-chooser">
-                <div class="job-brand">
-                    <span class="job-brand-name">AIS01</span>
-                    <span id="app-version-job" class="app-version-line"></span>
-                </div>
+                <p class="job-brand-name">AIS01-CB</p>
                 <button id="job-calibrate" class="job-btn">
                     <span class="job-btn-where">AT THE METER</span>
-                    <span class="job-btn-main">Calibrate the camera</span>
-                    <span class="job-btn-sub">aim, focus, set the reading box</span>
+                    <span class="job-btn-main">Calibrate camera</span>
                 </button>
                 <button id="job-provision" class="job-btn">
                     <span class="job-btn-where">AT THE BENCH</span>
-                    <span class="job-btn-main">Provision a node</span>
-                    <span class="job-btn-sub">certificates and MQTT, over BLE</span>
+                    <span class="job-btn-main">Configure node</span>
                 </button>
+                <!--
+                  Not for the person holding the phone: for us. It is how we
+                  find out whether what we just shipped is what they are
+                  running, so it has to be present and has to be ignorable —
+                  which is the bottom of the screen, and nowhere else.
+                -->
+                <span id="app-version-job" class="app-version-line"></span>
             </div>
 
             <!-- Phase 1: Choose connection method. Hidden until the job is
