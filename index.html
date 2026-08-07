@@ -34,8 +34,8 @@
          */
         .job-btn {
             position: relative;
-            width: 100%; max-width: 320px; padding: 16px 40px 16px 20px;
-            display: flex; flex-direction: column; align-items: flex-start; gap: 2px;
+            width: 100%; max-width: 320px; padding: 18px 40px 18px 20px;
+            display: flex; align-items: center;
             border: 1px solid #475569; border-radius: 12px;
             background: #273549; color: #e2e8f0; text-align: left;
             box-shadow: inset 0 1px 0 rgba(255,255,255,0.06),
@@ -50,12 +50,6 @@
         /* Pressed = down: the shadow goes away, the surface darkens. */
         .job-btn:active {
             background: #1e293b; box-shadow: none; transform: translateY(1px);
-        }
-        /* The place reads first because it is the thing already true when the
-           screen opens — you are standing somewhere before you decide anything. */
-        .job-btn-where {
-            font-size: 11px; font-weight: 600; letter-spacing: 1.2px;
-            color: #94a3b8;
         }
         .job-btn-main { font-size: 17px; font-weight: 600; }
         .job-back {
@@ -204,22 +198,18 @@
               waiting for banners their unit will never print. Transport cannot
               be the discriminator anyway — Bluetooth serves both.
 
-              The fork is still the device. What is written on the cards is the
-              PLACE, because that is what the person can check without looking
-              anything up: at the meter with a camera in front of them, or at a
-              bench with a node and a laptop. The question this screen used to
-              ask — "which device do you have?" — was answered by the two
-              answers under it, so it was a question in the way of its own
-              reply.
+              So each card names its job and nothing else. The question this
+              screen used to ask — "which device do you have?" — was answered by
+              the two answers under it, and every line that was tried underneath
+              them explained a screen that explains itself once you are in it.
+              Two words each is the whole decision.
             -->
             <div id="job-chooser">
                 <p class="job-brand-name">AIS01-CB</p>
                 <button id="job-calibrate" class="job-btn">
-                    <span class="job-btn-where">AT THE METER</span>
                     <span class="job-btn-main">Calibrate camera</span>
                 </button>
                 <button id="job-provision" class="job-btn">
-                    <span class="job-btn-where">AT THE BENCH</span>
                     <span class="job-btn-main">Configure node</span>
                 </button>
                 <!--

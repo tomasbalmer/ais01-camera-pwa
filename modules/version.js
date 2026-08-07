@@ -16,8 +16,8 @@
  * cached shell — pull to refresh, or reinstall the app from the home screen.
  */
 
-export const VERSION = '0.49.2';
+export const VERSION = '0.49.3';
 
 /* One line, for the places that want context rather than just a number. */
-export const VERSION_NOTE = 'the door reads AIS01-CB, its two choices look '
-    + 'like buttons, and the build number sits out of the way at the bottom';
+export const VERSION_NOTE = 'the door is two words and a chevron each: the '
+    + 'decision is which unit is in your hand, not a paragraph about it';
