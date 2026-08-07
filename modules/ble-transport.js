@@ -271,7 +271,12 @@ async function keepConnected() {
     reattaching = true;
     for (let attempt = 1; wantLink; attempt++) {
         if (device.gatt && device.gatt.connected) break;
-        onStatus('reconnecting', `attempt ${attempt}`);
+        /* A line per attempt at 1.2 s is a wall between two real facts, and the
+         * status dot already says it is trying. Say it once, then occasionally,
+         * so a hunt that has been running for minutes still shows its age. */
+        onStatus('reconnecting',
+                 attempt === 1 ? `looking for ${device.name || 'the unit'}`
+                 : attempt % 25 === 0 ? `still looking (attempt ${attempt})` : '');
         try {
             await attach();
             onStatus('connected', device.name || '');

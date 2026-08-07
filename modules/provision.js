@@ -496,9 +496,16 @@ function setLink(status, detail) {
     foot.className = up ? 'live' : 'live off';
     foot.lastChild.textContent = up ? 'live' : status;
 
-    /* The pair button exists for the first pairing and nothing else: once a
-     * unit is granted, adoption is automatic and there is nothing to press. */
-    el('pair-row').hidden = up || status === 'reconnecting';
+    /*
+     * Visible unless the link is up.
+     *
+     * It was hidden until something decided to show it, and that is backwards:
+     * every way of failing to connect then ends with no control on the screen
+     * at all, and the app looks broken rather than busy. A link that is down is
+     * exactly when a way to pair belongs in reach — including mid-hunt, where
+     * it is the escape hatch to a different unit.
+     */
+    el('pair-row').hidden = up;
 
     if (detail) note(`link ${status}${detail ? ' — ' + detail : ''}`);
 }
@@ -756,10 +763,7 @@ async function doConnect(fromTap = false) {
          * SecurityError at a page that just loaded. Nothing to adopt means the
          * pair button, which is exactly the gesture it is asking for.
          */
-        if (!name && !fromTap) {
-            el('pair-row').hidden = false;
-            return;
-        }
+        if (!name && !fromTap) return;
         if (!name) name = await link.connect(handlers);
 
         if (name === null) { note('scan dismissed'); return; }
@@ -1187,7 +1191,45 @@ async function installMock(kind) {
     note('Everything below is simulated. Nothing here proves the link works.');
 }
 
+/*
+ * The shell can be older than the code inside it.
+ *
+ * Modules are fetched with `no-store` and are always the deployed ones;
+ * `provision.html` can come from cache, and a phone launching from the home
+ * screen does exactly that. The mismatch does not announce itself — the module
+ * reaches for an element the old page never had, throws on the first line that
+ * does it, and everything after that line is simply never wired. Nothing
+ * connects, nothing responds, and the version badge cheerfully reads new,
+ * because the badge comes from the module.
+ *
+ * That cost a bench session. So it is checked, before anything can throw, by
+ * naming the elements this version needs and refusing to pretend when they are
+ * absent.
+ */
+const SHELL_NEEDS = [
+    'pair-row', 'btn-bundle', 'mark-bundle', 'raw-live', 'raw-count',
+    'terminal', 'terminal-raw', 'link-state', 'app-version',
+];
+
+function shellIsStale() {
+    const missing = SHELL_NEEDS.filter(id => !el(id));
+    if (!missing.length) return false;
+
+    const banner = document.createElement('div');
+    banner.style.cssText =
+        'padding:14px 16px;background:#7f1d1d;color:#fee2e2;font:14px/1.4 ' +
+        '-apple-system,sans-serif;';
+    banner.textContent =
+        `This page is cached from an older version (v${VERSION} code, ` +
+        `missing: ${missing.join(', ')}). Pull down to refresh, or reload with ` +
+        '?cb=1 — nothing here will work until you do.';
+    document.body.prepend(banner);
+    return true;
+}
+
 export function initProvision() {
+    if (shellIsStale()) return;
+
     /* First line of every session, so it lands in any screenshot sent back
      * from a bench. A log without a version is a log you cannot place. */
     el('app-version').textContent = `v${VERSION}`;
@@ -1254,7 +1296,6 @@ export function initProvision() {
 
     if (!hasBluetooth()) {
         fail('No Web Bluetooth in this browser. On iOS use Bluefy.');
-        el('pair-row').hidden = false;
         return;
     }
     you('Load the unit bundle with ⓪.');

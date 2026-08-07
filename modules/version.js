@@ -16,8 +16,8 @@
  * cached shell — pull to refresh, or reinstall the app from the home screen.
  */
 
-export const VERSION = '0.53.0';
+export const VERSION = '0.53.1';
 
 /* One line, for the places that want context rather than just a number. */
-export const VERSION_NOTE = 'no connect button after the first pairing, no '
-    + 'disconnect at all, and the bundle is step zero of the sequence';
+export const VERSION_NOTE = 'a way to pair is always on screen while the '
+    + 'link is down, and a cached page now says so instead of dying quietly';
