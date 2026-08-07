@@ -51,12 +51,14 @@ const state = {
  * while key material is in flight those lines are replaced rather than shown.
  * Everything else still comes through: this must never hide an error.
  */
+function isPemBody(line) {
+    const body = line.trim();
+    return body.length >= 60 && /^[A-Za-z0-9+/=]+$/.test(body);
+}
+
 function redact(line) {
     if (!state.redacting) return line;
-    if (line.length >= 60 && /^[A-Za-z0-9+/=]+$/.test(line.trim())) {
-        return '[redacted PEM body]';
-    }
-    return line;
+    return isPemBody(line) ? '[redacted PEM body]' : line;
 }
 
 const el = id => document.getElementById(id);
@@ -76,9 +78,83 @@ const el = id => document.getElementById(id);
  * know, and reproducing the PEM bytes would put a private key on the screen and
  * into the clipboard of a log meant to be shared. Evidence is what the device
  * said back.
+ *
+ * That asymmetry had a hole in it, and it was the whole point of keeping TX out.
+ * The console echoes our lines back, so the key we refused to write as TX
+ * arrived a second later as RX and was written verbatim — into the one buffer
+ * `copyRawLog` hands to the share sheet. `ATE0` does not close it: that silences
+ * the BG95, while the echo comes from the STM32 console in front of it, which is
+ * the same echo the N/19 counter reads to tell whether the pacing is right.
+ *
+ * So while key material is in flight the RX stream is filtered too, by the one
+ * rule that cannot match a Dragino message: a long unbroken base64 run is PEM
+ * body. Commands, `+QFUPL` verdicts and errors are none of those things and go
+ * through untouched — the log must still be able to explain a failure.
  */
 const RAW_CAP = 1_000_000;   /* characters; a bench session is long */
 let rawLog = '';
+
+/*
+ * The redaction filter is per line, and a notification boundary is not a line
+ * boundary, so an unterminated tail waits here until its terminator arrives. It
+ * only ever holds part of one line, and only while `state.redacting` is on.
+ */
+let rawCarry = '';
+
+/*
+ * Split after every CR or LF, keeping the terminator on the line it ends.
+ *
+ * Bare CR counts, for the reason `ble-transport.js` gives: the console returns
+ * our upload parts terminated the way we sent them, CR and no LF. Splitting on
+ * LF alone would leave a whole certificate sitting in one unterminated line —
+ * never filtered, and eventually flushed.
+ *
+ * Written as a scan rather than a lookbehind regex, which iOS WebKit only
+ * learned recently and this app has to run there.
+ */
+function splitTerminated(s) {
+    const lines = [];
+    let start = 0;
+    for (let i = 0; i < s.length; i++) {
+        if (s[i] === '\n' || s[i] === '\r') {
+            lines.push(s.slice(start, i + 1));
+            start = i + 1;
+        }
+    }
+    return [lines, s.slice(start)];
+}
+
+/* Filter the RX stream without disturbing its shape: same line count, same
+ * terminators, only PEM bodies swapped for a label. */
+function redactRaw(text) {
+    rawCarry += text;
+    const [lines, tail] = splitTerminated(rawCarry);
+    /* A tail with no terminator in sight is not a line waiting to be completed,
+     * it is a stream that has stopped giving us one. Filter it and let it go
+     * rather than holding key material in a buffer indefinitely. */
+    if (tail.length > 4096) {
+        lines.push(tail);
+        rawCarry = '';
+    } else {
+        rawCarry = tail;
+    }
+    return lines.map(line => {
+        const end = line.length - line.replace(/[\r\n]+$/, '').length;
+        const body = end ? line.slice(0, -end) : line;
+        return isPemBody(body)
+            ? '[redacted PEM body]' + line.slice(body.length)
+            : line;
+    }).join('');
+}
+
+/* Give back whatever the filter is still holding, before redaction is lifted —
+ * afterwards it would go out verbatim, which is the bug this closes. */
+function flushRaw() {
+    if (!rawCarry) return;
+    const held = rawCarry;
+    rawCarry = '';
+    rawAppend(isPemBody(held) ? '[redacted PEM body]' : held);
+}
 
 function rawAppend(text, dir) {
     /* Only the payload is a secret. Redacting the commands too hid `AT+CERTMOD`
@@ -88,6 +164,9 @@ function rawAppend(text, dir) {
         text = '\n[tx: PEM part redacted]\n';
     } else if (dir === 'tx-line') {
         text = `\n>>> ${text}`;
+    } else if (state.redacting) {
+        text = redactRaw(text);
+        if (!text) return;   /* all of it is still an incomplete line */
     }
     rawLog += text;
     if (rawLog.length > RAW_CAP) rawLog = rawLog.slice(-RAW_CAP);
@@ -777,6 +856,9 @@ async function doCerts() {
         note('Nothing half-written survives — every attempt starts with QFDEL.');
         note('Press RESET, wait for the window, and tap ② again.');
     } finally {
+        /* Order matters: the filter is holding a partial line, and once the
+         * flag is down it would be appended verbatim. */
+        flushRaw();
         state.redacting = false;
         state.busy = false;
     }

@@ -16,8 +16,8 @@
  * cached shell — pull to refresh, or reinstall the app from the home screen.
  */
 
-export const VERSION = '0.48.1';
+export const VERSION = '0.48.2';
 
 /* One line, for the places that want context rather than just a number. */
-export const VERSION_NOTE = 'load a bundle, not a folder — which is what lets ' +
-    'the phone picker reach Drive with no account to configure';
+export const VERSION_NOTE = 'the console echoes what we send, so the raw log ' +
+    'was keeping the private key we refused to write into it';
