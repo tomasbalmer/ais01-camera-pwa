@@ -31,47 +31,66 @@
         body { display: flex; flex-direction: column; }
 
         /*
-         * One bar, one row, same shape as the calibration page's `#topbar`:
-         * 44px tall, a border underneath, everything on a single baseline.
+         * ── The bar ──────────────────────────────────────────────────────
          *
-         * It was two stacked rows — title and link, then IMEI and version — and
-         * two rows of chrome above a log is a header that behaves like content.
-         * The colour is the one difference from calibration, and it is the same
-         * decision: there the bar is #0f172a against a black viewer, so it
-         * separates itself. Here the page is already #0f172a, so the bar takes
-         * the palette's next surface up (#1e293b) to stay a bar rather than the
-         * top of the log.
+         * This is the calibration page's `#topbar`, rule for rule, from
+         * styles/layout.css and styles/components.css. The values are copied
+         * rather than the file imported, because this page shipping no shared
+         * stylesheet is deliberate (see above) — but a second look must not be
+         * a second design.
+         *
+         * What makes that bar read the way it does, and none of which was here:
+         *   · one 8px dot for the link, not a word
+         *   · ONE line of text, 12px, --text2, flex:1, ellipsised — nothing
+         *     bold, nothing monospaced, nothing competing
+         *   · a 36x36 icon button on the end
+         *   · the same background as the page, separated by one hairline
          */
+        :root {
+            --bg: #0f172a;
+            --text: #f1f5f9;
+            --text2: #94a3b8;
+            --muted: #64748b;
+            --border: #334155;
+        }
         header {
-            flex: 0 0 auto;
-            height: 44px; padding: 0 12px;
-            display: flex; align-items: center; gap: 10px;
-            background: #1e293b;
-            border-bottom: 1px solid #334155;
+            flex-shrink: 0;
+            height: 44px;
+            padding: 0 12px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            background: var(--bg);
+            border-bottom: 1px solid var(--border);
         }
-        .back {
-            color: #64748b; text-decoration: none; font-size: 17px; line-height: 1;
+        .icon-btn {
+            width: 36px; height: 36px;
+            display: flex; align-items: center; justify-content: center;
+            flex-shrink: 0;
+            background: none; border: none; border-radius: 8px;
+            color: var(--text2); font-size: 18px; text-decoration: none;
+            -webkit-tap-highlight-color: transparent;
         }
-        /* The only thing here that may be clipped: on a narrow phone something
-           has to give, and the name of the screen you are already looking at is
-           the most redundant thing in the row. */
-        .title {
-            font-size: 13px; font-weight: 600;
-            white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-            min-width: 0;
+        .icon-btn:active { background: rgba(255,255,255,0.08); }
+        /* The link, said the way the other bar says it. */
+        .dot {
+            width: 8px; height: 8px; border-radius: 50%;
+            background: var(--muted); flex-shrink: 0;
         }
-        .imei {
-            font-size: 12px; color: #94a3b8; white-space: nowrap;
-            font-family: ui-monospace, "SF Mono", Menlo, monospace;
+        .dot.link-connected    { background: #22c55e; }
+        .dot.link-reconnecting { background: #fbbf24; }
+        .dot.link-disconnected { background: var(--muted); }
+        .bar-text {
+            flex: 1;
+            font-size: 12px; color: var(--text2);
+            overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
         }
-        .imei b { color: #e2e8f0; font-weight: 500; }
-        .bar-gap { flex: 1 1 auto; }
-        .link { font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; }
-        .link-connected { color: #4ade80; }
-        .link-reconnecting { color: #fbbf24; }
-        .link-disconnected { color: #64748b; }
+        /* The IMEI is the one thing in the line worth landing on. Same weight
+           `#stats.active` uses when it has something real to say. */
+        .bar-text b { color: var(--text); font-weight: 500; }
         .version {
-            font-size: 11px; color: #475569; white-space: nowrap;
+            flex-shrink: 0;
+            font-size: 11px; color: var(--muted);
             font-family: ui-monospace, "SF Mono", Menlo, monospace;
         }
 
@@ -197,11 +216,9 @@
 </head>
 <body>
     <header>
-        <a class="back" href="index.html" aria-label="Back">←</a>
-        <span class="title">AIS01 End node configuration</span>
-        <span class="imei">IMEI <b id="imei">—</b></span>
-        <span class="bar-gap"></span>
-        <span id="link-state" class="link link-disconnected">○ BLE</span>
+        <a class="icon-btn" href="index.html" aria-label="Back">←</a>
+        <span id="link-state" class="dot link-disconnected" title="BLE link"></span>
+        <span class="bar-text">AIS01 End node configuration · <b id="imei">—</b></span>
         <span id="app-version" class="version"></span>
     </header>
 

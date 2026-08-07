@@ -382,11 +382,12 @@ function setMark(stage, text, kind = 'weak') {
     mark.className = `mark mark-${kind}`;
 }
 
+/* The bar says the link with a colour, the way the calibration bar does. The
+ * words for it are in the log, where the reason lives too. */
 function setLink(status, detail) {
     const dot = el('link-state');
-    dot.textContent = status === 'connected' ? '● BLE'
-        : status === 'reconnecting' ? '◐ BLE' : '○ BLE';
-    dot.className = `link link-${status}`;
+    dot.className = `dot link-${status}`;
+    dot.title = `BLE ${status}`;
     if (detail) note(`link ${status}${detail ? ' — ' + detail : ''}`);
 }
 
