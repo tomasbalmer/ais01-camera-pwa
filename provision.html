@@ -402,33 +402,29 @@
         <button id="btn-connect">Pair unit</button>
     </div>
 
-    <!-- The bundle input lives outside the row that hides: a `display:none`
-         input still opens its picker from ⓪, but a hidden ancestor is a
-         needless risk for the one control a session cannot start without.
+    <!--
+      The input lives outside the row that hides: a `display:none` input still
+      opens its picker from ⓪, but a hidden ancestor is a needless risk for the
+      one control a session cannot start without.
 
-         No `accept` filter on purpose. iOS Files greys out .json on some
-             versions, which looks like the file is missing rather than
-             filtered — and the file always arrives from somewhere we do not
-             control (AirDrop, Drive, a download). The parser rejects anything
-             that is not a bundle, with a reason, which is the better place to
-             be strict. -->
-        <!-- No `webkitdirectory`, and that is the whole point of this input.
-             Asking for a DIRECTORY is what kept Drive out: the phone's own
-             picker already offers Drive as a source, but cloud providers
-             expose files, not folders, so a directory request shows the
-             technician an empty Drive. Asking for files lets them browse
-             straight into it, with no OAuth, no API key and no account to
-             configure.
+      `webkitdirectory`, and it is the whole point of this input. The material
+      is a FOLDER — the one the technician downloaded from Drive and saved on
+      their machine — because the folder name is where the unit's identity
+      lives. AWS names the PEMs after the certificate ID, so no file inside
+      says which unit it belongs to; the directory does, and a file pick throws
+      it away.
 
-             The cost is the IMEI. AWS names the PEMs after the certificate ID,
-             so with loose files the unit's identity exists only in the folder
-             name that a file pick discards — and the wrong-unit check goes
-             with it. The prepared bundle is the answer: `ais01 certs bundle`
-             writes one AIS01-CB-<IMEI>.json carrying the IMEI, the password
-             and both PEMs, so a single tap in Drive keeps the check alive.
-         loadFiles() still accepts loose files, and still says the check is
-         off when it gets them. -->
-    <input id="bundle-input" type="file" multiple hidden>
+      This briefly asked for files instead, back when the folder had to come
+      from a phone's own Drive and cloud providers only expose files. That flow
+      is gone, and with it the prepared `AIS01-CB-<IMEI>.json` that existed to
+      carry the IMEI past a picker that could not.
+
+      No `accept` filter: the folder legitimately contains files we ignore
+      (AmazonRootCA*.pem, *-public.pem.key), and filtering by extension would
+      hide the ones that matter on some file managers. loadFiles() decides what
+      matters, by the names the server generated.
+    -->
+    <input id="bundle-input" type="file" webkitdirectory directory multiple hidden>
 
     <!-- One command, sent as typed. The session has to be unlocked first: the
          app answers `AT` and `AT?` itself but ignores everything else until the
@@ -449,7 +445,7 @@
     -->
     <div class="actions">
         <button id="btn-bundle">
-            <span class="label">⓪&nbsp;BUNDLE</span><span id="mark-bundle" class="mark"></span>
+            <span class="label">⓪&nbsp;FOLDER</span><span id="mark-bundle" class="mark"></span>
         </button>
         <button id="btn-login">
             <span class="label">①&nbsp;LOGIN</span><span id="mark-login" class="mark"></span>

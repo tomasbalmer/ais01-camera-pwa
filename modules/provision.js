@@ -510,21 +510,50 @@ function setLink(status, detail) {
     if (detail) note(`link ${status}${detail ? ' — ' + detail : ''}`);
 }
 
-/* ── Bundle ──────────────────────────────────────────────────────────── */
+/* ── The unit's material ─────────────────────────────────────────────────
+ *
+ * One input, one shape: the folder the technician downloaded from Drive, saved
+ * on their machine, and picks whole. Nothing is prepared, converted or packed
+ * first, because every step between the server and the unit is a step where
+ * material can be paired with the wrong identity.
+ *
+ * The prepared `AIS01-CB-<IMEI>.json` this replaces existed for one reason —
+ * a phone picker cannot ask a cloud provider for a folder — and that reason
+ * belongs to a flow that no longer runs from the phone's own storage.
+ */
 
-const REQUIRED = ['imei', 'thing_name', 'password', 'certificate', 'private_key'];
+/*
+ * What the folder must be called, because it is the only place two facts
+ * exist. A PEM carries no identity: the IMEI is in the directory name or it is
+ * nowhere. And the environment decides which broker the unit will talk to,
+ * which is not written in any file either.
+ *
+ *     AIS01-CB-869181072714122-WaterplanProduction
+ *              └─── IMEI ────┘ └──── where ─────┘
+ */
+const FOLDER_IMEI = /(\d{15})/;
+const FOLDER_ENV = /(staging|production)/i;
 
-function parseBundle(text) {
-    let data;
-    try {
-        data = JSON.parse(text);
-    } catch (err) {
-        throw new Error(`not valid JSON — ${err.message}`);
-    }
-    const missing = REQUIRED.filter(k => !data[k]);
-    if (missing.length) throw new Error(`missing field(s): ${missing.join(', ')}`);
-    return data;
-}
+/*
+ * Account-level, identical for every unit in an environment, and therefore not
+ * something a technician should be typing or a folder should be carrying.
+ * Source: firmware-factory/docs/golden-config.md and SETUP-GUIDE.md.
+ */
+const ENVIRONMENTS = {
+    production: {
+        endpoint: 'a1igqe74p78h8k-ats.iot.us-east-1.amazonaws.com',
+        /* A resolved address for AT+BKDNS, the fallback the firmware uses when
+         * DNS does not answer — the transient that cost the 122 its first
+         * attempt on every boot. Production only: it is the one we have
+         * verified. */
+        endpoint_ip: '54.158.94.62',
+        tdc: 1200,
+    },
+    staging: {
+        endpoint: 'a8jij4el5zhvl-ats.iot.us-east-1.amazonaws.com',
+        tdc: 1200,
+    },
+};
 
 /*
  * The one guard worth having. The BT24 advertises under the unit's IMEI, so a
@@ -536,22 +565,14 @@ function imeiMismatch(bundle) {
     const advertised = link.deviceName();
     if (!advertised || !bundle) return null;
 
-    /* No IMEI in the selection means the browser handed over loose files rather
-     * than a folder. There is nothing to compare, so there is no mismatch —
-     * claiming one would refuse a correct unit, which is the exact opposite of
-     * this guard's job. The absence is already reported once, at load. */
-    if (!bundle.imei) return null;
-
     if (advertised.includes(bundle.imei)) return null;
-    return `bundle is for ${bundle.imei}, connected unit advertises "${advertised}"`;
+    return `material is for ${bundle.imei}, connected unit advertises "${advertised}"`;
 }
 
 /*
- * What AWS hands you when you create a thing is a folder, so that is what this
- * reads. Nothing is prepared, converted or transferred first: the technician
- * picks the folder and the app does the grouping.
- *
- * Files are identified by the names AWS gives them, not by order or position:
+ * Files are identified by the names the server gives them, never by order or
+ * position — the prefix is the certificate ID, so only the suffix is ours to
+ * match on:
  *
  *   *-certificate.pem.crt   the client certificate
  *   *-private.pem.key       the private key
@@ -559,10 +580,8 @@ function imeiMismatch(bundle) {
  *   AmazonRootCA*.pem       ignored — public, identical everywhere, in the app
  *   *-public.pem.key        ignored — the modem never sees it
  *
- * The IMEI comes from the folder name, which is the only place it exists: a
- * PEM carries no identity. When the browser gives a folder (webkitRelativePath),
- * that check is available; when it can only give loose files, it is not, and
- * the app says so rather than pretending.
+ * Anything else in the folder is ignored too. The technician downloads what
+ * Drive gives them; deciding what matters is this list's job, not theirs.
  */
 const FILE_ROLES = [
     ['certificate', /-certificate\.pem\.crt$/i],
@@ -570,21 +589,48 @@ const FILE_ROLES = [
     ['password',    /^password\.txt$/i],
 ];
 
+function rejectFolder(reason, ...help) {
+    state.bundle = null;
+    el('imei').textContent = '—';
+    setMark('bundle', 'rejected', 'fail');
+    fail(reason);
+    for (const line of help) you(line);
+}
+
 async function loadFiles(fileList) {
     const files = Array.from(fileList || []);
     if (!files.length) return;
 
     /*
-     * The prepared bundle, and on a phone the only sensible choice.
+     * The folder name is read before the files are, because it decides what
+     * the files MEAN. Without it there is material and no identity: three
+     * correct files that could belong to any unit on the bench, and writing
+     * them is how unit A's identity ends up inside unit B — silent, and
+     * visible weeks later in the field.
      *
-     * The picker cannot ask Drive for a folder — cloud providers expose files
-     * — so the directory name that carries the IMEI never arrives, and with it
-     * goes the check that this material belongs to this unit. One
-     * `AIS01-CB-<IMEI>.json` from `ais01 certs bundle` puts the IMEI back
-     * INSIDE the artefact, where a file pick cannot lose it.
+     * So this refuses rather than warning. It used to warn and write anyway,
+     * from a time when a phone picker could not hand over a directory at all;
+     * now that the folder comes off a laptop's own disk, an unnamed one is a
+     * mistake to correct, not a limitation to work around.
      */
-    const json = files.find(f => /\.json$/i.test(f.name));
-    if (json && files.length === 1) return loadBundleJson(json);
+    const folder = (files[0].webkitRelativePath || '').split('/')[0];
+    const imei = (folder.match(FOLDER_IMEI) || [])[1];
+    const envName = (folder.match(FOLDER_ENV) || [])[1];
+
+    if (!folder) {
+        rejectFolder('that was a file, not a folder',
+                     'Pick the FOLDER that came from Drive — its name carries ' +
+                     'the IMEI, and no file inside it does.');
+        return;
+    }
+    if (!imei || !envName) {
+        rejectFolder(`"${folder}" does not name a unit`,
+                     'Expected AIS01-CB-<15-digit IMEI>-Waterplan<Production|' +
+                     'Staging>. Rename the folder to match what the server ' +
+                     'created and pick it again.');
+        return;
+    }
+    const env = ENVIRONMENTS[envName.toLowerCase()];
 
     const found = {};
     for (const [role, pattern] of FILE_ROLES) {
@@ -594,46 +640,39 @@ async function loadFiles(fileList) {
 
     const missing = FILE_ROLES.map(([r]) => r).filter(r => !found[r]);
     if (missing.length) {
-        state.bundle = null;
-        el('imei').textContent = '—';
-        fail(`missing from the selection: ${missing.join(', ')}`);
-        note(`picked ${files.length} file(s): ${files.map(f => f.name).join(', ')}`);
-        note('Pick AIS01-CB-<IMEI>.json, or all three files including');
-        note('password.txt.');
+        rejectFolder(`${folder} is missing: ${missing.join(', ')}`,
+                     'The folder needs the certificate (*-certificate.pem.crt), ' +
+                     'the key (*-private.pem.key) and password.txt.');
+        note(`saw ${files.length} file(s): ${files.map(f => f.name).join(', ')}`);
         return;
     }
 
-    /* A folder pick preserves the directory name and a file pick does not, so
-     * this path has an IMEI only on a desktop browser that still offers one.
-     * The warning below is not boilerplate: it is the difference between a
-     * checked write and an unchecked one. */
-    const relative = found.certificate.webkitRelativePath || '';
-    const imei = (relative.match(/(\d{15})/) || [])[1] || null;
-
     const bundle = {
         imei,
-        thing_name: imei ? `AIS01-CB-${imei}` : null,
+        thing_name: `AIS01-CB-${imei}`,
         password: (await found.password.text()).split(/\r?\n/)[0].trim(),
         certificate: await found.certificate.text(),
         private_key: await found.private_key.text(),
-        mqtt: {},
+        /* Not in the folder and not per unit: where this environment's broker
+         * is. The folder says which environment; the app knows the rest. */
+        mqtt: { ...env },
     };
 
-    if (!bundle.password) { fail('password.txt is empty'); return; }
+    if (!bundle.password) {
+        rejectFolder('password.txt is empty', 'Download it again from Drive.');
+        return;
+    }
 
     state.bundle = bundle;
-    rememberBundle(bundle, relative ? relative.split('/')[0] : 'loose files');
-    el('imei').textContent = imei || '(unknown)';
-    ok(`loaded ${relative ? relative.split('/')[0] : files.length + ' files'}`);
-    note(`  certificate ${bundle.certificate.length}B · key ${bundle.private_key.length}B`);
+    rememberBundle(bundle, folder);
+    el('imei').textContent = imei;
+    setMark('bundle', imei.slice(-6), 'ok');
+    ok(`loaded ${folder}`);
+    note(`  ${envName.toLowerCase()} · certificate ${bundle.certificate.length}B ` +
+         `· key ${bundle.private_key.length}B`);
 
-    if (!imei) {
-        note('No IMEI in the selection — pick the folder, not the files, to');
-        note('enable the wrong-unit check. Writing is still allowed.');
-    } else {
-        const problem = imeiMismatch(bundle);
-        if (problem) fail(`WRONG UNIT — ${problem}`);
-    }
+    const problem = imeiMismatch(bundle);
+    if (problem) fail(`WRONG UNIT — ${problem}`);
 }
 
 /* ── Remembering the unit's material ─────────────────────────────────────
@@ -658,7 +697,7 @@ function rememberBundle(bundle, label) {
     try {
         localStorage.setItem(REMEMBERED, JSON.stringify({ bundle, label }));
     } catch {
-        note('could not remember this bundle — it will need reloading');
+        note('could not remember this folder — it will need picking again');
     }
 }
 
@@ -667,7 +706,7 @@ function forgetBundle() {
     state.bundle = null;
     el('imei').textContent = '—';
     setMark('bundle', '', 'weak');
-    note('bundle forgotten — load the next unit\'s material');
+    note('forgotten — pick the next unit\'s folder with ⓪');
 }
 
 function restoreBundle() {
@@ -683,27 +722,9 @@ function restoreBundle() {
     note('  tap FORGET before provisioning a different unit');
 }
 
-async function loadBundleJson(file) {
-    try {
-        const bundle = parseBundle(await file.text());
-        state.bundle = bundle;
-        rememberBundle(bundle, file.name);
-        el('imei').textContent = bundle.imei;
-        ok(`bundle loaded: ${file.name}`);
-        setMark('bundle', bundle.imei.slice(-6), 'ok');
-        const problem = imeiMismatch(bundle);
-        if (problem) fail(`WRONG UNIT — ${problem}`);
-    } catch (err) {
-        state.bundle = null;
-        el('imei').textContent = '—';
-        setMark('bundle', 'rejected', 'fail');
-        fail(`bundle rejected: ${err.message}`);
-    }
-}
-
-/* Refuse to write anything without a bundle that matches this unit. */
+/* Refuse to write anything without material that matches this unit. */
 function bundleReady() {
-    if (!state.bundle) { fail('no bundle loaded'); return false; }
+    if (!state.bundle) { fail('no unit folder loaded — pick one with ⓪'); return false; }
     if (!link.isConnected()) { fail('not connected'); return false; }
     const problem = imeiMismatch(state.bundle);
     if (problem) { fail(`refusing to write — ${problem}`); return false; }
@@ -778,7 +799,7 @@ async function doConnect(fromTap = false) {
 }
 
 async function doLogin() {
-    if (!state.bundle) { fail('no bundle loaded — the password is in it'); return; }
+    if (!state.bundle) { fail('no unit folder loaded — the password is in it'); return; }
     if (!link.isConnected()) {
         /* An idle drop is normal on BT24; try the same device before giving up. */
         try { await link.reconnect(); } catch (err) {
@@ -864,7 +885,7 @@ async function doReadConfig() {
  */
 function desiredSettings(bundle) {
     const mqtt = bundle.mqtt || {};
-    if (!mqtt.endpoint) throw new Error('bundle has no mqtt.endpoint');
+    if (!mqtt.endpoint) throw new Error('no endpoint — the folder name did not say which environment');
     return [
         ['AT+PRO', '3,5'],
         ['AT+SERVADDR', `${mqtt.endpoint},8883`],
@@ -1298,7 +1319,7 @@ export function initProvision() {
         fail('No Web Bluetooth in this browser. On iOS use Bluefy.');
         return;
     }
-    you('Load the unit bundle with ⓪.');
+    you('Pick the unit folder with ⓪ — the one downloaded from Drive.');
 
     /*
      * Attach on load, with nobody pressing anything.

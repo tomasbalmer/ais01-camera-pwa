@@ -16,8 +16,8 @@
  * cached shell — pull to refresh, or reinstall the app from the home screen.
  */
 
-export const VERSION = '0.53.1';
+export const VERSION = '0.54.0';
 
 /* One line, for the places that want context rather than just a number. */
-export const VERSION_NOTE = 'a way to pair is always on screen while the '
-    + 'link is down, and a cached page now says so instead of dying quietly';
+export const VERSION_NOTE = 'one input: the folder from Drive, named for its '
+    + 'unit — no prepared file, and no writing without an identity';
