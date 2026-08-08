@@ -294,6 +294,21 @@
             font-size: 10px; font-weight: 500; line-height: 1;
             color: #64748b; min-height: 11px;
         }
+        /*
+         * ⓪ reports the unit, in full, in figures you can compare against the
+         * label on the board. A tick cannot do that: picking 869181072714163
+         * instead of 869181072714122 looks identical under a checkmark, and
+         * that is the exact mistake every guard on this screen exists to catch.
+         *
+         * Which is why the button is wider than its neighbours — fifteen digits
+         * have to fit without shrinking to a size nobody checks.
+         */
+        #btn-bundle { flex: 1.7; }
+        #mark-bundle {
+            font-family: ui-monospace, "SF Mono", Menlo, monospace;
+            font-variant-numeric: tabular-nums;
+            letter-spacing: -0.2px;
+        }
         .mark-ok    { color: #4ade80; }
         .mark-weak  { color: #fbbf24; }
         .mark-fail  { color: #f87171; }

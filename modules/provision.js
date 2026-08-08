@@ -507,6 +507,12 @@ function setLink(status, detail) {
      */
     el('pair-row').hidden = up;
 
+    /* The folder is usually chosen before the link comes up, so the comparison
+     * it enables only becomes possible here. Re-marking on every connect is
+     * what turns a green number red when the unit answering is not the one the
+     * folder is for. */
+    if (up) markUnit();
+
     if (detail) note(`link ${status}${detail ? ' — ' + detail : ''}`);
 }
 
@@ -615,7 +621,7 @@ function rolesOf(bundle) {
 
 function showLoaded(bundle, folder, found) {
     el('imei').textContent = bundle.imei;
-    setMark('bundle', 'chosen ✓', 'ok');
+    markUnit();
 
     el('btn-bundle').title = [
         folder,
@@ -626,6 +632,25 @@ function showLoaded(bundle, folder, found) {
         '',
         'The browser never reveals where this folder is on disk — only its name.',
     ].join('\n');
+}
+
+/*
+ * The mark under ⓪ is the unit, in figures.
+ *
+ * It said "chosen ✓" for one version, and a tick is content-free: picking
+ * 869181072714163 when you meant 869181072714122 looks exactly the same under
+ * it. The number is the only thing that distinguishes the folder you meant from
+ * the one next to it in the download list, and it is there to be compared —
+ * against the label on the board, and against the IMEI in the bar.
+ *
+ * Its colour is the comparison the app can make for you: green while nothing
+ * contradicts it, red the moment the connected unit advertises a different
+ * IMEI. Amber is not an option here. Either they agree or they do not.
+ */
+function markUnit() {
+    const bundle = state.bundle;
+    if (!bundle) { setMark('bundle', '', 'weak'); return; }
+    setMark('bundle', bundle.imei, imeiMismatch(bundle) ? 'fail' : 'ok');
 }
 
 function rejectFolder(reason, ...help) {
