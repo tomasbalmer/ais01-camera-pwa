@@ -598,11 +598,11 @@ const FILE_ROLES = [
  * identity: it carries the IMEI and the environment, which is the whole reason
  * the convention exists.
  *
- * The bar takes the two standing facts (unit, environment). The mark under ⓪
- * takes the environment, short, because a green PROD and an amber STG are
- * readable from arm's length and the IMEI already sits in the bar. The hover
- * takes everything, including which file was matched to which role — the
- * question you actually have when a write goes wrong.
+ * The bar takes the unit, which is the one standing fact. The mark under ⓪
+ * answers the only question the button itself has — is a folder chosen — and
+ * says nothing else, because the bar has already said which one. The hover
+ * takes the detail: the folder, the endpoint it resolved to, and which file was
+ * matched to which role, the question you actually have when a write goes wrong.
  */
 function rolesOf(bundle) {
     const names = bundle.files || {};
@@ -615,12 +615,7 @@ function rolesOf(bundle) {
 
 function showLoaded(bundle, folder, found) {
     el('imei').textContent = bundle.imei;
-
-    const env = el('env');
-    env.textContent = bundle.environment === 'production' ? 'PROD' : 'STG';
-    env.className = `env env-${bundle.environment}`;
-
-    setMark('bundle', env.textContent, 'ok');
+    setMark('bundle', 'chosen ✓', 'ok');
 
     el('btn-bundle').title = [
         folder,
@@ -636,7 +631,6 @@ function showLoaded(bundle, folder, found) {
 function rejectFolder(reason, ...help) {
     state.bundle = null;
     el('imei').textContent = '—';
-    el('env').textContent = '';
     el('btn-bundle').title = '';
     setMark('bundle', 'rejected', 'fail');
     fail(reason);
@@ -757,7 +751,6 @@ function forgetBundle() {
     try { localStorage.removeItem(REMEMBERED); } catch { /* nothing to undo */ }
     state.bundle = null;
     el('imei').textContent = '—';
-    el('env').textContent = '';
     el('btn-bundle').title = '';
     setMark('bundle', '', 'weak');
     note('forgotten — pick the next unit\'s folder with ⓪');
@@ -1300,7 +1293,7 @@ async function installMock(kind) {
  * absent.
  */
 const SHELL_NEEDS = [
-    'pair-row', 'btn-bundle', 'mark-bundle', 'raw-live', 'raw-count', 'env',
+    'pair-row', 'btn-bundle', 'mark-bundle', 'raw-live', 'raw-count',
     'terminal', 'terminal-raw', 'link-state', 'app-version',
 ];
 

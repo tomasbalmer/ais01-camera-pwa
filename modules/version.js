@@ -16,8 +16,8 @@
  * cached shell — pull to refresh, or reinstall the app from the home screen.
  */
 
-export const VERSION = '0.54.1';
+export const VERSION = '0.54.2';
 
 /* One line, for the places that want context rather than just a number. */
-export const VERSION_NOTE = 'the screen says which unit and which account, '
-    + 'and ⓪ hovers the folder it read and the files it matched';
+export const VERSION_NOTE = '⓪ says whether a folder is chosen, and the bar '
+    + 'says which unit — nothing else needs to be up there';
