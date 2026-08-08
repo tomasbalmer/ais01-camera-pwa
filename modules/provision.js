@@ -589,9 +589,55 @@ const FILE_ROLES = [
     ['password',    /^password\.txt$/i],
 ];
 
+/*
+ * Say where we are standing, in the three places it matters.
+ *
+ * A browser never hands over an absolute path — `webkitRelativePath` is the
+ * folder's own name and nothing above it — so "which folder is loaded" can
+ * only ever be answered with that name. It is enough, because the name is the
+ * identity: it carries the IMEI and the environment, which is the whole reason
+ * the convention exists.
+ *
+ * The bar takes the two standing facts (unit, environment). The mark under ⓪
+ * takes the environment, short, because a green PROD and an amber STG are
+ * readable from arm's length and the IMEI already sits in the bar. The hover
+ * takes everything, including which file was matched to which role — the
+ * question you actually have when a write goes wrong.
+ */
+function rolesOf(bundle) {
+    const names = bundle.files || {};
+    return {
+        certificate: { name: names.certificate || '(remembered)' },
+        private_key: { name: names.private_key || '(remembered)' },
+        password:    { name: names.password || '(remembered)' },
+    };
+}
+
+function showLoaded(bundle, folder, found) {
+    el('imei').textContent = bundle.imei;
+
+    const env = el('env');
+    env.textContent = bundle.environment === 'production' ? 'PROD' : 'STG';
+    env.className = `env env-${bundle.environment}`;
+
+    setMark('bundle', env.textContent, 'ok');
+
+    el('btn-bundle').title = [
+        folder,
+        `environment: ${bundle.environment} → ${bundle.mqtt.endpoint}`,
+        `certificate: ${found.certificate.name}`,
+        `private key: ${found.private_key.name}`,
+        `password:    ${found.password.name}`,
+        '',
+        'The browser never reveals where this folder is on disk — only its name.',
+    ].join('\n');
+}
+
 function rejectFolder(reason, ...help) {
     state.bundle = null;
     el('imei').textContent = '—';
+    el('env').textContent = '';
+    el('btn-bundle').title = '';
     setMark('bundle', 'rejected', 'fail');
     fail(reason);
     for (const line of help) you(line);
@@ -653,6 +699,13 @@ async function loadFiles(fileList) {
         password: (await found.password.text()).split(/\r?\n/)[0].trim(),
         certificate: await found.certificate.text(),
         private_key: await found.private_key.text(),
+        environment: envName.toLowerCase(),
+        folder,
+        /* Which files, by name, ended up being the ones used. Kept so the
+         * screen can answer "where am I standing" without the technician
+         * re-opening the folder to check. */
+        files: Object.fromEntries(
+            Object.entries(found).map(([role, f]) => [role, f.name])),
         /* Not in the folder and not per unit: where this environment's broker
          * is. The folder says which environment; the app knows the rest. */
         mqtt: { ...env },
@@ -665,10 +718,9 @@ async function loadFiles(fileList) {
 
     state.bundle = bundle;
     rememberBundle(bundle, folder);
-    el('imei').textContent = imei;
-    setMark('bundle', imei.slice(-6), 'ok');
+    showLoaded(bundle, folder, found);
     ok(`loaded ${folder}`);
-    note(`  ${envName.toLowerCase()} · certificate ${bundle.certificate.length}B ` +
+    note(`  ${bundle.environment} · certificate ${bundle.certificate.length}B ` +
          `· key ${bundle.private_key.length}B`);
 
     const problem = imeiMismatch(bundle);
@@ -705,6 +757,8 @@ function forgetBundle() {
     try { localStorage.removeItem(REMEMBERED); } catch { /* nothing to undo */ }
     state.bundle = null;
     el('imei').textContent = '—';
+    el('env').textContent = '';
+    el('btn-bundle').title = '';
     setMark('bundle', '', 'weak');
     note('forgotten — pick the next unit\'s folder with ⓪');
 }
@@ -715,9 +769,27 @@ function restoreBundle() {
     catch { return; }
     if (!saved || !saved.bundle) return;
 
-    state.bundle = saved.bundle;
-    el('imei').textContent = saved.bundle.imei || '(unknown)';
-    setMark('bundle', 'remembered', 'ok');
+    /*
+     * What is in this browser can be older than what reads it. A bundle stored
+     * by the version that loaded a prepared `.json` has no environment and no
+     * endpoint, and restoring it would put a unit on screen with half its facts
+     * — worst of all a `STG` chip on material that never said so.
+     *
+     * There is nothing to migrate: the folder is still on the technician's
+     * disk, and picking it again is one click.
+     */
+    const b = saved.bundle;
+    if (!b.imei || !b.environment || !(b.mqtt && b.mqtt.endpoint)) {
+        try { localStorage.removeItem(REMEMBERED); } catch { /* nothing to undo */ }
+        you(`the remembered material (${saved.label}) predates this version — ` +
+            'pick the folder again with ⓪');
+        return;
+    }
+
+    state.bundle = b;
+    /* Restored material must look exactly like freshly picked material —
+     * the standing facts are about the unit, not about how it got here. */
+    showLoaded(b, b.folder || saved.label, rolesOf(b));
     ok(`remembered ${saved.label} — stored in this browser, not in the app`);
     note('  tap FORGET before provisioning a different unit');
 }
@@ -1228,7 +1300,7 @@ async function installMock(kind) {
  * absent.
  */
 const SHELL_NEEDS = [
-    'pair-row', 'btn-bundle', 'mark-bundle', 'raw-live', 'raw-count',
+    'pair-row', 'btn-bundle', 'mark-bundle', 'raw-live', 'raw-count', 'env',
     'terminal', 'terminal-raw', 'link-state', 'app-version',
 ];
 

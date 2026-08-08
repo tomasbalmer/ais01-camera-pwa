@@ -88,6 +88,16 @@
         /* The IMEI is the one thing in the line worth landing on. Same weight
            `#stats.active` uses when it has something real to say. */
         .bar-text b { color: var(--text); font-weight: 500; }
+        /* Which account this unit is about to be pointed at. It is in the bar
+           rather than in the log because it is a standing fact, and because
+           writing a production unit into staging is silent until someone goes
+           looking for an uplink that was never going to arrive. */
+        .env {
+            margin-left: 8px; padding: 1px 6px; border-radius: 3px;
+            font-size: 10px; font-weight: 700; letter-spacing: 0.08em;
+        }
+        .env-production { color: #4ade80; background: #14532d55; border: 1px solid #16653455; }
+        .env-staging    { color: #fbbf24; background: #78350f55; border: 1px solid #92400e55; }
         .version {
             flex-shrink: 0;
             font-size: 11px; color: var(--muted);
@@ -344,7 +354,7 @@
     <header>
         <a class="icon-btn" href="index.html" aria-label="Back">←</a>
         <span id="link-state" class="dot link-disconnected" title="BLE link"></span>
-        <span class="bar-text">AIS01 End node configuration · <b id="imei">—</b></span>
+        <span class="bar-text">AIS01 End node configuration · <b id="imei">—</b><span id="env" class="env"></span></span>
         <span id="app-version" class="version"></span>
     </header>
 
