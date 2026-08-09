@@ -363,23 +363,37 @@ export async function checkFolder(folder, files) {
     const certId = chosen.certificate && certificateId(chosen.certificate.name);
     const keyId = chosen.private_key && certificateId(chosen.private_key.name);
 
+    /*
+     * Only when there are two files to compare.
+     *
+     * With either PEM absent this row could say nothing the two rows above it
+     * had not already said in red, so it said "not compared" — a line whose
+     * whole content was a restatement of the failure before it. A row earns
+     * its place by carrying a fact of its own.
+     *
+     * Its silence cannot be misread as a pass, which is the usual reason to
+     * keep an empty row: it only ever goes quiet directly underneath a
+     * MISSING FILE that explains why.
+     */
     if (!chosen.certificate || !chosen.private_key) {
-        say('info', 'cert + key',
-            'not compared — both files have to be here first');
+        /* nothing to compare, and the rows above already said so */
     } else if (certId && keyId && certId !== keyId) {
         /* The check this module was written for. Material from two different
          * certificates writes without complaint and is refused by AWS IoT a
          * cycle later, which is the failure that looks like broken hardware. */
         bad('cert + key', `certificate is ${mask(certId)} but the key is ` +
                           `${mask(keyId)} — two different certificates`);
+        findings[findings.length - 1].rule = true;
     } else if (certId && keyId) {
         say('ok', 'cert + key', `same certificate — ${mask(certId)}`);
+        findings[findings.length - 1].rule = true;
     } else {
         /* Renamed by hand, so the tie cannot be tested. Not a refusal — the
          * files may be perfectly correct — but its absence is worth a line. */
         say('info', 'cert + key',
             'not compared — the names carry no certificate id, so they were ' +
             'renamed after AWS created them');
+        findings[findings.length - 1].rule = true;
     }
 
     for (const [name, why] of ignored) {

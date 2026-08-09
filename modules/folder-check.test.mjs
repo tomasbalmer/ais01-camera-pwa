@@ -238,6 +238,8 @@ check('a failing folder still reports every check it got to',
  */
 const ROWS = ['folder selected', 'imei', 'environment',
               'certificate', 'private_key', 'password', 'region', 'cert + key'];
+/* Every row a folder with all four files must produce. `cert + key` is not on
+ * this list for a folder that is missing one of the PEMs — see below. */
 const labelsOf = report => report.findings.map(f => f.label);
 
 check('a good folder reports every row',
@@ -320,9 +322,20 @@ check('an empty folder names all four files it wants',
           empty.findings.some(f => f.label === role
                                 && f.detail.startsWith('MISSING FILE'))),
       true);
-check('and says the two PEMs were not compared, rather than going quiet',
-      empty.findings.find(f => f.label === 'cert + key').detail,
-      'not compared — both files have to be here first');
+/*
+ * The row is dropped when there is nothing to compare. It could only restate
+ * the MISSING FILE two lines above it, and its silence cannot be read as a
+ * pass — it only ever goes quiet directly under the failure that explains it.
+ */
+check('and does not restate the missing PEMs as an uncomparable pair',
+      empty.findings.some(f => f.label === 'cert + key'), false);
+
+/* It does appear the moment there are two names to compare, even unusable
+ * ones, because then it has something of its own to say. */
+check('the comparison is marked as a change of subject',
+      good.findings.find(f => f.label === 'cert + key').rule, true);
+check('and nothing else is',
+      good.findings.filter(f => f.rule).length, 1);
 
 console.log(failed ? `\n${failed} failed` : '\nall passed');
 process.exit(failed ? 1 : 0);

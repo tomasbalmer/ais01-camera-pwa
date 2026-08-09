@@ -907,8 +907,20 @@ function rejectFolder(reason, ...help) {
  * broke is the difference between re-downloading one file and re-downloading
  * everything.
  */
+/* A hairline, for a finding that changes the subject. The rows above ask what
+ * the folder CONTAINS; the one below asks whether two of those things agree,
+ * which is a different question and reads as one. */
+function rule() {
+    const out = el('terminal');
+    const line = document.createElement('div');
+    line.className = 'line-rule';
+    out.appendChild(line);
+    if (state.pinned.annotated) tail(out);
+}
+
 function reportFolder(report) {
-    for (const { level, label, detail } of report.findings) {
+    for (const { level, label, detail, rule: breaks } of report.findings) {
+        if (breaks) rule();
         const kind = level === 'fail' ? 'fail' : level === 'ok' ? 'ok' : 'note';
         /* `private_key` is a role key, not a word. The column is the only
          * place these are read by a person. */
