@@ -272,15 +272,44 @@
             font-variant-numeric: tabular-nums; letter-spacing: 0.02em;
             color: var(--text);
         }
+        /*
+         * The country, on the same plate and behind a hairline.
+         *
+         * On the plate because it is the same kind of fact as the IMEI: read
+         * off this unit's folder, true of this unit only. Behind a rule
+         * because it is a different fact — the number identifies the unit,
+         * the country decides what gets sent to it — and two things sharing a
+         * frame with nothing between them read as one thing.
+         *
+         * Sky blue, which on this page and on the calibration page means a
+         * value the session turned on rather than a state the device reported.
+         * The code shouts and the country does not: `AR` is what is written in
+         * `region.txt` and what gets compared against a SIM, and the name is
+         * there so nobody has to know the code.
+         */
+        .bar-region {
+            display: inline-flex; align-items: baseline; gap: 6px;
+            padding-left: 9px;
+            border-left: 1px solid var(--border-2);
+            font-size: 11px; font-weight: 700; letter-spacing: 0.07em;
+            color: var(--accent);
+        }
+        .bar-region .country {
+            font-size: 11px; font-weight: 500; letter-spacing: 0;
+            color: var(--text2);
+        }
         .version {
             flex-shrink: 0;
             font-size: 10px; color: var(--muted);
             font-family: ui-monospace, "SF Mono", Menlo, monospace;
         }
         /* Below this the app's name is the first thing to go: the unit and the
-           controls are what a phone at a bench has room for. */
+           controls are what a phone at a bench has room for. The country's
+           NAME goes with it and its code does not — two letters cost nothing
+           and they are the ones written in the file. */
         @media (max-width: 700px) {
             .bar-title, .bar-rule { display: none; }
+            .bar-region .country { display: none; }
         }
 
         /*
@@ -1046,6 +1075,22 @@
             <span class="bar-unit">
                 <span id="link-state" class="dot link-disconnected" title="BLE link"></span>
                 <b id="imei">—</b>
+                <!--
+                  The country, beside the unit rather than anywhere else.
+
+                  It comes out of `region.txt` and it decides `AT+APN` and
+                  `AT+IOTMOD` — which decide whether the modem attaches at all.
+                  An Argentine APN on a Brazilian unit produces a unit that
+                  never connects and a failure that reads as broken hardware,
+                  and nothing on the screen said which profile was loaded.
+
+                  It sits with the IMEI because it is the same kind of fact: a
+                  property of THIS unit, read off its folder, and the two are
+                  what a bench with units from two countries on it has to tell
+                  apart at a glance. Hidden until a folder is open — there is no
+                  country before there is a unit.
+                -->
+                <span id="unit-region" class="bar-region" hidden></span>
             </span>
         </span>
         <!--

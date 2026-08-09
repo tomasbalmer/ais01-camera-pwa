@@ -931,8 +931,42 @@ function imeiMismatch(bundle) {
  * takes the detail: the folder, the endpoint it resolved to, and which file was
  * matched to which role, the question you actually have when a write goes wrong.
  */
+/*
+ * The country on the bar, or nothing at all.
+ *
+ * `region.txt` decides `AT+APN` and `AT+IOTMOD`, which decide whether the
+ * modem attaches — and the only place it appeared was one row of ⓪'s report,
+ * which scrolls away. A bench running Argentine and Brazilian units differs in
+ * exactly this, so it belongs where the IMEI is: the two facts you check
+ * before sending anything.
+ *
+ * Blank rather than a guess when there is no folder. There is no country
+ * before there is a unit, and a bar that keeps showing the last one is how the
+ * next unit gets provisioned as the previous one's.
+ */
+function showRegion(code) {
+    const slot = el('unit-region');
+    slot.textContent = '';
+    slot.hidden = !code;
+    if (!code) { slot.title = ''; return; }
+
+    /* Elements with textContent, never markup: this comes out of a file on a
+     * disk somebody else wrote. */
+    const abbr = document.createElement('span');
+    abbr.textContent = code;
+    const name = document.createElement('span');
+    name.className = 'country';
+    name.textContent = REGIONS[code] ? REGIONS[code].country : '';
+    slot.append(abbr, name);
+
+    slot.title = `${regionLabel(code)} — read from region.txt. It sets ` +
+                 `AT+APN and AT+IOTMOD, which decide whether the modem ` +
+                 `attaches at all.`;
+}
+
 function showLoaded(bundle) {
     el('imei').textContent = bundle.imei;
+    showRegion(bundle.region);
     markUnit();
 
     el('btn-bundle').title = [
@@ -998,6 +1032,7 @@ function rejectFolder(reason, action) {
      * happened is "this folder is wrong". */
     state.remembered = null;
     el('imei').textContent = '—';
+    showRegion(null);
     el('btn-bundle').title = '';
     setMark('bundle', 'rejected', 'fail');
     fail(reason);
@@ -1571,6 +1606,7 @@ async function forgetFolder({ quiet = false } = {}) {
     state.handle = null;
     state.remembered = null;
     el('imei').textContent = '—';
+    showRegion(null);
     el('btn-bundle').title = '';
     setMark('bundle', '', 'weak');
     if (!quiet) note(`let go of that folder — open the next one with `
@@ -1984,7 +2020,11 @@ function sessionEnded() {
  */
 const REGIONS = {
     AR: {
-        label: 'Argentina · EMnify',
+        /* Two fields rather than one string: the bar prints the country on its
+         * own, and splitting a label back apart to get it is how a display
+         * starts depending on a separator nobody promised. */
+        country: 'Argentina',
+        carrier: 'EMnify',
         settings: [
             ['AT+APN', 'em'],
             ['AT+CSQTIME', '1'],
@@ -1993,7 +2033,8 @@ const REGIONS = {
         ],
     },
     BR: {
-        label: 'Brazil · Vivo',
+        country: 'Brazil',
+        carrier: 'Vivo',
         settings: [
             ['AT+APN', 'NULL'],
             ['AT+CSQTIME', '1'],
@@ -2002,6 +2043,10 @@ const REGIONS = {
         ],
     },
 };
+
+/* The country and the network it sits on, in the one order they are said. */
+const regionLabel = code => REGIONS[code]
+    ? `${REGIONS[code].country} · ${REGIONS[code].carrier}` : code;
 
 /* Refuses rather than defaulting. Picking a region on the operator's behalf is
  * how a BR unit gets an EMnify APN and never attaches — and the failure looks
@@ -2012,7 +2057,7 @@ function networkSettings(bundle) {
         /* ⓪ refuses these, so reaching here means the profile table changed
          * under a folder that was already loaded. */
         const known = Object.entries(REGIONS)
-            .map(([code, it]) => `${code} (${it.label})`).join(', ');
+            .map(([code]) => `${code} (${regionLabel(code)})`).join(', ');
         throw new Error(
             `no network profile for ${bundle.region} — this app can send ${known}`);
     }
@@ -2736,7 +2781,7 @@ const SHELL_NEEDS = [
     'terminal', 'terminal-raw', 'link-state', 'app-version',
     'at-menu', 'at-panel', 'at-list', 'at-filter',
     'btn-network', 'mark-network',
-    'btn-ble', 'mark-ble',
+    'btn-ble', 'mark-ble', 'unit-region',
 ];
 
 function shellIsStale() {
