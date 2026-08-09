@@ -26,7 +26,7 @@
  *              └─── IMEI ────┘ └──── where ─────┘
  *
  * Two facts and no more. The region used to ride here as a `-AR` suffix and is
- * a file now — see `REGION_CODES`.
+ * a file now — see `REGION_SHAPE`.
  */
 export const FOLDER_IMEI = /(\d{15})/;
 export const FOLDER_ENV = /(staging|production)/i;
@@ -44,8 +44,7 @@ export const BAD_NAME = `BAD FOLDER NAME — expected ${FOLDER_SHAPE}`;
 /*
  * The region is a FILE, not part of the name.
  *
- * `firmware-factory/docs/golden-config.md`: `AT+APN` is `em` on AR/EMnify and
- * `NULL` on BR/Vivo, `AT+IOTMOD` is 0 against 2. Those decide whether the modem
+ * The country decides `AT+APN` and `AT+IOTMOD`, which decide whether the modem
  * attaches at all, and nothing else in the folder knows which SIM the unit will
  * sit beside.
  *
@@ -55,8 +54,22 @@ export const BAD_NAME = `BAD FOLDER NAME — expected ${FOLDER_SHAPE}`;
  * made the name carry three things instead of two. `password.txt` had already
  * shown the shape for this — a fact that belongs to the unit, in a file of its
  * own, with nothing else in it.
+ *
+ * THIS FILE DOES NOT KNOW THE COUNTRIES.
+ *
+ * It knows the SHAPE — ISO 3166-1 alpha-2, two letters — and that is all a
+ * folder check can honestly assert. Which countries have a network profile is
+ * a different question, it lives with the profiles themselves (`REGIONS` in
+ * provision.js), and it changes whenever one is added. Enumerating them here
+ * put a list in the missing-file message that would have to grow every time
+ * the company sells into a new market, and that message is about what the file
+ * IS, not about what we happen to support this month.
+ *
+ * The caller may pass the codes it has profiles for, and then membership is
+ * checked too — one place holds the list, and ⓪ still catches an unsupported
+ * country at folder time rather than at ③.
  */
-export const REGION_CODES = ['AR', 'BR'];
+export const REGION_SHAPE = /^[A-Z]{2}$/;
 
 /*
  * The three facts, each on its own, present or not.
@@ -112,7 +125,7 @@ const WANTED = {
     certificate: '*-certificate.pem.crt',
     private_key: '*-private.pem.key',
     password: 'password.txt',
-    region: `region.txt (${REGION_CODES.join(' or ')})`,
+    region: 'region.txt (the unit\'s two-letter country code)',
 };
 
 /*
@@ -262,7 +275,7 @@ export function matchRoles(names) {
  * `{ ok, identity, chosen, password, findings }` — `chosen` is the one file per
  * role and `password` its first line, both present only when `ok`.
  */
-export async function checkFolder(folder, files) {
+export async function checkFolder(folder, files, { knownRegions = null } = {}) {
     const findings = [];
     const say = (level, label, detail) => findings.push({ level, label, detail });
     let fatal = false;
@@ -339,16 +352,23 @@ export async function checkFolder(folder, files) {
         if (role === 'region') {
             region = firstLine(text).toUpperCase();
             if (!region) {
-                bad(role, `${file.name} is empty — it holds the country code, ` +
-                          `${REGION_CODES.join(' or ')}`);
+                bad(role, `${file.name} is empty — it holds the unit's ` +
+                          'two-letter country code');
                 continue;
             }
-            if (!REGION_CODES.includes(region)) {
-                bad(role, `${file.name} holds "${region}" — there is no network ` +
-                          `profile for it, only ${REGION_CODES.join(' and ')}`);
+            if (!REGION_SHAPE.test(region)) {
+                bad(role, `${file.name} holds "${region}" — expected a ` +
+                          'two-letter country code, like AR');
                 continue;
             }
-            say('ok', role, `${region} — the network profile ③ will send`);
+            /* Membership, only when the caller said what it has profiles for.
+             * The shape is this file's business; the list is not. */
+            if (knownRegions && !knownRegions.includes(region)) {
+                bad(role, `${region} has no network profile yet — ③ would have ` +
+                          `nothing to send. Known: ${knownRegions.join(', ')}`);
+                continue;
+            }
+            say('ok', role, region);
             chosen[role] = file;
             continue;
         }

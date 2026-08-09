@@ -187,15 +187,42 @@ check('a password that is not 6 digits is refused', oddPassword.ok, false);
 const noRegion = await checkFolder(FOLDER,
     goodFolder().filter(f => f.name !== 'region.txt'));
 check('a folder with no region.txt is refused', noRegion.ok, false);
-check('and the row names the file and its contents',
+/* The message says what the file IS, not which countries we happen to support
+ * this month — that list lives with the profiles and grows with the markets. */
+check('and the row names the file without enumerating the world',
       noRegion.findings.find(f => f.label === 'region').detail,
-      'MISSING FILE — expected region.txt (AR or BR)');
+      "MISSING FILE — expected region.txt (the unit's two-letter country code)");
 
-const badRegion = await checkFolder(FOLDER,
-    goodFolder().map(f => f.name === 'region.txt' ? file(f.name, 'US') : f));
-check('a country with no profile is refused', badRegion.ok, false);
-check('rather than silently sending the wrong APN',
-      badRegion.findings.find(f => f.label === 'region').detail.includes('"US"'),
+/* Shape is this module's business. Any two letters pass it. */
+const anyCountry = await checkFolder(FOLDER,
+    goodFolder().map(f => f.name === 'region.txt' ? file(f.name, 'MX') : f));
+check('an unheard-of country is still a well-formed region', anyCountry.ok, true);
+check('and comes back as itself', anyCountry.region, 'MX');
+
+const notACode = await checkFolder(FOLDER,
+    goodFolder().map(f => f.name === 'region.txt' ? file(f.name, 'Argentina') : f));
+check('something that is not a country code is refused', notACode.ok, false);
+check('and the row says what a code looks like',
+      notACode.findings.find(f => f.label === 'region').detail
+          .includes('two-letter country code'), true);
+
+/*
+ * Membership is the CALLER's list, because the profiles are. Keeping it here
+ * would have meant this module growing an entry every time the company sells
+ * into a new market.
+ */
+const unsupported = await checkFolder(
+    FOLDER,
+    goodFolder().map(f => f.name === 'region.txt' ? file(f.name, 'MX') : f),
+    { knownRegions: ['AR', 'BR'] });
+check('a country with no profile is refused when the caller says so',
+      unsupported.ok, false);
+check('rather than loading a folder ③ could do nothing with',
+      unsupported.findings.find(f => f.label === 'region').detail,
+      'MX has no network profile yet — ③ would have nothing to send. ' +
+      'Known: AR, BR');
+check('and a country that IS known passes the same check',
+      (await checkFolder(FOLDER, goodFolder(), { knownRegions: ['AR', 'BR'] })).ok,
       true);
 
 const lowerRegion = await checkFolder(FOLDER,

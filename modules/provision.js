@@ -950,7 +950,11 @@ async function loadFromFolder(folder, files) {
 }
 
 async function readFolder(folder, files) {
-    const report = await checkFolder(folder, files);
+    /* The profiles are here, so the list of countries we can provision is here
+     * too — `folder-check.js` checks that region.txt holds two letters and asks
+     * us whether they are two letters we know. */
+    const report = await checkFolder(folder, files,
+                                     { knownRegions: Object.keys(REGIONS) });
     reportFolder(report);
 
     if (!report.ok) {
@@ -971,8 +975,9 @@ async function readFolder(folder, files) {
         certificate: await found.certificate.text(),
         private_key: await found.private_key.text(),
         environment: who.environment,
-        /* AR or BR, read out of region.txt — see folder-check's REGION_CODES.
-         * ⓪ refuses a folder without it, so by here it is always one of them. */
+        /* A two-letter country code read out of region.txt. ⓪ refuses a
+         * folder whose code has no profile, so by here it is always a key of
+         * `REGIONS`. */
         region: report.region,
         folder,
         /* Which files, by name, ended up being the ones used. Kept so the
@@ -1533,8 +1538,19 @@ function judgeLogin(lines) {
  */
 
 /*
- * Source: `firmware-factory/docs/golden-config.md`. Two profiles, and the two
- * that differ are the two that decide whether the modem attaches.
+ * Source: `firmware-factory/docs/golden-config.md`. The two values that differ
+ * between profiles are the two that decide whether the modem attaches.
+ *
+ * This is the whole list of countries this app can provision, and it is short
+ * because the document only records these two. ADDING ONE IS NOT A GUESS: a
+ * new market needs its APN and its IOTMOD established against a real SIM and
+ * written down there first, and then copied here. An APN invented for a country
+ * produces a unit that never attaches and a failure that reads as broken
+ * hardware — which is exactly the diagnosis this app is built to avoid handing
+ * anyone.
+ *
+ * ⓪ refuses a region.txt naming a country that is not here, rather than loading
+ * the folder and leaving ③ with nothing to send.
  */
 const REGIONS = {
     AR: {
@@ -1563,9 +1579,12 @@ const REGIONS = {
 function networkSettings(bundle) {
     const profile = REGIONS[bundle.region];
     if (!profile) {
+        /* ⓪ refuses these, so reaching here means the profile table changed
+         * under a folder that was already loaded. */
+        const known = Object.entries(REGIONS)
+            .map(([code, it]) => `${code} (${it.label})`).join(', ');
         throw new Error(
-            'no network profile for this unit — region.txt should hold AR ' +
-            `(${REGIONS.AR.label}) or BR (${REGIONS.BR.label})`);
+            `no network profile for ${bundle.region} — this app can send ${known}`);
     }
     return profile.settings;
 }
