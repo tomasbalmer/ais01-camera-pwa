@@ -237,7 +237,7 @@ function tail(out) { out.scrollTop = out.scrollHeight; }
  * unit to be within reach.
  */
 async function doReset() {
-    if (!link.isConnected()) { fail('not connected'); return; }
+    if (!needLink()) return;
     write('ATZ', 'tx');
     await link.sendLine('ATZ');
     /* The one boot we cause, so it is the one we can draw without being told.
@@ -416,7 +416,7 @@ async function sendManual() {
     const input = el('at-input');
     const text = input.value.trim();
     if (!text) return;
-    if (!link.isConnected()) { fail('not connected'); return; }
+    if (!needLink()) return;
 
     /* `ATZ` keeps the treatment its dedicated button gave it — the boot divider
      * and the line about when the window opens are worth more than the button
@@ -1428,10 +1428,53 @@ async function recordSettings(applied) {
     }
 }
 
+/*
+ * The link is missing. Say which of the two ways, and what to do about it.
+ *
+ * Four controls used to answer this with `not connected`, and ① with
+ * `not connected: Nothing to reconnect to` — the transport's own words for its
+ * own internal state, printed at a person holding a phone and a board. Accurate,
+ * and it answers none of the three questions they actually have: what happened,
+ * whether they broke it, and what to press.
+ *
+ * Two different situations were also sharing that one sentence, and their next
+ * actions are opposites:
+ *
+ *     no unit has ever been paired    press something
+ *     the link dropped, as it does    wait, it comes back on its own
+ *
+ * The second is not a fault at all. The BT24 gives up after about sixty seconds
+ * idle and the unit goes away at the end of every duty cycle, so a dropped link
+ * is the normal resting state of this screen — and telling somebody it is an
+ * error is how they end up re-pairing a unit that was about to re-attach by
+ * itself.
+ *
+ * The button is named in full, exactly as it reads on screen, because "pair the
+ * device" and "PAIR DEVICE VIA BLE" cost a person one more look at the bar.
+ */
+function needLink() {
+    if (link.isConnected()) return true;
+
+    const name = link.deviceName();
+    if (!name) {
+        fail('Device not connected yet.');
+        you('Tap PAIR DEVICE VIA BLE at the top to choose the unit, then try ' +
+            'again.');
+        return false;
+    }
+
+    fail(`${name} is not connected right now.`);
+    you(link.isHunting()
+        ? 'The app is re-attaching on its own and the link comes back when the ' +
+          'unit next wakes. Press the board\'s RESET to start a cycle now.'
+        : 'Press the board\'s RESET to wake the unit, or tap PAIR DEVICE VIA BLE.');
+    return false;
+}
+
 /* Refuse to write anything without material that matches this unit. */
 function bundleReady() {
     if (!state.bundle) { fail('no unit folder loaded — pick one with ⓪'); return false; }
-    if (!link.isConnected()) { fail('not connected'); return false; }
+    if (!needLink()) return false;
     const problem = imeiMismatch(state.bundle);
     if (problem) { fail(`refusing to write — ${problem}`); return false; }
     return true;
@@ -1510,11 +1553,22 @@ async function doConnect(fromTap = false) {
 }
 
 async function doLogin() {
-    if (!state.bundle) { fail('no unit folder loaded — the password is in it'); return; }
+    if (!state.bundle) {
+        fail('No unit folder loaded — the password is in it.');
+        you('Pick the unit\'s folder with ⓪, then try again.');
+        return;
+    }
     if (!link.isConnected()) {
         /* An idle drop is normal on BT24; try the same device before giving up. */
         try { await link.reconnect(); } catch (err) {
-            fail(`not connected: ${err.message}`); return;
+            needLink();
+            /* The transport's own words, kept and put out of the way. They
+             * describe a GATT failure nobody can act on, and they are only
+             * worth printing at all when there WAS a device to re-attach to —
+             * otherwise "Nothing to reconnect to" is just the line above
+             * restated in a language the operator does not speak. */
+            if (link.deviceName()) note(`  (re-attach failed: ${err.message})`);
+            return;
         }
     }
     write('••••••  (password)', 'tx');
