@@ -125,8 +125,11 @@ const WANTED = {
     certificate: '*-certificate.pem.crt',
     private_key: '*-private.pem.key',
     password: 'password.txt',
-    region: 'region.txt (the unit\'s two-letter country code)',
+    region: 'region.txt',
 };
+
+/* What goes in it, for the ones whose name does not say. */
+const HINT = { region: 'the unit\'s two-letter country code' };
 
 /*
  * Expected in the folder and not wanted. Named rather than lumped into
@@ -310,7 +313,11 @@ export async function checkFolder(folder, files, { knownRegions = null } = {}) {
         const hits = roles[role];
 
         if (!hits.length) {
-            bad(role, `MISSING FILE — expected ${WANTED[role]}`);
+            bad(role, `MISSING FILE — expected ${WANTED[role]}` +
+                      (HINT[role] ? ` (${HINT[role]})` : ''));
+            /* The bare name, so the closing line can say "add region.txt"
+             * without picking the message above apart. */
+            findings[findings.length - 1].expected = WANTED[role];
             continue;
         }
         if (hits.length > 1) {

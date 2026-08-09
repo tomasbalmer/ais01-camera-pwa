@@ -193,6 +193,13 @@ check('and the row names the file without enumerating the world',
       noRegion.findings.find(f => f.label === 'region').detail,
       "MISSING FILE — expected region.txt (the unit's two-letter country code)");
 
+/* The bare name rides on the finding, so the closing line can say "create
+ * region.txt" without picking the message above apart. */
+check('and carries the bare name for whoever has to say "create it"',
+      noRegion.findings.find(f => f.label === 'region').expected, 'region.txt');
+check('a file that is present but wrong carries no such name',
+      oddPassword.findings.find(f => f.label === 'password').expected, undefined);
+
 /* Shape is this module's business. Any two letters pass it. */
 const anyCountry = await checkFolder(FOLDER,
     goodFolder().map(f => f.name === 'region.txt' ? file(f.name, 'MX') : f));

@@ -21,7 +21,7 @@ import {
 } from './ble-transport.js';
 import { writeCerts } from './certmod.js';
 import { catalogueGroups, DANGEROUS } from './at-catalogue.js';
-import { checkFolder, identityOf } from './folder-check.js';
+import { checkFolder, identityOf, FOLDER_SHAPE } from './folder-check.js';
 import { saveHandle, loadHandle, clearHandle } from './handle-store.js';
 import {
     STAGES, LOG_FILE, CONFIG_FILE, logEntry, appendLog, saveIntendedConfig,
@@ -869,7 +869,13 @@ function expectedImei() {
     return state.remembered ? state.remembered.imei : null;
 }
 
-function rejectFolder(reason, ...help) {
+/*
+ * `reason` is the verdict and `action` is the one thing to do about it. The
+ * reassurance is not a parameter: it is true of every rejection here — this
+ * stage reads files and talks to nobody — and it is the first question anyone
+ * asks when a screen goes red next to a device worth a truck roll.
+ */
+function rejectFolder(reason, action) {
     state.bundle = null;
     /* The folder that was pointed at is not usable, so the app stops claiming
      * to know which unit it is on. Keeping the identity would put an amber IMEI
@@ -880,7 +886,8 @@ function rejectFolder(reason, ...help) {
     el('btn-bundle').title = '';
     setMark('bundle', 'rejected', 'fail');
     fail(reason);
-    for (const line of help) you(line);
+    if (action) you(action);
+    note('Nothing has been sent to the unit.');
 }
 
 /*
@@ -949,6 +956,54 @@ async function loadFromFolder(folder, files) {
     }
 }
 
+/*
+ * The last two lines, and they are the ones that get read.
+ *
+ * Both cases were closing with "N things to fix above" and "fix them in the
+ * folder", which says the same thing about a folder that is WRONG and a folder
+ * that is RIGHT and short one file. Those are different situations and they
+ * have different next actions: rename a directory, or create a file in it.
+ *
+ * So the close is built from what actually failed. A name that parsed is said
+ * out loud, because "I picked the right folder" is exactly the thing the
+ * operator cannot tell from a screen with red on it.
+ */
+const list = items => items.length < 2
+    ? items[0]
+    : `${items.slice(0, -1).join(', ')} and ${items[items.length - 1]}`;
+
+function closeFolder(folder, report) {
+    const failed = report.findings.filter(f => f.level === 'fail');
+    const named = failed.filter(f => f.label === 'imei' || f.label === 'environment');
+    const inside = failed.filter(f => !named.includes(f));
+    const missing = inside.filter(f => f.expected).map(f => f.expected);
+    const wrong = inside.length - missing.length;
+
+    /* The name is the folder's identity, so it is the first thing to be right
+     * and the first thing to report on. */
+    if (named.length) {
+        rejectFolder(
+            `${folder} is not a unit folder` +
+            (inside.length ? `, and ${inside.length} of its files need attention`
+                           : ''),
+            `Rename it to ${FOLDER_SHAPE}` +
+            (inside.length ? ', fix the rows above,' : '') +
+            ' and pick it again with ⓪.');
+        return;
+    }
+
+    const counts = [];
+    if (missing.length) counts.push(`${missing.length} file` +
+                                    `${missing.length === 1 ? ' is' : 's are'} missing`);
+    if (wrong) counts.push(`${wrong} needs fixing`);
+
+    rejectFolder(
+        `${folder} is the right folder — ${counts.join(', and ')}`,
+        missing.length
+            ? `Create ${list(missing)} inside it, then pick it again with ⓪.`
+            : 'Fix the rows marked above, then pick it again with ⓪.');
+}
+
 async function readFolder(folder, files) {
     /* The profiles are here, so the list of countries we can provision is here
      * too — `folder-check.js` checks that region.txt holds two letters and asks
@@ -958,11 +1013,7 @@ async function readFolder(folder, files) {
     reportFolder(report);
 
     if (!report.ok) {
-        const broken = report.findings.filter(f => f.level === 'fail').length;
-        rejectFolder(
-            `${folder} — ${broken} thing${broken === 1 ? '' : 's'} to fix above`,
-            'Fix them in the folder and pick it again with ⓪. Nothing has ' +
-            'been sent to the unit.');
+        closeFolder(folder, report);
         return false;
     }
 
