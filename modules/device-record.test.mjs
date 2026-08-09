@@ -14,6 +14,7 @@
 import {
     nowIso, logEntry, serialiseLog, mergeIntendedConfig,
     appendLog, saveIntendedConfig, LOG_FILE, CONFIG_FILE,
+    parseLog, lastFor, readLog,
 } from './device-record.js';
 
 let failed = 0;
@@ -136,6 +137,53 @@ catch { refused = true; }
 check('unparseable intended-config.json is refused, not overwritten', refused, true);
 check('and it is left exactly as it was',
       broken.files[CONFIG_FILE], '{ this is not json');
+
+/* ── Reading the log back ────────────────────────────────────────────────
+ *
+ * The file was write-only until ② started asking it whether this unit had
+ * already been done. Every case below is one this app decides a dialog on, and
+ * getting any of them wrong means either offering to redo work that is already
+ * proven or silently skipping the warning that it exists.
+ */
+const line = o => JSON.stringify(o) + '\n';
+
+check('a torn last line costs only itself',
+      parseLog(line({ substep: 'a', status: 'done' }) + '{"substep":"b"').length, 1);
+check('blank lines are not entries',
+      parseLog('\n\n' + line({ substep: 'a' }) + '\n').length, 1);
+check('no file reads as no history', parseLog('').length, 0);
+
+/*
+ * The LAST match, not the first. A unit written successfully in the morning
+ * and re-attempted badly in the afternoon is a unit whose certificates are in
+ * doubt — and reading the first match reports the exact opposite, on the one
+ * question this log is now consulted about.
+ */
+const history = parseLog(
+    line({ substep: 'certificates_written', status: 'done', at: 'morning' }) +
+    line({ substep: 'mqtt_settings_set', status: 'done', at: 'noon' }) +
+    line({ substep: 'certificates_written', status: 'failed', at: 'afternoon' }));
+check('lastFor reports the most recent entry, not the first',
+      lastFor(history, 'certificates_written').at, 'afternoon');
+check('and null when the substep has never run',
+      lastFor(history, 'full_cycle_observed'), null);
+
+check('readLog on a folder with no log is an empty history',
+      (await readLog(fakeDir())).length, 0);
+check('readLog on a folder that was never opened is too',
+      (await readLog(null)).length, 0);
+
+/* The round trip that matters: what `appendLog` writes, `readLog` finds. */
+const roundTrip = fakeDir();
+await appendLog(roundTrip, logEntry({
+    imei: '869181072714122', stage: 'certs', substep: 'certificates_written',
+    status: 'done', summary: 'three files', at: stamp,
+    evidence: ['cacert.pem: +QFUPL: 1208,5769'],
+}));
+const back = lastFor(await readLog(roundTrip), 'certificates_written');
+check('an entry survives the round trip with its status', back.status, 'done');
+check('and with the modem\'s own verdict',
+      back.evidence_refs, ['cacert.pem: +QFUPL: 1208,5769']);
 
 console.log(failed ? `\n${failed} failed` : '\nall passed');
 process.exit(failed ? 1 : 0);

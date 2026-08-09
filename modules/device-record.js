@@ -104,6 +104,46 @@ export function serialiseLog(entry) {
 }
 
 /*
+ * The log, read back.
+ *
+ * It was write-only for its whole life, which made it evidence for a human
+ * opening the folder later and nothing at all to the app that wrote it. The
+ * one question worth asking it is the one a technician asks out loud at the
+ * bench — "did I already do this to this unit?" — and until now the answer
+ * lived in a file nobody opened.
+ *
+ * A line that will not parse is SKIPPED rather than fatal. This file is
+ * append-only and shared with the CLI; a half-written last line from a session
+ * that was interrupted must not cost the reader everything above it.
+ */
+export function parseLog(text) {
+    const entries = [];
+    for (const line of (text || '').split('\n')) {
+        const body = line.trim();
+        if (!body) continue;
+        try {
+            const entry = JSON.parse(body);
+            if (entry && typeof entry === 'object') entries.push(entry);
+        } catch { /* a torn line, and the rest of the file is still good */ }
+    }
+    return entries;
+}
+
+/*
+ * The LAST entry for a substep, because the log is a history and the standing
+ * answer is its most recent line. An early success followed by a later failure
+ * is a unit whose certificates are in doubt, and reading the first match would
+ * report the opposite.
+ */
+export function lastFor(entries, substep) {
+    for (let i = entries.length - 1; i >= 0; i--) {
+        if (entries[i].substep === substep) return entries[i];
+    }
+    return null;
+}
+
+
+/*
  * Merge, never replace.
  *
  * The CLI writes this file too, and it holds settings this app does not touch —
@@ -170,6 +210,13 @@ export async function appendLog(dir, entry) {
     const separator = previous && !previous.endsWith('\n') ? '\n' : '';
     await writeText(dir, LOG_FILE, previous + separator + serialiseLog(entry));
     return entry;
+}
+
+/* The history, or an empty one. A folder with no log is a unit's first
+ * session, which is a fact rather than a failure. */
+export async function readLog(dir) {
+    if (!dir) return [];
+    return parseLog(await readTextIfPresent(dir, LOG_FILE));
 }
 
 /* Merge the settings that were ACCEPTED — never the ones that were merely

@@ -16,8 +16,8 @@
  * cached shell — pull to refresh, or reinstall the app from the home screen.
  */
 
-export const VERSION = '0.77.0';
+export const VERSION = '0.78.0';
 
 /* One line, for the places that want context rather than just a number. */
-export const VERSION_NOTE = 'every step has one name — the one on its own '
-    + 'button — and no message points at a number the screen does not show';
+export const VERSION_NOTE = 'the certificate write asks first, and the unit\'s '
+    + 'own log is finally read back to say whether it has been done already';

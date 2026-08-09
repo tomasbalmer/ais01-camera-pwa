@@ -25,6 +25,7 @@ import { checkFolder, identityOf, FOLDER_SHAPE } from './folder-check.js';
 import { saveHandle, loadHandle, clearHandle } from './handle-store.js';
 import {
     STAGES, LOG_FILE, CONFIG_FILE, logEntry, appendLog, saveIntendedConfig,
+    readLog, lastFor,
 } from './device-record.js';
 import { VERSION, VERSION_NOTE } from './version.js';
 
@@ -1082,7 +1083,7 @@ function closeFolder(folder, report) {
                            : ''),
             `Rename it to ${FOLDER_SHAPE}` +
             (inside.length ? ', fix the rows above,' : '') +
-            ' and pick it again with ⓪.');
+            ` and pick it again with ${press(STEP.folder)}.`);
         return;
     }
 
@@ -1094,8 +1095,10 @@ function closeFolder(folder, report) {
     rejectFolder(
         `${folder} is the right folder — ${counts.join(', and ')}`,
         missing.length
-            ? `Create ${list(missing)} inside it, then pick it again with ⓪.`
-            : 'Fix the rows marked above, then pick it again with ⓪.');
+            ? `Create ${list(missing)} inside it, then pick it again with ` +
+              `${press(STEP.folder)}.`
+            : `Fix the rows marked above, then pick it again with ` +
+              `${press(STEP.folder)}.`);
 }
 
 async function readFolder(folder, files) {
@@ -1417,8 +1420,9 @@ async function changeUnit() {
                 subject: remembered,
                 lines: [
                     'Nothing is open right now, but this browser can still ' +
-                    're-open that folder without the picker. ⓪ would ask from ' +
-                    'scratch instead, here and after every reload.',
+                    're-open that folder without the picker. Select ' +
+                    'provisioning folder would ask from scratch instead, ' +
+                    'here and after every reload.',
                 ],
                 confirmLabel: 'Forget folder',
             });
@@ -1448,8 +1452,8 @@ async function changeUnit() {
         title: 'Clear the selected folder?',
         subject: folder,
         lines: [
-            '⓪ will ask for a folder again. Nothing is sent to the unit and ' +
-            'the folder on your disk is not touched.',
+            'Select provisioning folder will ask for a new one. Nothing is ' +
+            'sent to the unit and the folder on your disk is not touched.',
         ],
         confirmLabel: 'Clear folder',
     });
@@ -1510,7 +1514,7 @@ async function restoreFolder() {
             state.remembered = salvaged;
             markUnit();
             you(`this browser was last on ${salvaged.imei} — open its folder ` +
-                `with ⓪ (${salvaged.folder}).`);
+                `with ${press(STEP.folder)} (${salvaged.folder}).`);
         } else {
             you(`Tap ${press(STEP.folder)} and choose the unit's folder — the one `
                 + `downloaded from Drive.`);
@@ -1551,7 +1555,8 @@ async function record(fields) {
         note(`  recorded in ${LOG_FILE}`);
     } catch (err) {
         note(`  could not write ${LOG_FILE} (${err.message}) — the folder may ` +
-             'need re-opening with ⓪; nothing about the device changed');
+             `need re-opening with ${press(STEP.folder)}; nothing about the ` +
+             `device changed`);
     }
 }
 
@@ -1715,7 +1720,8 @@ async function doConnect(fromTap = false) {
              * guard: the folder about to be opened is the last one, and it is
              * not this unit's. */
             you(`this is not the unit this browser was last on ` +
-                `(${state.remembered.imei}) — open ${name}'s own folder with ⓪`);
+                `(${state.remembered.imei}) — open ${name}'s own folder with ` +
+                `${press(STEP.folder)}`);
         }
     } catch (err) {
         fail(`connect failed: ${err.message}`);
@@ -2196,9 +2202,130 @@ const runConfigStage = key =>
  * the same pair the USB path produced on 2026-07-13. A different checksum
  * means the link lost bytes, not that the certificate is wrong.
  */
+/* The one substep the log is asked about. It is the string `record()` writes,
+ * so the question and the answer cannot drift apart. */
+const CERTS_SUBSTEP = 'certificates_written';
+
+/*
+ * Has this unit's folder already recorded a successful certificate write?
+ *
+ * Read from disk at the moment ② is tapped rather than cached when the folder
+ * was opened, because the folder is shared: the CLI writes this same file, and
+ * so does the same folder opened on another machine. A cached answer is a
+ * stale answer, and one small file read costs nothing against a stage that
+ * runs for two and a half minutes.
+ *
+ * Every failure here answers "no". A log that cannot be read is not evidence
+ * that the work was done, and the cost of being wrong in that direction is one
+ * extra dialog — against writing over a good unit's certificates on the
+ * strength of a file that would not open.
+ */
+async function priorCertWrite() {
+    if (!state.handle) return null;
+    try {
+        const last = lastFor(await readLog(state.handle), CERTS_SUBSTEP);
+        return last && last.status === 'done' ? last : null;
+    } catch {
+        return null;
+    }
+}
+
+/*
+ * Where the unit is in its cycle, as one sentence for the dialog.
+ *
+ * `lastDivider` is the last boundary this screen actually drew, which is read
+ * off lines the device printed — so this reports an observation rather than a
+ * belief. It is in a dialog and gates nothing: the operator can proceed from
+ * any of these readings, and on a unit that has been quiet since the page
+ * loaded there is no reading to give at all.
+ */
+function cycleReading() {
+    if (lastDivider === 'end') {
+        return 'The unit is idle: the last boundary logged was ASLEEP. This ' +
+               'is the moment.';
+    }
+    if (lastDivider === 'wake') {
+        return 'The unit is AWAKE and its cycle is running. Wait for ' +
+               '"NB module power-off successful."';
+    }
+    if (lastDivider === 'reset') {
+        return 'A RESET was just sent. Wait for the cycle to run and the ' +
+               'modem to power off.';
+    }
+    return 'No cycle boundary has gone past since this screen opened, so ' +
+           'nothing here can say whether the unit is idle.';
+}
+
+/*
+ * Ask before ②, and ask differently depending on what the folder already knows.
+ *
+ * Both cases exist for the same reason and it is not caution for its own sake.
+ * This stage costs an AT window, and an AT window costs a boot and sixteen
+ * seconds of waiting — so the expensive mistake is not a bad write, which the
+ * checksum gate catches, it is starting at the wrong moment and finding out two
+ * minutes later. The dialog is the one place that can say WHEN, and it is worth
+ * a tap because the alternative is reading `certmod.js`.
+ */
+/*
+ * It goes out through `askConfirm`, which is the platform's `FeedbackAlert`
+ * rebuilt on this page — one icon, one question, a line of prose, two buttons.
+ * That component sets the length: it has ONE description slot at 16px, and an
+ * alert with five paragraphs in it has stopped being an alert and become a
+ * page nobody reads before pressing the green button.
+ *
+ * So three short paragraphs at most, and the detail goes where detail belongs.
+ * The recorded proof is printed into the log first — it is a list of checksums,
+ * which is a thing to read rather than a thing to be asked about — and the
+ * alert carries the question and the timing.
+ */
+async function confirmCerts(previous) {
+    if (previous) {
+        /* The modem's own `+QFUPL` verdicts from that run. The date says
+         * somebody pressed the button; only these say what it stored. */
+        note(`this folder already records a certificate write on ${previous.at}:`);
+        for (const proof of previous.evidence_refs || []) note(`  ${proof}`);
+
+        return askConfirm({
+            title: 'Write them again?',
+            subject: `${state.bundle.imei} — written ` +
+                     `${String(previous.at).replace('T', ' ').slice(0, 16)}`,
+            lines: [
+                `${LOG_FILE} in this unit's folder already records a ` +
+                'successful write. Its checksums are in the log behind this.',
+                'Retrying is safe — every attempt deletes the modem\'s slot ' +
+                'before it uploads — but it costs an AT window.',
+                cycleReading(),
+            ],
+            confirmLabel: 'Write them again',
+        });
+    }
+
+    return askConfirm({
+        title: 'Write certificates now?',
+        subject: state.bundle.imei,
+        lines: [
+            'Three files go into the modem, each accepted only when the modem ' +
+            'echoes back a checksum over what it stored. It runs about two and ' +
+            'a half minutes on its own.',
+            'Start it while the unit is idle: writing during a cycle takes the ' +
+            'modem away mid-upload, and that reads as a dead device rather ' +
+            'than as bad timing.',
+            cycleReading(),
+        ],
+        confirmLabel: 'Write certificates',
+    });
+}
+
 async function doCerts() {
     if (!bundleReady()) return;
     if (state.busy) { note('a stage is already running'); return; }
+
+    /* Before anything is sent, and before the material is even assembled: this
+     * is the operator's decision to make and the device has no part in it. */
+    if (!await confirmCerts(await priorCertWrite())) {
+        note('not written — tap it again when the unit is idle');
+        return;
+    }
 
     const io = {
         send: link.sendLine,
@@ -2317,7 +2444,7 @@ async function doCerts() {
      * the window it holds open. */
     await record({
         stage: STAGES.certs,
-        substep: 'certificates_written',
+        substep: CERTS_SUBSTEP,
         status: failure ? 'failed' : 'done',
         summary: failure
             ? `Stopped after ${proofs.length}/3 files — ${failure.message}`
