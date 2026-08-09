@@ -16,8 +16,8 @@
  * cached shell — pull to refresh, or reinstall the app from the home screen.
  */
 
-export const VERSION = '0.76.0';
+export const VERSION = '0.77.0';
 
 /* One line, for the places that want context rather than just a number. */
-export const VERSION_NOTE = 'pairing is a step in the row, reports under its '
-    + 'own section, and names the RESET a unit missing from the scan needs';
+export const VERSION_NOTE = 'every step has one name — the one on its own '
+    + 'button — and no message points at a number the screen does not show';

@@ -298,7 +298,7 @@ function atGroups() {
         let settings;
         try { settings = spec.settings(state.bundle); } catch { continue; }
         mine.push(...settings.map(([name, value]) =>
-            [`${name}=${value}`, `what ${spec.glyph} would send`]));
+            [`${name}=${value}`, `sent by ${press(spec.label)}`]));
     }
     if (!mine.length) return groups;
     return [[`This unit · ${state.bundle.imei}`, mine], ...groups];
@@ -536,6 +536,45 @@ function ok(text) { write(text, 'ok'); }
 /* Something for the person to do with their hands: press RESET, plug it in,
  * pick a bundle. It is the one voice the app cannot act on itself. */
 function you(text) { write(text, 'you'); }
+
+/*
+ * The seven steps, each by the name it wears on its own button.
+ *
+ * ONE name per step, used for the section it opens in the log AND for every
+ * sentence that asks somebody to press it. There were three vocabularies for
+ * the same seven things: the chip said `Select provisioning folder`, the log
+ * section said `⓪ FOLDER`, and the prose said `pick one with ⓪` — and the last
+ * two named something that is not on the screen at all. The numbers left the
+ * chips when the status circles took over (provision.html: "the order it was
+ * carrying is already given by the position"), and nothing else followed them
+ * out. Every `⓪`, `②` and `⑤` printed since has been an instruction to press a
+ * control the operator cannot find.
+ *
+ * So a message that wants somebody to press something quotes what is written
+ * on it, verbatim. That is the only version of this that cannot drift: rename
+ * a chip without touching this table and the mismatch shows up in the first
+ * screenshot instead of in a support call.
+ *
+ * Sentence case here and uppercase on screen — `.phase` applies the transform,
+ * so `AWS IoT` stays spelled properly in the one place it is written down.
+ *
+ * The numbers survive in this file's COMMENTS, where they are shorthand
+ * between developers and point at `firmware-factory/stages.json`. They are not
+ * shown to anybody holding the phone.
+ */
+const STEP = {
+    folder:  'Select provisioning folder',
+    ble:     'Connect via Bluetooth',
+    login:   'Log in to device console',
+    certs:   'Write certificates into modem',
+    network: 'Apply cellular network settings',
+    mqtt:    'Apply MQTT broker settings',
+    verify:  'Verify publish to AWS IoT',
+};
+
+/* A control named inside a sentence. The quotes are load-bearing: a
+ * three-word name dissolves into the words around it without them. */
+const press = step => `"${step}"`;
 
 /* ── Phases ──────────────────────────────────────────────────────────────
  *
@@ -1003,7 +1042,7 @@ async function loadFromFolder(folder, files) {
      *
      * The header goes red on its own: `write(…, 'fail')` calls `failPhase`.
      */
-    const phase = startPhase('⓪ FOLDER');
+    const phase = startPhase(STEP.folder);
     try {
         return await readFolder(folder, files);
     } finally {
@@ -1241,7 +1280,8 @@ async function openFolder(handle, remember) {
         files = await filesIn(handle);
     } catch (err) {
         fail(`could not read ${handle.name}: ${err.message}`);
-        you('The folder may have been moved or renamed — pick it again with ⓪.');
+        you(`The folder may have been moved or renamed — choose it again with `
+            + `${press(STEP.folder)}.`);
         await forgetFolder({ quiet: true });
         return false;
     }
@@ -1385,7 +1425,7 @@ async function changeUnit() {
             if (!confirmed) { note(`still remembering ${remembered}`); return; }
         }
         await forgetFolder({ quiet: true });
-        note('no folder is held — ⓪ is ready for the next one');
+        note(`no folder is held — ${press(STEP.folder)} is ready for the next one`);
         return;
     }
 
@@ -1444,7 +1484,8 @@ async function forgetFolder({ quiet = false } = {}) {
     el('imei').textContent = '—';
     el('btn-bundle').title = '';
     setMark('bundle', '', 'weak');
-    if (!quiet) note('let go of that folder — open the next one with ⓪');
+    if (!quiet) note(`let go of that folder — open the next one with `
+                     + `${press(STEP.folder)}`);
 }
 
 /*
@@ -1471,7 +1512,8 @@ async function restoreFolder() {
             you(`this browser was last on ${salvaged.imei} — open its folder ` +
                 `with ⓪ (${salvaged.folder}).`);
         } else {
-            you('Pick the unit folder with ⓪ — the one downloaded from Drive.');
+            you(`Tap ${press(STEP.folder)} and choose the unit's folder — the one `
+                + `downloaded from Drive.`);
         }
         return;
     }
@@ -1484,7 +1526,8 @@ async function restoreFolder() {
         await openFolder(handle, false);
         return;
     }
-    you(`${handle.name} is remembered — tap ⓪ to open it again.`);
+    you(`${handle.name} is remembered — tap ${press(STEP.folder)} to open it `
+        + `again.`);
     note('  only the folder is remembered; the certificate, the key and the ' +
          'password are read from disk each session and kept nowhere else');
 }
@@ -1578,7 +1621,10 @@ function needLink() {
 
 /* Refuse to write anything without material that matches this unit. */
 function bundleReady() {
-    if (!state.bundle) { fail('no unit folder loaded — pick one with ⓪'); return false; }
+    if (!state.bundle) {
+        fail(`No unit folder loaded — tap ${press(STEP.folder)} first.`);
+        return false;
+    }
     if (!needLink()) return false;
     const problem = imeiMismatch(state.bundle);
     if (problem) { fail(`refusing to write — ${problem}`); return false; }
@@ -1624,7 +1670,7 @@ async function doConnect(fromTap = false) {
      * `endPhase` drops it when nothing was logged, which is the normal outcome
      * of the automatic attempt on load.
      */
-    const phase = startPhase('BLUETOOTH');
+    const phase = startPhase(STEP.ble);
     try {
         /* Redact for the screen only — the collectors that decide whether a
          * write landed must still see the real bytes. */
@@ -1684,7 +1730,7 @@ async function doConnect(fromTap = false) {
 async function doLogin() {
     if (!state.bundle) {
         fail('No unit folder loaded — the password is in it.');
-        you('Pick the unit\'s folder with ⓪, then try again.');
+        you(`Tap ${press(STEP.folder)}, choose the unit's folder, then try again.`);
         return;
     }
     if (!link.isConnected()) {
@@ -1782,7 +1828,8 @@ function judgeLogin(lines) {
 function sessionEnded() {
     if (!stageState.login || stageState.login === 'pending') return;
     setMark('login', '', 'weak');
-    note('① cleared — the console asks for the password again after a restart');
+    note(`${press(STEP.login)} cleared — the console asks for the password `
+         + `again after a restart`);
 }
 
 /*
@@ -1941,15 +1988,15 @@ const CONSOLE_LINE_MS = 2500;
  */
 const CONFIG_STAGES = {
     network: {
-        button: 'btn-network', mark: 'network', glyph: '③',
-        label: 'Apply cellular network settings',
+        button: 'btn-network', mark: 'network',
+        label: STEP.network,
         armed: n => `Send ${n} network settings`,
         substep: 'network_settings_set',
         settings: bundle => networkSettings(bundle),
     },
     mqtt: {
-        button: 'btn-config', mark: 'config', glyph: '④',
-        label: 'Apply MQTT broker settings',
+        button: 'btn-config', mark: 'config',
+        label: STEP.mqtt,
         armed: n => `Send ${n} MQTT settings`,
         substep: 'mqtt_settings_set',
         settings: bundle => desiredSettings(bundle),
@@ -2254,9 +2301,9 @@ async function doCerts() {
     } catch (err) {
         failure = err;
         setMark('certs', 'failed', 'fail');
-        fail(`② CERTS: ${err.message}`);
+        fail(`${STEP.certs}: ${err.message}`);
         note('Nothing half-written survives — every attempt starts with QFDEL.');
-        note('Press RESET, wait for the window, and tap ② again.');
+        note(`Press RESET, wait for the window, and tap ${press(STEP.certs)} again.`);
     } finally {
         /* Order matters: the filter is holding a partial line, and once the
          * flag is down it would be appended verbatim. */
@@ -2331,13 +2378,13 @@ function doVerify() {
         return;
     }
 
-    const phase = startPhase('⑤ VERIFY');
+    const phase = startPhase(STEP.verify);
     const seen = new Set();
     const collector = { lines: [], each: line => {
         PUBLISH_EVIDENCE.forEach(([pattern, meaning], i) => {
             if (seen.has(i) || !pattern.test(line)) return;
             seen.add(i);
-            write(`⑤ ${meaning}`, i === CONNECTED ? 'ok' : 'note');
+            write(meaning, i === CONNECTED ? 'ok' : 'note');
             setMark('verify', `${seen.size}/${PUBLISH_EVIDENCE.length}`, 'run');
             /* Stop at the verdict, or when the cycle closes without one —
              * a failed cycle is diagnosable now, not in twenty minutes. */
@@ -2372,13 +2419,13 @@ function doVerify() {
 
         if (published) {
             setMark('verify', 'published ✓', 'ok');
-            ok('⑤ AWS IoT accepted this unit\'s certificate and the reading left ' +
+            ok('AWS IoT accepted this unit\'s certificate and the reading left ' +
                'the modem.');
             note('QoS 0 has no delivery receipt: confirm the uplink landed in ' +
                  `AWS IoT for ${state.bundle ? state.bundle.imei : 'this IMEI'}.`);
         } else if (seen.has(0)) {
             setMark('verify', 'no MQTT', 'fail');
-            fail('⑤ The cycle ran and never connected to the server.');
+            fail('The cycle ran and never connected to the server.');
             note(seen.has(4)
                 ? 'It reached the broker and was refused: the certificate is ' +
                   'not registered/active/attached, or the key does not match it.'
@@ -2387,7 +2434,7 @@ function doVerify() {
             note('SNI=0 and MQOS=0 are the two settings that fail silently here.');
         } else {
             setMark('verify', 'nothing seen', 'weak');
-            fail('⑤ No cycle was observed before the budget ran out.');
+            fail('No cycle was observed before the budget ran out.');
             note('The link only carries lines while the unit is awake, so a ' +
                  'cycle that ran while BLE was re-attaching can be missed.');
         }
@@ -2400,8 +2447,9 @@ function doVerify() {
 
     setMark('verify', 'watching', 'run');
     note(`Watching for a publish, up to ${Math.round(verifyBudgetMs() / 60000)} min.`);
-    you('Press RESET to start a cycle now, or wait for the next one. Tap ⑤ ' +
-        'again to stop watching and report what was seen.');
+    you(`Press RESET to start a cycle now, or wait for the next one. Tap `
+        + `${press(STEP.verify)} again to stop watching and report what was `
+        + `seen.`);
 }
 
 /* ── Wiring ──────────────────────────────────────────────────────────── */
@@ -2519,14 +2567,14 @@ export function initProvision() {
     el('btn-connect').addEventListener('click', () => doConnect(true));
     el('btn-ble').addEventListener('click', () => doConnect(true));
     el('btn-bundle').addEventListener('click', chooseFolder);
-    el('btn-login').addEventListener('click', staged('① LOGIN', doLogin));
-    el('btn-certs').addEventListener('click', staged('② CERTS', doCerts));
+    el('btn-login').addEventListener('click', staged(STEP.login, doLogin));
+    el('btn-certs').addEventListener('click', staged(STEP.certs, doCerts));
     el('btn-verify').addEventListener('click', doVerify);
 
     el('btn-network').addEventListener('click',
-        staged('③ NETWORK', () => runConfigStage('network')));
+        staged(STEP.network, () => runConfigStage('network')));
     el('btn-config').addEventListener('click',
-        staged('④ MQTT', () => runConfigStage('mqtt')));
+        staged(STEP.mqtt, () => runConfigStage('mqtt')));
 
     el('copy-log').addEventListener('click', copyRawLog);
     el('btn-forget').addEventListener('click', changeUnit);
