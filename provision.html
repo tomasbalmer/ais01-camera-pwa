@@ -115,6 +115,7 @@
             --rail: 400px;
             --rail-pad: 8px;
 
+
             /*
              * ── Borrowed from the dashboard's design system ──────────────
              *
@@ -315,21 +316,51 @@
         /* Furniture, not log: these label the pane, they are not written to
            by anything the device says. Same reasoning as the bar and the
            console, one step lighter — see `--chrome-2`. */
+        /*
+         * One row, whatever it carries.
+         *
+         * `min-height` rather than symmetrical padding, because the two heads
+         * hold different things: RAW SERIAL is a 10px word, HISTORY is that
+         * word plus four bordered badges. Padding alone gives them two
+         * different heights and the two logs start on different lines; one
+         * height, centred, and they land together with no number to keep in
+         * sync between them.
+         */
         .pane-head {
-            flex: 0 0 auto; padding: 3px 12px;
-            font-size: 9px; font-weight: 600; letter-spacing: 0.1em;
+            flex: 0 0 auto;
+            display: flex; align-items: center;
+            min-height: 28px; padding: 4px 12px;
+            font-size: var(--fs-label); font-weight: 600; letter-spacing: 0.1em;
             color: var(--muted); background: var(--chrome-2);
             border-bottom: 1px solid #1e293b;
         }
+        /*
+         * The key, on the title's own line.
+         *
+         * It was a second row under HISTORY, which gave a four-item key the
+         * same standing as the pane it belongs to and cost the log 20px of
+         * height for it. It is a caption, not a header: it sits after the
+         * name, on one line, and the block is a third shorter for it.
+         *
+         * Two gaps, three jobs. 7px holds a badge to its word, 16px separates
+         * one pair from the next, and the name takes 10px more than that so
+         * the title reads as the title and not as a fifth key.
+         */
         .pane-head.legend {
-            display: flex; align-items: center; gap: 5px;
-            letter-spacing: 0; font-weight: 500; flex-wrap: wrap;
+            flex-wrap: wrap;
+            column-gap: 16px; row-gap: 6px;
+            letter-spacing: 0; font-weight: 500; color: var(--txt-faint);
         }
+        .pane-head.legend .pane-name {
+            font-weight: 600; letter-spacing: 0.1em; color: var(--muted);
+            margin-right: 10px;
+        }
+        .legend-key { display: inline-flex; align-items: center; gap: 7px; }
         .pane-head.legend .v {
-            padding: 0 4px; border: 1px solid #334155; border-radius: 3px;
-            font-size: 9px; font-weight: 700;
+            padding: 2px 5px; border: 1px solid #334155; border-radius: 4px;
+            font-size: 9px; font-weight: 700; letter-spacing: 0.06em;
+            line-height: 1.1;
         }
-        .pane-head.legend .v + * { margin-right: 4px; }
         /* Same element here, descendant in a row — hence the second set. */
         .pane-head.legend .voice-dev { color: #cbd5e1; }
         .pane-head.legend .voice-cmd { color: #7dd3fc; border-color: #0e7490;
@@ -1069,16 +1100,26 @@
 
     <main>
         <section class="pane pane-annotated">
-            <div class="pane-head">HISTORY</div>
             <!-- Who is speaking, spelled out once. A row's colour is its
                  status; its badge is its source, and the two are independent:
                  the device reporting success and the app concluding it are not
-                 the same claim. -->
+                 the same claim.
+
+                 The name and the key share a line: the key is a caption on
+                 this pane, not a header of its own, and a second row spent
+                 20px of the log saying so.
+
+                 Each badge and its word are wrapped together. They were bare
+                 text nodes beside the badges, so the only thing that could
+                 space them was one flex gap doing double duty — the space
+                 inside a pair and the space between pairs were the same
+                 number, and a row of eight items is what that looks like. -->
             <div class="pane-head legend">
-                <span class="v voice-dev">DEV</span> device
-                <span class="v voice-cmd">CMD</span> sent
-                <span class="v voice-sys">SYS</span> verdict
-                <span class="v voice-you">YOU</span> your move
+                <span class="pane-name">HISTORY</span>
+                <span class="legend-key"><span class="v voice-dev">DEV</span>device</span>
+                <span class="legend-key"><span class="v voice-cmd">CMD</span>sent</span>
+                <span class="legend-key"><span class="v voice-sys">SYS</span>verdict</span>
+                <span class="legend-key"><span class="v voice-you">YOU</span>your move</span>
             </div>
             <div id="terminal"></div>
         </section>

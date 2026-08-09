@@ -25,7 +25,7 @@ import { checkFolder, identityOf, FOLDER_SHAPE } from './folder-check.js';
 import { saveHandle, loadHandle, clearHandle } from './handle-store.js';
 import {
     STAGES, LOG_FILE, CONFIG_FILE, logEntry, appendLog, saveIntendedConfig,
-    readLog, lastFor,
+    readLog, lastFor, parseLog,
 } from './device-record.js';
 import { VERSION, VERSION_NOTE } from './version.js';
 
@@ -1168,9 +1168,74 @@ async function readFolder(folder, files) {
      * their sizes. This line only has to say the folder passed. */
     ok(`  ready — ${bundle.environment} → ${bundle.mqtt.endpoint}`);
 
+    clearStageMarks();
+    await reportPriorCerts(files);
+
     const problem = imeiMismatch(bundle);
     if (problem) fail(`WRONG UNIT — ${problem}`);
     return true;
+}
+
+/*
+ * A new folder is a new unit, so nothing the last one earned may stay on screen.
+ *
+ * The marks describe the unit the folder points at. Carrying unit A's green ②
+ * into unit B is the same class of mistake as writing A's material into B, only
+ * cheaper to make — it takes one tap of the picker, and the chip that is wrong
+ * is the one nobody re-reads because it is already green.
+ *
+ * ⓪ is not in the list: it is the folder itself, and `readFolder` has just set
+ * it to this unit's IMEI.
+ */
+function clearStageMarks() {
+    for (const stage of ['login', 'certs', 'network', 'config', 'verify']) {
+        setMark(stage, '', 'weak');
+    }
+}
+
+/*
+ * What the folder already knows about this unit's certificates.
+ *
+ * `provisioning-log.jsonl` records every write with the modem's own `+QFUPL`
+ * verdicts, and until now the app wrote it and never looked. So a unit written
+ * yesterday — or written by the CLI over USB — came up with ② blank, and the
+ * only way to find out was to spend an AT window discovering it was already
+ * done.
+ *
+ * This reads the log the folder came with, so it works through the directory
+ * handle and through the `webkitdirectory` fallback alike: the file is in
+ * `files` either way, and no second permission is asked for.
+ *
+ * The mark is green because what backs it is evidence — checksums the MODEM
+ * computed over what it stored — rather than anybody's say-so. `already
+ * written` and not `3/3 ✓` all the same: this session verified nothing, and the
+ * two states are worth telling apart on a screen where green is a promise.
+ *
+ * Only a `done` entry speaks. A failed or partial one leaves the mark blank,
+ * which is honest — an attempt that did not finish tells you nothing about what
+ * is in the modem, and ② is one tap away either way.
+ */
+async function reportPriorCerts(files) {
+    const found = files.find(f => f.name === LOG_FILE);
+    if (!found) return;
+
+    let history;
+    try {
+        history = parseLog(await found.text());
+    } catch (err) {
+        note(`  could not read ${LOG_FILE} (${err.message})`);
+        return;
+    }
+
+    const written = lastFor(history, CERTS_SUBSTEP);
+    if (!written || written.status !== 'done') return;
+
+    setMark('certs', 'already written', 'ok');
+    write(`already written ${String(written.at).replace('T', ' ').slice(0, 16)}` +
+          `, per ${LOG_FILE}`, 'ok', 'certificates');
+    /* The modem's own verdicts, so the claim above can be checked rather than
+     * believed. A date says somebody pressed a button. */
+    for (const proof of written.evidence_refs || []) note(`    ${proof}`);
 }
 
 /*
