@@ -364,36 +364,37 @@ export async function checkFolder(folder, files) {
     const keyId = chosen.private_key && certificateId(chosen.private_key.name);
 
     /*
-     * Only when there are two files to compare.
+     * The one thing neither row above can say.
      *
-     * With either PEM absent this row could say nothing the two rows above it
-     * had not already said in red, so it said "not compared" — a line whose
-     * whole content was a restatement of the failure before it. A row earns
-     * its place by carrying a fact of its own.
+     * `CERTIFICATE` and `PRIVATE KEY` each judge one file on its own: it is
+     * there, it is a PEM, it is this many bytes. Both can pass on a certificate
+     * from unit A and a key from unit B — the write succeeds and AWS IoT
+     * refuses the handshake a cycle later, because a key that does not match
+     * its certificate is not something either file can be asked about alone.
+     * Only their two names, compared, can answer it.
      *
-     * Its silence cannot be misread as a pass, which is the usual reason to
-     * keep an empty row: it only ever goes quiet directly underneath a
-     * MISSING FILE that explains why.
+     * So this speaks when the answer is not already on the screen. Both rows
+     * print the id they carry, so two matching ids are visible in the two rows
+     * above and a third row saying "these match" is the screen telling you
+     * something you just read. What is NOT visible up there is a mismatch that
+     * you have to notice yourself, or a pair that could not be compared at all.
+     *
+     * That is not the usual "silence reads as a pass" trap: the evidence is
+     * printed either way. This row restates it or it does not.
      */
-    if (!chosen.certificate || !chosen.private_key) {
-        /* nothing to compare, and the rows above already said so */
-    } else if (certId && keyId && certId !== keyId) {
-        /* The check this module was written for. Material from two different
-         * certificates writes without complaint and is refused by AWS IoT a
-         * cycle later, which is the failure that looks like broken hardware. */
-        bad('cert + key', `certificate is ${mask(certId)} but the key is ` +
-                          `${mask(keyId)} — two different certificates`);
-        findings[findings.length - 1].rule = true;
-    } else if (certId && keyId) {
-        say('ok', 'cert + key', `same certificate — ${mask(certId)}`);
-        findings[findings.length - 1].rule = true;
-    } else {
-        /* Renamed by hand, so the tie cannot be tested. Not a refusal — the
-         * files may be perfectly correct — but its absence is worth a line. */
-        say('info', 'cert + key',
-            'not compared — the names carry no certificate id, so they were ' +
-            'renamed after AWS created them');
-        findings[findings.length - 1].rule = true;
+    if (chosen.certificate && chosen.private_key) {
+        if (certId && keyId && certId !== keyId) {
+            bad('cert + key', `certificate is ${mask(certId)} but the key is ` +
+                              `${mask(keyId)} — two different certificates`);
+            findings[findings.length - 1].rule = true;
+        } else if (!certId || !keyId) {
+            /* Worth one line: the guard is off, and it is the guard that
+             * catches the mistake this whole screen exists to catch. */
+            say('info', 'cert + key',
+                'not compared — the names carry no certificate id, so they ' +
+                'were renamed after AWS created them');
+            findings[findings.length - 1].rule = true;
+        }
     }
 
     for (const [name, why] of ignored) {

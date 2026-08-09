@@ -236,10 +236,12 @@ check('a failing folder still reports every check it got to',
  * which files were already in place. A checklist that stops at the first
  * unticked box is not a checklist.
  */
+/* Every row a folder must produce. `cert + key` is not among them: it speaks
+ * only when the two ids disagree or cannot be read, because when they agree
+ * both rows above already print the id and a third saying so is the screen
+ * repeating what you just read. */
 const ROWS = ['folder selected', 'imei', 'environment',
-              'certificate', 'private_key', 'password', 'region', 'cert + key'];
-/* Every row a folder with all four files must produce. `cert + key` is not on
- * this list for a folder that is missing one of the PEMs — see below. */
+              'certificate', 'private_key', 'password', 'region'];
 const labelsOf = report => report.findings.map(f => f.label);
 
 check('a good folder reports every row',
@@ -256,8 +258,7 @@ check('and the environment separately',
       true);
 check('while the files it DOES have still come back ok',
       nameless.findings.filter(f => f.level === 'ok').map(f => f.label).sort(),
-      ['cert + key', 'certificate', 'folder selected', 'password',
-       'private_key', 'region']);
+      ['certificate', 'folder selected', 'password', 'private_key', 'region']);
 
 /* The folder is the first row and it is green: picking one is the thing that
  * has definitely gone right, and a screen of red with no green in it does not
@@ -330,12 +331,20 @@ check('an empty folder names all four files it wants',
 check('and does not restate the missing PEMs as an uncomparable pair',
       empty.findings.some(f => f.label === 'cert + key'), false);
 
-/* It does appear the moment there are two names to compare, even unusable
- * ones, because then it has something of its own to say. */
-check('the comparison is marked as a change of subject',
-      good.findings.find(f => f.label === 'cert + key').rule, true);
-check('and nothing else is',
-      good.findings.filter(f => f.rule).length, 1);
+/* A folder whose two ids agree says so by printing the same id twice, in the
+ * rows that were going to print it anyway. */
+check('a matching pair adds no row of its own',
+      good.findings.some(f => f.label === 'cert + key'), false);
+check('because both rows already carry the id',
+      ['certificate', 'private_key'].every(role =>
+          good.findings.find(f => f.label === role).detail.includes(mask(ID_A))),
+      true);
+
+/* A mismatch is not visible unless you compare two masked ids yourself, so
+ * that one gets said out loud — and ruled off, since it is a different
+ * question from the rows above it. */
+check('a mismatch is marked as a change of subject',
+      mixed.findings.find(f => f.label === 'cert + key').rule, true);
 
 console.log(failed ? `\n${failed} failed` : '\nall passed');
 process.exit(failed ? 1 : 0);
