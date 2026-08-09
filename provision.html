@@ -260,11 +260,29 @@
             -webkit-tap-highlight-color: transparent;
         }
         #log-controls button:active { background: #334155; }
-        #live {
-            font-size: 11px; color: #4ade80;
-            background: #0f172acc; padding: 2px 6px; border-radius: 4px;
-            pointer-events: none;
+
+        /*
+         * Pairing sits in the bar, next to the dot that reports the link.
+         *
+         * It had a full-width row of its own, which said "this is the main
+         * thing on the screen" about a button that is pressed once per browser,
+         * ever — everything after that first pairing re-attaches with no
+         * gesture. A row that wide for an action that rare pushed the terminal
+         * up and read as an error state.
+         *
+         * Beside the dot is where it belongs: the dot says the link is down,
+         * and the fix is the next thing along.
+         */
+        #pair-row { flex-shrink: 0; display: flex; }
+        #pair-row[hidden] { display: none; }
+        #btn-connect {
+            padding: 5px 10px;
+            border: 1px solid #475569; border-radius: 6px;
+            background: #1e293b; color: #e2e8f0;
+            font-size: 11px; font-weight: 600; letter-spacing: 0.04em;
+            -webkit-tap-highlight-color: transparent;
         }
+        #btn-connect:active { background: #334155; }
 
         .actions {
             flex: 0 0 auto;
@@ -314,18 +332,6 @@
         .mark-fail  { color: #f87171; }
         .mark-run   { color: #7dd3fc; }
 
-        .bar {
-            flex: 0 0 auto; display: flex; gap: 6px; padding: 8px;
-            border-top: 1px solid #1e293b;
-        }
-        .bar button, .bar label {
-            flex: 1; min-height: 40px;
-            display: flex; align-items: center; justify-content: center;
-            border: 1px solid #334155; border-radius: 8px;
-            background: #0f172a; color: #cbd5e1; font-size: 13px;
-        }
-        .bar input { display: none; }
-
         /*
          * The manual AT row.
          *
@@ -339,17 +345,28 @@
          * It sends through the same `sendLine` as everything else, so the
          * console line law applies unchanged and the reply lands in the same
          * terminal as the rest of the session.
+         *
+         * The menu is the paved path and the field is the escape hatch, so the
+         * width is split that way round: most commands are picked, and the ones
+         * that are typed are short. The field had the whole row when it was the
+         * only way in.
          */
         .at-row { flex: 0 0 auto; display: flex; gap: 6px; padding: 0 8px 8px; }
+        .at-row select {
+            flex: 0 0 132px; min-width: 0; min-height: 40px; padding: 0 8px;
+            border: 1px solid #334155; border-radius: 8px;
+            background: #0f172a; color: #cbd5e1; font-size: 12px;
+            -webkit-tap-highlight-color: transparent;
+        }
         .at-row input {
-            flex: 1; min-height: 40px; padding: 0 10px;
+            flex: 1 1 auto; min-width: 0; min-height: 40px; padding: 0 10px;
             border: 1px solid #334155; border-radius: 8px;
             background: #0b1220; color: #e2e8f0;
             font-family: ui-monospace, monospace; font-size: 13px;
         }
         .at-row input::placeholder { color: #475569; }
         .at-row button {
-            flex: 0 0 88px; min-height: 40px;
+            flex: 0 0 72px; min-height: 40px;
             border: 1px solid #334155; border-radius: 8px;
             background: #0f172a; color: #cbd5e1; font-size: 13px;
         }
@@ -360,6 +377,17 @@
         <a class="icon-btn" href="index.html" aria-label="Back">←</a>
         <span id="link-state" class="dot link-disconnected" title="BLE link"></span>
         <span class="bar-text">AIS01 End node configuration · <b id="imei">—</b></span>
+        <!--
+          One button, and only until it has been pressed once, ever.
+
+          Adopting a unit this browser already has permission for needs no user
+          gesture, so once a unit has been paired the app attaches by itself and
+          keeps trying while it sleeps — which is what the daemon does, and the
+          daemon has no connect button. Opening the chooser is the one thing the
+          browser insists a person start, so that is the one thing left here,
+          and it hides the moment there is something to adopt instead.
+        -->
+        <span id="pair-row"><button id="btn-connect">PAIR</button></span>
         <span id="app-version" class="version"></span>
     </header>
 
@@ -389,35 +417,23 @@
         <!-- Controls sit on the log they act on. SHARE hands the whole raw
              buffer to whoever has to diagnose it, which on a bench is not the
              person holding the phone. -->
+        <!-- Two controls, both about the log's own material. RESET moved into
+             the AT menu: restarting is a command, and this strip is for the
+             log, not for the device. -->
         <div id="log-controls">
             <button id="copy-log">SHARE</button>
-            <!-- ATZ is one of the commands the app answers itself, so it
-                 restarts the unit without anyone reaching for the board. The
-                 link drops with it and comes back on its own. -->
-            <button id="btn-reset">RESET</button>
-            <!-- The FOLDER is remembered between reloads — the reference to it
+            <!-- Named for the moment it is used, not for what it clears.
+                 The FOLDER is remembered between reloads — the reference to it
                  and the permission to open it, never the certificate, the key
-                 or the password, which are re-read from disk each session.
-                 FORGET drops the reference when the bench moves to another
-                 unit. -->
-            <button id="btn-forget">FORGET</button>
-            <span id="live">▼ live</span>
+                 or the password, which are re-read from disk each session. This
+                 lets that reference go, which is what you want exactly once per
+                 unit: when the bench moves to the next one. -->
+            <button id="btn-forget"
+                    title="Let go of this unit's folder, so ⓪ asks for the next one">
+                CHANGE UNIT
+            </button>
         </div>
     </main>
-
-    <!--
-      One button, and only until it has been pressed once, ever.
-
-      Adopting a unit this browser already has permission for needs no user
-      gesture, so once a unit has been paired the app attaches by itself and
-      keeps trying while it sleeps — which is what the daemon does, and the
-      daemon has no connect button. Opening the chooser is the one thing the
-      browser insists a person start, so that is the one thing left here, and
-      it hides the moment there is something to adopt instead.
-    -->
-    <div class="bar" id="pair-row">
-        <button id="btn-connect">Pair unit</button>
-    </div>
 
     <!--
       The fallback picker. ⓪ prefers `showDirectoryPicker()`, which hands back a
@@ -452,11 +468,19 @@
     <!-- One command, sent as typed. The session has to be unlocked first: the
          app answers `AT` and `AT?` itself but ignores everything else until the
          password lands, so an unanswered command this early is a locked
-         console, not a wrong command. -->
+         console, not a wrong command.
+
+         Picking from the menu only FILLS the field — sending stays a separate
+         press. The technician owns when a command goes out, which is the same
+         principle the four stage buttons follow, and a menu that sent on
+         selection would be a stray tap away from an ATZ mid-write. -->
     <div class="at-row">
+        <select id="at-menu" aria-label="AT commands">
+            <option value="">AT ▾</option>
+        </select>
         <input id="at-input" type="text" spellcheck="false"
                autocapitalize="off" autocorrect="off"
-               placeholder="AT+CSQTIME=1">
+               placeholder="or type one">
         <button id="at-send">SEND</button>
     </div>
 

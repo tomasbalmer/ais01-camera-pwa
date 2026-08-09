@@ -16,8 +16,8 @@
  * cached shell — pull to refresh, or reinstall the app from the home screen.
  */
 
-export const VERSION = '0.56.0';
+export const VERSION = '0.57.0';
 
 /* One line, for the places that want context rather than just a number. */
-export const VERSION_NOTE = '⓪ remembers the folder, not what is in it — the '
-    + 'key and the password are read from disk and stored nowhere';
+export const VERSION_NOTE = 'a menu of AT commands beside the field, pairing '
+    + 'moved into the bar, and RESET is now ATZ in the menu';

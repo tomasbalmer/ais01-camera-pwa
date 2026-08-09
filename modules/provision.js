@@ -20,6 +20,7 @@ import {
     isHunting, stopHunting, sendLine, sendRaw, disconnect,
 } from './ble-transport.js';
 import { writeCerts } from './certmod.js';
+import { AT_CATALOGUE } from './at-catalogue.js';
 import { saveHandle, loadHandle, clearHandle } from './handle-store.js';
 import { VERSION, VERSION_NOTE } from './version.js';
 
@@ -256,11 +257,79 @@ async function doReset() {
  * form, and guessing at what the operator meant is how a console stops being
  * one.
  */
+/*
+ * Fill the field from the menu — and only fill it.
+ *
+ * Sending stays the separate press it always was. A menu that fired on
+ * selection would put `ATZ` one stray tap away from restarting a unit in the
+ * middle of a certificate write, which is the one thing this screen cannot
+ * afford to make easy.
+ *
+ * The unit's own settings are rebuilt each time the folder changes, because
+ * they only exist once there is a folder: they come from `desiredSettings`,
+ * the same list ③ stages, so picking one sends exactly what ③ would have sent
+ * for that line and nothing else.
+ */
+function buildAtMenu() {
+    const menu = el('at-menu');
+    menu.textContent = '';
+
+    const placeholder = document.createElement('option');
+    placeholder.value = '';
+    placeholder.textContent = 'AT ▾';
+    menu.appendChild(placeholder);
+
+    const groups = [...AT_CATALOGUE];
+    if (state.bundle) {
+        let settings = [];
+        try { settings = desiredSettings(state.bundle); } catch { settings = []; }
+        if (settings.length) {
+            groups.unshift([`This unit · ${state.bundle.imei}`,
+                settings.map(([k, v]) => [`${k}=${v}`, 'what ③ would send'])]);
+        }
+    }
+
+    for (const [label, entries] of groups) {
+        const group = document.createElement('optgroup');
+        group.label = label;
+        for (const [command, why] of entries) {
+            const option = document.createElement('option');
+            option.value = command;
+            /* textContent, never markup: these carry endpoints and topics
+             * built from a folder name somebody else chose. */
+            option.textContent = why ? `${command}  ·  ${why}` : command;
+            group.appendChild(option);
+        }
+        menu.appendChild(group);
+    }
+}
+
+function pickCommand() {
+    const menu = el('at-menu');
+    const command = menu.value;
+    menu.selectedIndex = 0;   /* back to the label; this is not a mode */
+    if (!command) return;
+    const input = el('at-input');
+    input.value = command;
+    input.focus();
+    /* Everything after the `=` is what usually needs changing, and selecting it
+     * whole means the next keystroke replaces it rather than appending. */
+    const at = command.indexOf('=');
+    if (at >= 0) input.setSelectionRange(at + 1, command.length);
+    else input.setSelectionRange(command.length, command.length);
+}
+
 async function sendManual() {
     const input = el('at-input');
     const text = input.value.trim();
     if (!text) return;
     if (!link.isConnected()) { fail('not connected'); return; }
+
+    /* `ATZ` keeps the treatment its dedicated button gave it — the boot divider
+     * and the line about when the window opens are worth more than the button
+     * was, and they are about the restart rather than about where it was
+     * pressed from. */
+    if (/^ATZ$/i.test(text)) { await doReset(); input.select(); return; }
 
     write(text, 'tx');
     /* Registered before the send: a fast device can answer inside the same
@@ -683,6 +752,7 @@ function rejectFolder(reason, ...help) {
     el('imei').textContent = '—';
     el('btn-bundle').title = '';
     setMark('bundle', 'rejected', 'fail');
+    buildAtMenu();
     fail(reason);
     for (const line of help) you(line);
 }
@@ -766,6 +836,7 @@ async function loadFromFolder(folder, files) {
     state.bundle = bundle;
     state.remembered = who;
     showLoaded(bundle, folder, found);
+    buildAtMenu();   /* this unit's settings become individually sendable */
     ok(`loaded ${folder}`);
     note(`  ${bundle.environment} · certificate ${bundle.certificate.length}B ` +
          `· key ${bundle.private_key.length}B`);
@@ -961,7 +1032,8 @@ async function forgetFolder({ quiet = false } = {}) {
     el('imei').textContent = '—';
     el('btn-bundle').title = '';
     setMark('bundle', '', 'weak');
-    if (!quiet) note('forgotten — pick the next unit\'s folder with ⓪');
+    buildAtMenu();
+    if (!quiet) note('let go of that unit — open the next one\'s folder with ⓪');
 }
 
 /*
@@ -1518,7 +1590,7 @@ async function installMock(kind) {
  */
 const SHELL_NEEDS = [
     'pair-row', 'btn-bundle', 'mark-bundle', 'raw-live', 'raw-count',
-    'terminal', 'terminal-raw', 'link-state', 'app-version',
+    'terminal', 'terminal-raw', 'link-state', 'app-version', 'at-menu',
 ];
 
 function shellIsStale() {
@@ -1571,29 +1643,34 @@ export function initProvision() {
     }));
 
     el('copy-log').addEventListener('click', copyRawLog);
-    el('btn-reset').addEventListener('click', doReset);
     el('btn-forget').addEventListener('click', () => forgetFolder());
 
     el('bundle-input').addEventListener('change', e => loadFiles(e.target.files));
 
+    buildAtMenu();
+    el('at-menu').addEventListener('change', pickCommand);
     el('at-send').addEventListener('click', sendManual);
     el('at-input').addEventListener('keydown', e => {
         if (e.key === 'Enter') sendManual();
     });
 
-    /* Scrolling away from the tail unpins that pane; the marker is how the
-     * operator knows they are no longer looking at the present. It reports the
-     * annotated pane, which is the one the stages talk through — the raw pane
-     * unpins quietly, since going back through it is the normal way to read it. */
+    /*
+     * Scrolling away from the tail unpins that pane, so reading back through
+     * the log does not fight the device writing to it.
+     *
+     * Both panes now unpin quietly. The `▼ live` marker that used to announce
+     * it for the annotated pane is gone — spec 004 asks for it, and in practice
+     * it reported something the scrollbar already shows, on the one screen
+     * where every pixel is the instrument. What is lost is the explicit signal
+     * that you are looking at the past; what is kept is the foot of the raw
+     * pane, which says whether the LINK is live, and that is the question the
+     * marker was being read for anyway.
+     */
     for (const [id, pane] of [['terminal', 'annotated'], ['terminal-raw', 'raw']]) {
         const out = el(id);
         out.addEventListener('scroll', () => {
-            const atBottom =
+            state.pinned[pane] =
                 out.scrollHeight - out.scrollTop - out.clientHeight < 24;
-            state.pinned[pane] = atBottom;
-            if (pane === 'annotated') {
-                el('live').style.visibility = atBottom ? 'visible' : 'hidden';
-            }
         });
     }
 
