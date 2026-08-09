@@ -52,6 +52,22 @@
             --text2: #94a3b8;
             --muted: #64748b;
             --border: #334155;
+
+            /*
+             * The left rail.
+             *
+             * Two things live in this column and they have to end on the same
+             * x: the raw serial pane, and the command trigger under it. They
+             * were two independent numbers that happened to read the same, and
+             * they did not land the same — the trigger sits inside a row with
+             * 8px of padding, so an equal width put its right edge 8px past
+             * the pane's divider.
+             *
+             * One number now, and the offset is derived from it rather than
+             * kept in somebody's head.
+             */
+            --rail: 400px;
+            --rail-pad: 8px;
         }
         header {
             flex-shrink: 0;
@@ -146,7 +162,7 @@
         .pane-raw       { order: 2; flex: 0 0 34%; border-top: 1px solid #1e293b; }
         @media (min-width: 700px) {
             main { flex-direction: row; }
-            .pane-raw       { order: 1; flex: 0 0 300px; border-top: none;
+            .pane-raw       { order: 1; flex: 0 0 var(--rail); border-top: none;
                               border-right: 1px solid #1e293b; }
             .pane-annotated { order: 2; }
         }
@@ -285,8 +301,8 @@
         #btn-connect:active { background: #334155; }
 
         .actions {
-            flex: 0 0 auto;
-            display: flex; gap: 6px; padding: 8px;
+            display: flex; gap: 6px;
+            padding: 8px var(--rail-pad);
             border-top: 1px solid #1e293b;
             padding-bottom: calc(8px + env(safe-area-inset-bottom));
         }
@@ -346,14 +362,37 @@
          * console line law applies unchanged and the reply lands in the same
          * terminal as the rest of the session.
          *
-         * The menu is the paved path and the field is the escape hatch, so the
-         * row is split that way round: the picker takes the width, and the
-         * field keeps only what a short command needs. It had the whole row
-         * when it was the only way in, and kept it for one version after it
-         * stopped being that, which read as the menu being the afterthought.
+         * Pick one, or type one — two ways into the same send, so they are the
+         * same size. The field had the whole row when it was the only way in,
+         * and neither shrinking it to a stub nor letting the picker sprawl was
+         * right: both made one of the two look like the afterthought. Equal
+         * says what is true, which is that either will do.
+         *
+         * Both take their width from `--rail`, so they line up under the raw
+         * pane rather than merely near it.
          */
+        /*
+         * Where the instrument ends and the controls begin.
+         *
+         * The two panes and the two control rows had been one continuous dark
+         * surface with hairlines between them, so the eye had nothing telling
+         * it which half it was reading — and these halves are not the same
+         * kind of thing at all. Above is what the device says, which only ever
+         * scrolls. Below is what you can do to it, which is fixed.
+         *
+         * So the controls sit on their own darker ground, closed off by the
+         * one strong line on the screen. The hairline between the two control
+         * rows stays a hairline: those two ARE the same kind of thing.
+         */
+        .console-foot {
+            flex: 0 0 auto;
+            background: #0a1120;
+            border-top: 2px solid var(--border);
+            box-shadow: 0 -6px 16px rgba(0,0,0,0.35);
+        }
         .at-row {
-            flex: 0 0 auto; display: flex; gap: 6px; padding: 0 8px 8px;
+            display: flex; gap: 6px;
+            padding: 10px var(--rail-pad) 10px;
             align-items: stretch;
         }
 
@@ -371,20 +410,25 @@
          * Nothing is sent, so nothing here needs confirming.
          */
         /*
-         * The trigger is sized to its own label, not to the row.
+         * The trigger sits in the rail, and the panel inherits its width.
          *
-         * Stretching it across every spare pixel made a control that says four
-         * words look like the screen's main event, and a bottom bar of three
-         * things all straining to fill the width has no hierarchy left to
-         * spend. The cluster sits left, at the size each part needs, and the
-         * empty space to its right is the point rather than a gap: the stage
-         * buttons below are what legitimately spans the screen.
+         * The panel was carrying its own width for a while, which meant two
+         * numbers that had to be kept agreeing by hand. `left: 0; right: 0`
+         * removes the question: the list is exactly as wide as the control it
+         * hangs off, and moving `--rail` moves both.
          *
-         * The PANEL is not bound by that. It is absolutely positioned, so it
-         * can be wider than the button it hangs off — which is what keeps 58
-         * entries and their descriptions readable behind a compact trigger.
+         * The empty space to the right of this cluster is the point rather
+         * than a gap — the stage buttons below are what legitimately spans the
+         * screen, and now they are the only thing that does.
          */
-        .at-picker { position: relative; flex: 0 0 260px; min-width: 0; display: flex; }
+        .at-picker {
+            position: relative;
+            /* The rail, minus the padding this row is inset by, so the right
+               edge lands on the raw pane's divider rather than past it. */
+            flex: 0 0 calc(var(--rail) - var(--rail-pad));
+            max-width: calc(100vw - 216px);   /* leave the field and SEND their room */
+            min-width: 0; display: flex;
+        }
         #at-menu {
             flex: 1 1 auto; min-width: 0; min-height: 40px;
             display: flex; align-items: center; justify-content: space-between;
@@ -399,8 +443,7 @@
         #at-menu[aria-expanded="true"] { border-color: #475569; background: #1e293b; }
 
         .at-panel {
-            position: absolute; bottom: calc(100% + 6px); left: 0;
-            width: max(100%, 420px); max-width: calc(100vw - 32px);
+            position: absolute; bottom: calc(100% + 6px); left: 0; right: 0;
             z-index: 20;
             display: flex; flex-direction: column;
             max-height: min(52vh, 420px);
@@ -448,8 +491,11 @@
         .at-opt.is-danger .cmd { color: #f87171; }
         .at-empty { padding: 14px 12px; font-size: 12px; color: var(--muted); }
 
+        /* The same width as the trigger, from the same number — the two are a
+           pair (pick one, or type one) and a pair that reads as a pair. */
         .at-row input#at-input {
-            flex: 0 0 116px; min-width: 0; min-height: 40px; padding: 0 10px;
+            flex: 0 0 calc(var(--rail) - var(--rail-pad));
+            min-width: 0; min-height: 40px; padding: 0 10px;
             border: 1px solid #334155; border-radius: 8px;
             background: #0b1220; color: #e2e8f0;
             font-family: ui-monospace, monospace; font-size: 13px;
@@ -572,6 +618,9 @@
          press. The technician owns when a command goes out, which is the same
          principle the four stage buttons follow, and a menu that sent on
          selection would be a stray tap away from an ATZ mid-write. -->
+    <!-- The controls, on their own ground. Above this line is what the device
+         says; below it is what you can do to it. -->
+    <div class="console-foot">
     <div class="at-row">
         <div class="at-picker">
             <button id="at-menu" type="button" aria-haspopup="listbox"
@@ -616,6 +665,7 @@
         <button id="btn-verify">
             <span class="label">④&nbsp;VERIFY</span><span id="mark-verify" class="mark"></span>
         </button>
+    </div>
     </div>
 
     <script type="module">
