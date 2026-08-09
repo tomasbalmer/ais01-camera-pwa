@@ -24,29 +24,36 @@
  *
  *     AIS01-CB-869181072714122-WaterplanProduction
  *              └─── IMEI ────┘ └──── where ─────┘
+ *
+ * Two facts and no more. The region used to ride here as a `-AR` suffix and is
+ * a file now — see `REGION_CODES`.
  */
 export const FOLDER_IMEI = /(\d{15})/;
 export const FOLDER_ENV = /(staging|production)/i;
 
 /*
- * The region, and it is a third fact the folder has to carry.
+ * The convention spelled out, for telling somebody what to rename a folder to.
+ * It sits beside the two patterns above so it cannot drift from them.
+ */
+export const FOLDER_SHAPE =
+    'AIS01-CB-<15-digit IMEI>-Waterplan<Staging|Production>';
+
+/*
+ * The region is a FILE, not part of the name.
  *
  * `firmware-factory/docs/golden-config.md`: `AT+APN` is `em` on AR/EMnify and
- * `NULL` on BR/Vivo, and `AT+IOTMOD` is 0 against 2. Those are the settings a
- * unit needs to attach at all, and nothing inside the folder says which set
- * applies — the certificate does not know what SIM it will sit beside.
+ * `NULL` on BR/Vivo, `AT+IOTMOD` is 0 against 2. Those decide whether the modem
+ * attaches at all, and nothing else in the folder knows which SIM the unit will
+ * sit beside.
  *
- * Anchored to the end, because `AR` and `BR` are two letters and an unanchored
- * match would find them inside a word somebody put in the middle of a name.
- *
- *     AIS01-CB-869181072714122-WaterplanProduction-AR
- *              └─── IMEI ────┘ └──── where ─────┘ └┘ which network
+ * It rode in the folder name for one version, as a `-AR` suffix. Two letters
+ * anchored to the end of a name is a fragile place to keep a fact that changes
+ * the APN: it is invisible in a file listing, it is lost by any rename, and it
+ * made the name carry three things instead of two. `password.txt` had already
+ * shown the shape for this — a fact that belongs to the unit, in a file of its
+ * own, with nothing else in it.
  */
-export const FOLDER_REGION = /-(AR|BR)\s*$/i;
-
-/* The convention spelled out, for telling somebody what to rename a folder to.
- * It sits beside the three patterns above so it cannot drift from them. */
-export const FOLDER_SHAPE = 'AIS01-CB-<15-digit IMEI>-WaterplanProduction-AR';
+export const REGION_CODES = ['AR', 'BR'];
 
 /*
  * The three facts, each on its own, present or not.
@@ -59,18 +66,14 @@ export const FOLDER_SHAPE = 'AIS01-CB-<15-digit IMEI>-WaterplanProduction-AR';
 export function nameFacts(folder) {
     const imei = (folder.match(FOLDER_IMEI) || [])[1] || null;
     const envName = (folder.match(FOLDER_ENV) || [])[1] || null;
-    const region = (folder.match(FOLDER_REGION) || [])[1] || null;
     return {
         imei,
         environment: envName ? envName.toLowerCase() : null,
-        /* Null is a real answer here and not a failure: everything except the
-         * network stage works without it. */
-        region: region ? region.toUpperCase() : null,
     };
 }
 
-/* An identity needs both of the facts that decide what the material MEANS. The
- * region is not one of them — see `nameFacts`. */
+/* Both facts, or nothing: each decides what the material MEANS, and material
+ * that means nothing is material that can be written into the wrong unit. */
 export function identityOf(folder) {
     const facts = nameFacts(folder);
     if (!facts.imei || !facts.environment) return null;
@@ -86,6 +89,9 @@ export const FILE_ROLES = [
     ['certificate', /-certificate\.pem\.crt$/i],
     ['private_key', /-private\.pem\.key$/i],
     ['password',    /^password\.txt$/i],
+    /* Not from AWS. Ours, like password.txt, and required for the same reason:
+     * without it ③ has no APN to send and the unit never attaches. */
+    ['region',      /^region\.txt$/i],
 ];
 
 /* What to tell an operator who is missing one. The patterns above are for
@@ -94,6 +100,7 @@ const WANTED = {
     certificate: 'one *-certificate.pem.crt',
     private_key: 'one *-private.pem.key',
     password: 'password.txt',
+    region: `region.txt, holding ${REGION_CODES.join(' or ')}`,
 };
 
 /*
@@ -204,9 +211,12 @@ export function pemProblem(text, expect) {
     return null;
 }
 
-/* What every unit's password has looked like so far. A NOTE, never a refusal
- * — see the header. */
+/* The console takes a 6-digit PIN. Anything else is the wrong file. */
 const PASSWORD_SHAPE = /^\d{6}$/;
+
+/* Both of our own files hold one value and nothing else, so both are read the
+ * same way — trailing newline from an editor included. */
+const firstLine = text => text.split(/\r?\n/)[0].trim();
 
 /*
  * Sort the folder's files into the roles, and say when a role is ambiguous.
@@ -256,26 +266,17 @@ export async function checkFolder(folder, files) {
     say('ok', 'folder selected', folder);
 
     if (facts.imei) say('ok', 'imei', facts.imei);
-    else bad('imei', 'not in the folder name — it has to carry the unit\'s 15 ' +
-                     `digits, because no file inside carries them. Rename to ` +
-                     `${FOLDER_SHAPE}`);
+    else bad('imei', `bad folder name — expected ${FOLDER_SHAPE}`);
 
     if (facts.environment) say('ok', 'environment', facts.environment);
     else bad('environment', 'not in the folder name — add WaterplanProduction ' +
                             'or WaterplanStaging, which is what decides the broker');
 
-    if (facts.region) {
-        say('ok', 'region', `${facts.region} — the network profile ③ will send`);
-    } else {
-        say('warn', 'region',
-            'not in the folder name — end it in -AR or -BR to enable ③; ' +
-            'nothing else on this screen needs it');
-    }
-
     /* ── The files ─────────────────────────────────────────────────────── */
     const { roles, ignored, unknown } = matchRoles(files.map(f => f.name));
     const chosen = {};
     let password = null;
+    let region = null;
 
     for (const [role] of FILE_ROLES) {
         const hits = roles[role];
@@ -294,23 +295,45 @@ export async function checkFolder(folder, files) {
         const text = await file.text();
 
         if (role === 'password') {
-            password = text.split(/\r?\n/)[0].trim();
+            password = firstLine(text);
             if (!password) {
                 bad(role, `${file.name} is empty — download it again from Drive`);
                 continue;
             }
+            /*
+             * A refusal, not a warning. It was a warning on the reasoning that
+             * we know what these have looked like and not that they can never
+             * look otherwise — true, and the wrong trade: the console takes a
+             * 6-digit PIN, so anything else is a file that will fail ① after
+             * costing an AT window to find out. Being sent back to the folder
+             * is cheaper than being sent back to the bench.
+             */
             if (!PASSWORD_SHAPE.test(password)) {
-                /* A note, never a refusal: we know what these have looked like,
-                 * not that they can never look otherwise. */
-                say('warn', role,
-                    `${file.name} found with ${password.length} characters — ` +
-                    'every unit so far has had 6 digits, so check this is the ' +
-                    'console password and not something else');
-            } else {
-                /* The value never appears. The shape is the whole of what can
-                 * be said safely in a log people screenshot. */
-                say('ok', role, `${file.name} found with 6 digits`);
+                bad(role, `${file.name} holds ${password.length} characters — ` +
+                          'the console password is 6 digits, so this is the ' +
+                          'wrong file or the wrong contents');
+                continue;
             }
+            /* The value never appears. The shape is the whole of what can be
+             * said safely in a log people screenshot. */
+            say('ok', role, `${file.name} found with 6 digits`);
+            chosen[role] = file;
+            continue;
+        }
+
+        if (role === 'region') {
+            region = firstLine(text).toUpperCase();
+            if (!region) {
+                bad(role, `${file.name} is empty — it holds the country code, ` +
+                          `${REGION_CODES.join(' or ')}`);
+                continue;
+            }
+            if (!REGION_CODES.includes(region)) {
+                bad(role, `${file.name} holds "${region}" — there is no network ` +
+                          `profile for it, only ${REGION_CODES.join(' and ')}`);
+                continue;
+            }
+            say('ok', role, `${region} — the network profile ③ will send`);
             chosen[role] = file;
             continue;
         }
@@ -355,6 +378,7 @@ export async function checkFolder(folder, files) {
         identity: fatal ? null : { ...facts, folder },
         chosen: fatal ? null : chosen,
         password: fatal ? null : password,
+        region: fatal ? null : region,
         findings,
     };
 }

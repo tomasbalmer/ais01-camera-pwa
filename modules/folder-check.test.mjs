@@ -39,25 +39,20 @@ const goodFolder = () => [
     file(`${ID_A}-certificate.pem.crt`, CERT),
     file(`${ID_A}-private.pem.key`, KEY),
     file('password.txt', '482913\n'),
+    file('region.txt', 'AR\n'),
     file('AmazonRootCA1.pem', CERT),
     file(`${ID_A}-public.pem.key`, KEY),
 ];
 
 /* ── Identity ────────────────────────────────────────────────────────────
  * The folder's name is the only place the IMEI and the environment exist. */
-check('the name yields the facts it carries', identityOf(FOLDER),
-      { imei: '869181072714122', environment: 'production', region: null,
-        folder: FOLDER });
+check('the name yields the two facts it carries', identityOf(FOLDER),
+      { imei: '869181072714122', environment: 'production', folder: FOLDER });
 
-/* The region is a third fact, and the two letters are anchored to the end —
- * unanchored, `AR` and `BR` turn up inside ordinary words. */
-check('a region suffix is read', identityOf(`${FOLDER}-AR`).region, 'AR');
-check('lowercase is normalised', identityOf(`${FOLDER}-br`).region, 'BR');
-check('AR inside a word is not a region',
-      identityOf('AIS01-CB-869181072714122-WaterplanProduction-SPARE').region,
-      null);
-check('a folder with no region still yields an identity',
-      identityOf(FOLDER) !== null, true);
+/* The region left the name. It changes the APN, and two letters anchored to
+ * the end of a directory are invisible in a listing and lost by any rename. */
+check('the name carries no region any more',
+      'region' in identityOf(FOLDER), false);
 check('a name with no environment is not an identity',
       identityOf('AIS01-CB-869181072714122'), null);
 check('a name with no IMEI is not an identity',
@@ -115,11 +110,9 @@ check('a PKCS#8 key is accepted too',
 /* ── The whole folder ──────────────────────────────────────────────────── */
 const good = await checkFolder(FOLDER, goodFolder());
 check('a correct folder passes', good.ok, true);
-/* A missing region is a NOTE: the certificates, the login and the MQTT
- * settings do not care which SIM the unit will sit beside. Only ③ does. */
-check('a folder with no region still loads', good.ok, true);
-check('but the network stage is warned about',
-      good.findings.some(f => f.level === 'warn' && f.label === 'region'), true);
+check('the region comes off its own file', good.region, 'AR');
+check('and reads as a row like any other',
+      good.findings.some(f => f.level === 'ok' && f.label === 'region'), true);
 check('and hands back the password, not the file', good.password, '482913');
 
 /* The password's VALUE is never in a finding — the shape is the whole of what
@@ -182,17 +175,31 @@ const emptyPassword = await checkFolder(FOLDER, [
 ]);
 check('an empty password.txt is refused', emptyPassword.ok, false);
 
-/* A password of an unexpected shape is a NOTE. We know what they have looked
- * like; we do not know they can never look otherwise. */
-const oddPassword = await checkFolder(FOLDER, [
-    file(`${ID_A}-certificate.pem.crt`, CERT),
-    file(`${ID_A}-private.pem.key`, KEY),
-    file('password.txt', 'hunter2!'),
-]);
-check('an unusual password is allowed through', oddPassword.ok, true);
-check('but it is called out',
-      oddPassword.findings.some(f => f.level === 'warn' && f.label === 'password'),
+/* A password that is not six digits is the wrong file or the wrong contents,
+ * and finding that out at ① costs an AT window. */
+const oddPassword = await checkFolder(FOLDER,
+    goodFolder().map(f => f.name === 'password.txt' ? file(f.name, 'hunter2!') : f));
+check('a password that is not 6 digits is refused', oddPassword.ok, false);
+
+/* ── region.txt ───────────────────────────────────────────────────────── */
+const noRegion = await checkFolder(FOLDER,
+    goodFolder().filter(f => f.name !== 'region.txt'));
+check('a folder with no region.txt is refused', noRegion.ok, false);
+check('and the row names the file and its contents',
+      noRegion.findings.find(f => f.label === 'region').detail,
+      'missing — the folder needs region.txt, holding AR or BR');
+
+const badRegion = await checkFolder(FOLDER,
+    goodFolder().map(f => f.name === 'region.txt' ? file(f.name, 'US') : f));
+check('a country with no profile is refused', badRegion.ok, false);
+check('rather than silently sending the wrong APN',
+      badRegion.findings.find(f => f.label === 'region').detail.includes('"US"'),
       true);
+
+const lowerRegion = await checkFolder(FOLDER,
+    goodFolder().map(f => f.name === 'region.txt' ? file(f.name, 'br\n') : f));
+check('case and a trailing newline are not the operator\'s problem',
+      lowerRegion.region, 'BR');
 
 /*
  * A folder whose files were renamed by hand loses the tie between certificate
@@ -207,6 +214,7 @@ const renamed = await checkFolder(FOLDER, [
     file('unit122-certificate.pem.crt', CERT),
     file('unit122-private.pem.key', KEY),
     file('password.txt', '482913'),
+    file('region.txt', 'AR'),
 ]);
 check('hand-renamed files still load', renamed.ok, true);
 check('but the untestable tie is said out loud',
@@ -225,8 +233,8 @@ check('a failing folder still reports every check it got to',
  * which files were already in place. A checklist that stops at the first
  * unticked box is not a checklist.
  */
-const ROWS = ['folder selected', 'imei', 'environment', 'region',
-              'certificate', 'private_key', 'password', 'pair'];
+const ROWS = ['folder selected', 'imei', 'environment',
+              'certificate', 'private_key', 'password', 'region', 'pair'];
 const labelsOf = report => report.findings.map(f => f.label);
 
 check('a good folder reports every row',
@@ -243,7 +251,8 @@ check('and the environment separately',
       true);
 check('while the files it DOES have still come back ok',
       nameless.findings.filter(f => f.level === 'ok').map(f => f.label).sort(),
-      ['certificate', 'folder selected', 'pair', 'password', 'private_key']);
+      ['certificate', 'folder selected', 'pair', 'password', 'private_key',
+       'region']);
 
 /* The folder is the first row and it is green: picking one is the thing that
  * has definitely gone right, and a screen of red with no green in it does not
@@ -253,14 +262,9 @@ check('the folder leads, in its own row', nameless.findings[0],
 
 /* A row that says what is wrong without saying what right looks like leaves
  * the operator to reconstruct the convention from three other rows. */
-check('a missing IMEI suggests the whole name',
-      nameless.findings.find(f => f.label === 'imei').detail.includes(FOLDER_SHAPE),
-      true);
-
-/* Missing and not fatal is its own level. Red would say it blocks the write
- * and grey would let it pass for conversation; it is neither. */
-check('a missing region is warned, not failed or muttered',
-      nameless.findings.find(f => f.label === 'region').level, 'warn');
+check('a bad name says what right looks like, and briefly',
+      nameless.findings.find(f => f.label === 'imei').detail,
+      `bad folder name — expected ${FOLDER_SHAPE}`);
 
 /* One fact missing is one row failing, not all of them. */
 const noRegionNoEnv = await checkFolder('AIS01-CB-869181072714122', goodFolder());

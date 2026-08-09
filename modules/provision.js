@@ -478,8 +478,7 @@ function stamp() {
  * a log to find out why a unit failed means telling those apart, and until now
  * they were the same shade of green.
  */
-const VOICE = { rx: 'DEV', tx: 'CMD', ok: 'SYS', fail: 'SYS', note: 'SYS',
-                warn: 'SYS', you: 'YOU' };
+const VOICE = { rx: 'DEV', tx: 'CMD', ok: 'SYS', fail: 'SYS', note: 'SYS', you: 'YOU' };
 
 /*
  * `field` turns a row into a labelled one: a column of its own for the name of
@@ -529,16 +528,6 @@ function write(text, kind = 'rx', field = null) {
 }
 
 function note(text) { write(text, 'note'); }
-/*
- * Missing, and not fatal.
- *
- * `note` is this app's ordinary informational voice and there are hundreds of
- * them, so it cannot be the one that means "something is absent" — a screen
- * where every second line is amber says nothing at all. This is the third
- * level: red blocks the write, amber is missing and blocks only what depends
- * on it, grey is talking.
- */
-function warn(text) { write(text, 'warn'); }
 function fail(text) { write(text, 'fail'); }
 function ok(text) { write(text, 'ok'); }
 /* Something for the person to do with their hands: press RESET, plug it in,
@@ -920,10 +909,7 @@ function rejectFolder(reason, ...help) {
  */
 function reportFolder(report) {
     for (const { level, label, detail } of report.findings) {
-        const kind = level === 'fail' ? 'fail'
-            : level === 'ok' ? 'ok'
-            : level === 'warn' ? 'warn'
-            : 'note';
+        const kind = level === 'fail' ? 'fail' : level === 'ok' ? 'ok' : 'note';
         /* `private_key` is a role key, not a word. The column is the only
          * place these are read by a person. */
         write(detail, kind, label.replace(/_/g, ' '));
@@ -952,9 +938,9 @@ async function loadFromFolder(folder, files) {
         certificate: await found.certificate.text(),
         private_key: await found.private_key.text(),
         environment: who.environment,
-        /* AR / BR / null — the network stage refuses on null rather than
-         * choosing a profile on the operator's behalf. */
-        region: who.region,
+        /* AR or BR, read out of region.txt — see folder-check's REGION_CODES.
+         * ⓪ refuses a folder without it, so by here it is always one of them. */
+        region: report.region,
         folder,
         /* Which files, by name, ended up being the ones used. Kept so the
          * screen can answer "where am I standing" without the technician
@@ -1524,9 +1510,8 @@ function networkSettings(bundle) {
     const profile = REGIONS[bundle.region];
     if (!profile) {
         throw new Error(
-            'the folder name does not say which network — rename it to end in ' +
-            `-AR (${REGIONS.AR.label}) or -BR (${REGIONS.BR.label}) and pick ` +
-            'it again with ⓪');
+            'no network profile for this unit — region.txt should hold AR ' +
+            `(${REGIONS.AR.label}) or BR (${REGIONS.BR.label})`);
     }
     return profile.settings;
 }

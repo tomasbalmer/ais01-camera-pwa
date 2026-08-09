@@ -16,8 +16,8 @@
  * cached shell — pull to refresh, or reinstall the app from the home screen.
  */
 
-export const VERSION = '0.64.0';
+export const VERSION = '0.65.0';
 
 /* One line, for the places that want context rather than just a number. */
-export const VERSION_NOTE = '⓪ leads with the folder it did select, suggests '
-    + 'the name it wanted, and gives every file a row of its own';
+export const VERSION_NOTE = 'the region is region.txt now, not a suffix on the '
+    + 'folder name, and every row either passes or fails';
