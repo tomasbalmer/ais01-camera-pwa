@@ -20,7 +20,7 @@ import {
     isHunting, stopHunting, sendLine, sendRaw, disconnect,
 } from './ble-transport.js';
 import { writeCerts } from './certmod.js';
-import { catalogueGroups, DANGEROUS } from './at-catalogue.js';
+import { catalogueGroups, describe, DANGEROUS } from './at-catalogue.js';
 import { checkFolder, identityOf, FOLDER_SHAPE } from './folder-check.js';
 import { saveHandle, loadHandle, clearHandle } from './handle-store.js';
 import {
@@ -290,19 +290,69 @@ async function doReset() {
  * behaviour for a stage about to write and the wrong one for a menu, so here it
  * simply contributes nothing and the rest of the list still builds.
  */
-function atGroups() {
-    const groups = catalogueGroups();
-    if (!state.bundle) return groups;
-
-    const mine = [];
+/*
+ * This unit's own settings, split the way the stages are split.
+ *
+ * They were one group of thirteen called `This unit · <IMEI>`, which is a list
+ * of everything with no shape: the four that decide whether the modem attaches
+ * sat next to the ten that decide where it publishes, and the only way to tell
+ * them apart was to already know. They are answerable to different things —
+ * one comes from the SIM the unit will sit beside, the other from the folder's
+ * name — and that is the split the buttons already make.
+ *
+ * The hint is what the SETTING means, not which button sends it. The group
+ * heading says which button; repeating it on every row spends the one column
+ * that could be explaining `SNI=0` on something already read.
+ */
+function unitGroups(bundle) {
+    const groups = [];
     for (const spec of Object.values(CONFIG_STAGES)) {
         let settings;
-        try { settings = spec.settings(state.bundle); } catch { continue; }
-        mine.push(...settings.map(([name, value]) =>
-            [`${name}=${value}`, `sent by ${press(spec.label)}`]));
+        /* `networkSettings` throws when the folder names no region. Right for
+         * a stage about to write, wrong for a menu — here it contributes
+         * nothing and the rest of the list still builds. */
+        try { settings = spec.settings(bundle); } catch { continue; }
+        if (!settings.length) continue;
+        groups.push([`This unit · ${spec.menuGroup}`,
+            settings.map(([name, value]) =>
+                [`${name}=${value}`, describe(`${name}=${value}`)])]);
     }
-    if (!mine.length) return groups;
-    return [[`This unit · ${state.bundle.imei}`, mine], ...groups];
+    return groups;
+}
+
+/*
+ * The other countries' network profiles, straight out of `REGIONS`.
+ *
+ * The loaded one is left out because it is already at the top, under `This
+ * unit`, with the same four values. What is left is the answer to the question
+ * this menu could not answer before: a unit turns up whose `region.txt` was
+ * wrong, and the four commands that fix it are now readable instead of being
+ * reconstructed from `golden-config.md`.
+ *
+ * One group per country rather than one group with the country repeated on
+ * every row — four rows saying `Brazil · Vivo` is a column spent on a heading.
+ */
+function countryGroups() {
+    const loaded = state.bundle && state.bundle.region;
+    return Object.entries(REGIONS)
+        .filter(([code]) => code !== loaded)
+        .map(([code, profile]) => [
+            `${profile.country} · ${profile.carrier}`,
+            profile.settings.map(([name, value]) =>
+                [`${name}=${value}`, describe(`${name}=${value}`)]),
+        ]);
+}
+
+function atGroups() {
+    const shelf = catalogueGroups();
+    return [
+        ...(state.bundle ? unitGroups(state.bundle) : []),
+        shelf.common,
+        ...shelf.presets,
+        ...countryGroups(),
+        shelf.bg95,
+        shelf.all,
+    ];
 }
 
 function buildAtMenu(filter = '') {
@@ -339,6 +389,8 @@ function buildAtMenu(filter = '') {
             const note_ = document.createElement('span');
             note_.className = 'why';
             note_.textContent = why;
+            /* Both halves, for a row narrow enough to have wrapped. */
+            option.title = why ? `${command}\n${why}` : command;
             option.append(cmd, note_);
             list.appendChild(option);
             shown++;
@@ -1461,7 +1513,8 @@ async function chooseFolder() {
  * `lines` are plain strings, set with textContent: one of them is a folder
  * name somebody else chose.
  */
-function askConfirm({ title, lines, subject = null, confirmLabel = 'Confirm' }) {
+function askConfirm({ title, lines, subject = null, commands = null,
+                      confirmLabel = 'Confirm' }) {
     const dialog = el('confirm-dialog');
     el('confirm-title').textContent = title;
     el('confirm-ok').textContent = confirmLabel;
@@ -1475,6 +1528,25 @@ function askConfirm({ title, lines, subject = null, confirmLabel = 'Confirm' }) 
         const p = document.createElement('p');
         p.textContent = line;
         body.appendChild(p);
+    }
+    /*
+     * The `customContent` slot, and the one thing that goes in it: the exact
+     * lines that are about to leave.
+     *
+     * `textContent` per row, never a joined string into innerHTML — these are
+     * built from a folder's own contents (the endpoint, the thing name, the
+     * topics), and a dialog that renders them as markup is a folder name
+     * deciding what this page executes.
+     */
+    if (commands && commands.length) {
+        const list = document.createElement('ol');
+        list.className = 'cmd-list';
+        for (const cmd of commands) {
+            const li = document.createElement('li');
+            li.textContent = cmd;
+            list.appendChild(li);
+        }
+        body.appendChild(list);
     }
     if (subject) {
         const it = document.createElement('p');
@@ -2116,53 +2188,84 @@ function desiredSettings(bundle) {
 const CONSOLE_LINE_MS = 2500;
 
 /*
- * The two config stages differ in three strings and one function. Everything
- * else — stage, arm, apply, count, record — is identical, and writing it twice
+ * The two config stages differ in two strings and one function. Everything
+ * else — confirm, apply, count, record — is identical, and writing it twice
  * is how the second copy quietly stops matching the first.
- *
- * The labels live here rather than only in the markup because the button's text
- * is swapped while it is armed, and a label the code puts back has to be the
- * one the page shipped with.
  */
 const CONFIG_STAGES = {
     network: {
-        button: 'btn-network', mark: 'network',
-        label: STEP.network,
-        armed: n => `Send ${n} network settings`,
+        mark: 'network',
+        /* What this half configures, for the command menu's heading. Short
+         * because it follows `This unit · `, and a heading that repeats the
+         * whole button name is a heading nobody finishes reading. */
+        menuGroup: 'cellular network',
         substep: 'network_settings_set',
         settings: bundle => networkSettings(bundle),
     },
     mqtt: {
-        button: 'btn-config', mark: 'config',
-        label: STEP.mqtt,
-        armed: n => `Send ${n} MQTT settings`,
+        mark: 'config',
+        menuGroup: 'MQTT broker',
         substep: 'mqtt_settings_set',
         settings: bundle => desiredSettings(bundle),
     },
 };
 
-function configLabel(key, text) {
-    const spec = CONFIG_STAGES[key];
-    const button = el(spec.button);
-    button.querySelector('.name').textContent = text || spec.label;
-    button.classList.toggle('armed', !!text);
-}
-
-/* First tap stages and shows what would go out; second tap sends it. The pause
- * between them is the point — these are the settings a unit is judged by, and
- * reading them before they leave costs one tap. */
-async function stageConfig(key) {
+/*
+ * Read them, then send them — in one press instead of two.
+ *
+ * The pause before these lines leave is not negotiable: they are the settings
+ * the unit is judged by, and an APN or an endpoint that is wrong is a truck
+ * roll. What was negotiable is where the pause happens.
+ *
+ * It used to be an ARMED BUTTON. The first tap printed the commands into the
+ * History and relabelled the chip `Send 4 network settings` in amber; the
+ * second tap sent them. Three things were wrong with it, and none of them is
+ * the idea:
+ *
+ *   · Nothing on screen said a second tap was owed. A chip that changes its
+ *     own label is the app answering a question the technician did not know
+ *     they had asked, and "I press it and nothing goes out" is what that
+ *     feels like from the other side.
+ *   · The commands landed in the LOG, which is the record of what happened —
+ *     so the log claimed a send that had not occurred, above the send that
+ *     eventually did.
+ *   · The staged state outlived the screen: arm ③, walk away, come back, and
+ *     the next tap sends lines chosen for a folder that may since have been
+ *     cleared.
+ *
+ * A dialog is the same pause with none of that. It says what will go out,
+ * verbatim and in order, it cannot be dismissed by accident, and it holds no
+ * state after it closes.
+ */
+async function runConfigStage(key) {
     if (!bundleReady()) return;
     const spec = CONFIG_STAGES[key];
     let wanted;
     try { wanted = spec.settings(state.bundle); } catch (err) {
         fail(err.message); setMark(spec.mark, 'no region', 'fail'); return;
     }
-    state.pending[key] = wanted.map(([name, value]) => `${name}=${value}`);
-    note(`staged ${state.pending[key].length} settings:`);
-    state.pending[key].forEach(line => note(`  ${line}`));
-    configLabel(key, spec.armed(state.pending[key].length));
-    setMark(spec.mark, 'staged', 'run');
+
+    const lines = wanted.map(([name, value]) => `${name}=${value}`);
+    const seconds = Math.round(
+        (lines.length * CONSOLE_LINE_MS + REPLY_DRAIN_MS) / 1000);
+
+    const confirmed = await askConfirm({
+        title: `Send ${lines.length} ${spec.menuGroup} settings?`,
+        lines: [
+            `They go to the modem one line at a time — about ${seconds} s. ` +
+            `Nothing leaves this screen until you confirm.`,
+        ],
+        commands: lines,
+        confirmLabel: 'Send settings',
+    });
+    if (!confirmed) { note(`nothing sent — the unit is as it was`); return; }
+
+    /* Set here and read by `applyConfig`, which is the only reader. It is
+     * assigned one line before it is used rather than held between taps: the
+     * whole defect in the armed button was that this survived the moment it
+     * was chosen for. */
+    state.pending[key] = lines;
+    await applyConfig(key);
 }
 
 /*
@@ -2291,7 +2394,6 @@ async function applyConfig(key) {
         'it is in the command menu, and it is the only thing that settles this.');
 
     state.pending[key] = null;
-    configLabel(key, null);
 
     /*
      * Everything the device did not REFUSE goes into `intended-config.json`.
@@ -2322,8 +2424,6 @@ async function applyConfig(key) {
     });
 }
 
-const runConfigStage = key =>
-    state.pending[key] ? applyConfig(key) : stageConfig(key);
 
 /*
  * The stage that decides whether a phone can replace the laptop at all. One

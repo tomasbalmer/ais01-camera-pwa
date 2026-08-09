@@ -717,7 +717,6 @@
             .status-circle { width: 26px; height: 26px; font-size: 12px; }
         }
         .actions button:active { background: #334155; }
-        .actions button.armed { background: #b45309; border-color: #f59e0b; }
 
         /*
           The per-stage mark reports what the stage's own commands came back
@@ -887,6 +886,41 @@
             color: var(--text);
             word-break: break-all;
         }
+        /*
+         * The lines that are about to leave, verbatim.
+         *
+         * The one thing in this dialog that is NOT centred. Everything else
+         * here is prose and belongs on the component's axis; this is a column
+         * of commands read top to bottom, and centring it would put every
+         * `AT+` at a different x — which is the only thing the eye has to
+         * scan them with.
+         *
+         * Inset rather than raised: it is not another surface stacked on the
+         * modal, it is a window cut into it onto the console underneath, so
+         * it wears the log's own ground and the log's own face.
+         */
+        .cmd-list {
+            margin: 0 0 20px; padding: 10px 12px;
+            list-style: none; counter-reset: cmd;
+            text-align: left;
+            background: var(--chrome); border-radius: 8px;
+            border: 1px solid rgba(0,0,0,0.35);
+            max-height: 40vh; overflow-y: auto;
+        }
+        .cmd-list li {
+            display: flex; gap: 10px; align-items: baseline;
+            font-family: ui-monospace, "SF Mono", Menlo, monospace;
+            font-size: 13px; line-height: 1.7;
+            color: #7dd3fc;          /* the log's `.line-tx` — same voice */
+            word-break: break-all;
+        }
+        /* The order they go out in, which is not decoration: the console takes
+           one line at a time and some of these depend on the ones before. */
+        .cmd-list li::before {
+            counter-increment: cmd; content: counter(cmd);
+            flex: 0 0 auto; min-width: 1.2em; text-align: right;
+            color: var(--txt-faint); font-size: 11px;
+        }
         #confirm-body p:last-child { margin-bottom: 0; }
         .dialog-actions {
             display: flex; justify-content: center; gap: 12px;
@@ -1007,8 +1041,22 @@
             text-transform: uppercase; color: var(--muted);
             background: #0b1220; position: sticky; top: 0;
         }
+        /*
+         * The row wraps rather than letting either half win.
+         *
+         * `.cmd` was `flex: 0 0 auto`, which is right until a command carries
+         * a real value: `AT+PUBTOPIC=waterplan/meters/869181072714122/uplink`
+         * is wider than the panel, so it took the whole row and ellipsised the
+         * hint out of existence — on exactly the entries whose value is worth
+         * reading. Truncating the command instead is worse: it is the thing
+         * being inserted into the field.
+         *
+         * So the hint drops to its own line when the two do not fit, and both
+         * survive whole.
+         */
         .at-opt {
-            display: flex; align-items: baseline; gap: 8px;
+            display: flex; flex-wrap: wrap; align-items: baseline;
+            gap: 2px 8px;
             width: 100%; padding: 7px 12px;
             border: none; background: none; text-align: left;
             color: #cbd5e1; font-size: 13px;
@@ -1016,14 +1064,19 @@
         }
         .at-opt:hover, .at-opt.is-on { background: #1e293b; }
         .at-opt .cmd {
-            flex: 0 0 auto;
+            flex: 0 1 auto; min-width: 0;
             font-family: ui-monospace, "SF Mono", Menlo, monospace;
             color: #7dd3fc;
+            /* A topic is one unbroken token and has to give somewhere. Broken
+               mid-string beats hidden: every character stays readable. */
+            word-break: break-all;
         }
+        /* `min-width` is the wrap trigger: below about eight characters the
+           hint is not worth the space it would take from the command, so it
+           takes a line of its own instead. */
         .at-opt .why {
-            flex: 1 1 auto; min-width: 0;
+            flex: 1 1 auto; min-width: 8em;
             font-size: 11px; color: var(--muted);
-            overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
         }
         /* A factory reset undoes a provisioning session. It is in the list
            because the list is the whole table, and it is red because being in
