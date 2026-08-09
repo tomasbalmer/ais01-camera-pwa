@@ -924,9 +924,11 @@ async function loadFromFolder(folder, files) {
     reportFolder(report);
 
     if (!report.ok) {
-        rejectFolder(`${folder} is not ready to write`,
-                     'Fix the lines marked above and pick the folder again. ' +
-                     'Nothing was sent to the unit.');
+        const broken = report.findings.filter(f => f.level === 'fail').length;
+        rejectFolder(
+            `${folder} — ${broken} thing${broken === 1 ? '' : 's'} to fix above`,
+            'Fix them in the folder and pick it again with ⓪. Nothing has ' +
+            'been sent to the unit.');
         return false;
     }
 

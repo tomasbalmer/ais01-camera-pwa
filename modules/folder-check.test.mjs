@@ -163,16 +163,16 @@ const ambiguous = await checkFolder(FOLDER, [
 check('two candidates for one role are refused, not guessed at',
       ambiguous.ok, false);
 check('and both names are shown',
-      ambiguous.findings.some(f => f.detail.includes('2 candidates')), true);
+      ambiguous.findings.some(f => f.detail.includes('2 of them')), true);
 
 const noKey = await checkFolder(FOLDER, [
     file(`${ID_A}-certificate.pem.crt`, CERT),
     file('password.txt', '482913'),
 ]);
 check('a missing role is refused', noKey.ok, false);
-check('and named exactly',
-      noKey.findings.some(f => f.label === 'private_key' && f.detail === 'missing'),
-      true);
+check('and named exactly, with what would fix it',
+      noKey.findings.some(f => f.label === 'private_key'
+                            && f.detail.includes('*-private.pem.key')), true);
 
 const emptyPassword = await checkFolder(FOLDER, [
     file(`${ID_A}-certificate.pem.crt`, CERT),
@@ -215,6 +215,51 @@ check('but the untestable tie is said out loud',
  * the difference between re-downloading one file and re-downloading all. */
 check('a failing folder still reports every check it got to',
       mixed.findings.length >= 3, true);
+
+
+/* ── Every row, every time ───────────────────────────────────────────────
+ *
+ * The check used to return on the first failure, so a folder with a bad NAME
+ * reported one line and stopped — and the operator fixing it could not see
+ * which files were already in place. A checklist that stops at the first
+ * unticked box is not a checklist.
+ */
+const ROWS = ['imei', 'environment', 'region',
+              'certificate', 'private_key', 'password', 'pair'];
+const labelsOf = report => report.findings.map(f => f.label);
+
+check('a good folder reports every row',
+      ROWS.every(row => labelsOf(good).includes(row)), true);
+
+const nameless = await checkFolder('AIS01-CB-Test', goodFolder());
+check('a folder with an unusable name is refused', nameless.ok, false);
+check('and still reports every row',
+      ROWS.every(row => labelsOf(nameless).includes(row)), true);
+check('naming the IMEI as the thing that is missing',
+      nameless.findings.some(f => f.label === 'imei' && f.level === 'fail'), true);
+check('and the environment separately',
+      nameless.findings.some(f => f.label === 'environment' && f.level === 'fail'),
+      true);
+check('while the files it DOES have still come back ok',
+      nameless.findings.filter(f => f.level === 'ok').map(f => f.label).sort(),
+      ['certificate', 'pair', 'password', 'private_key']);
+
+/* One fact missing is one row failing, not all of them. */
+const noRegionNoEnv = await checkFolder('AIS01-CB-869181072714122', goodFolder());
+check('the IMEI is found even when the environment is not',
+      noRegionNoEnv.findings.some(f => f.label === 'imei' && f.level === 'ok'),
+      true);
+check('and only the environment fails',
+      noRegionNoEnv.findings.filter(f => f.level === 'fail').map(f => f.label),
+      ['environment']);
+
+const empty = await checkFolder('AIS01-CB-Test', []);
+check('an empty folder names all three files it wants',
+      ['certificate', 'private_key', 'password'].every(role =>
+          empty.findings.some(f => f.label === role && f.detail.includes('missing'))),
+      true);
+check('and says the pair cannot be judged yet',
+      empty.findings.some(f => f.label === 'pair' && f.level === 'info'), true);
 
 console.log(failed ? `\n${failed} failed` : '\nall passed');
 process.exit(failed ? 1 : 0);

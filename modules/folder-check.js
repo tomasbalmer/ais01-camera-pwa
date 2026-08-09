@@ -44,19 +44,33 @@ export const FOLDER_ENV = /(staging|production)/i;
  */
 export const FOLDER_REGION = /-(AR|BR)\s*$/i;
 
-export function identityOf(folder) {
-    const imei = (folder.match(FOLDER_IMEI) || [])[1];
-    const envName = (folder.match(FOLDER_ENV) || [])[1];
-    if (!imei || !envName) return null;
-    const region = (folder.match(FOLDER_REGION) || [])[1];
+/*
+ * The three facts, each on its own, present or not.
+ *
+ * Read separately rather than all-or-nothing, because a name that is missing
+ * one of them still has the other two and the operator has to be told WHICH is
+ * missing. "Carries no IMEI and no environment" is what you get from a function
+ * that only knows how to succeed completely.
+ */
+export function nameFacts(folder) {
+    const imei = (folder.match(FOLDER_IMEI) || [])[1] || null;
+    const envName = (folder.match(FOLDER_ENV) || [])[1] || null;
+    const region = (folder.match(FOLDER_REGION) || [])[1] || null;
     return {
         imei,
-        environment: envName.toLowerCase(),
+        environment: envName ? envName.toLowerCase() : null,
         /* Null is a real answer here and not a failure: everything except the
          * network stage works without it. */
         region: region ? region.toUpperCase() : null,
-        folder,
     };
+}
+
+/* An identity needs both of the facts that decide what the material MEANS. The
+ * region is not one of them — see `nameFacts`. */
+export function identityOf(folder) {
+    const facts = nameFacts(folder);
+    if (!facts.imei || !facts.environment) return null;
+    return { ...facts, folder };
 }
 
 /*
@@ -69,6 +83,14 @@ export const FILE_ROLES = [
     ['private_key', /-private\.pem\.key$/i],
     ['password',    /^password\.txt$/i],
 ];
+
+/* What to tell an operator who is missing one. The patterns above are for
+ * matching; these are for reading. */
+const WANTED = {
+    certificate: 'one *-certificate.pem.crt',
+    private_key: 'one *-private.pem.key',
+    password: 'password.txt',
+};
 
 /*
  * Expected in the folder and not wanted. Named rather than lumped into
@@ -216,102 +238,97 @@ export function matchRoles(names) {
 export async function checkFolder(folder, files) {
     const findings = [];
     const say = (level, label, detail) => findings.push({ level, label, detail });
+    let fatal = false;
+    const bad = (label, detail) => { say('fail', label, detail); fatal = true; };
 
-    const identity = identityOf(folder);
-    if (!identity) {
-        say('fail', 'name', `"${folder}" carries no IMEI and no environment`);
-        return { ok: false, identity: null, chosen: null, findings };
-    }
-    say('ok', 'name', `IMEI ${identity.imei}, ${identity.environment}`);
+    /* ── The name ──────────────────────────────────────────────────────── */
+    const facts = nameFacts(folder);
 
-    /*
-     * A note, not a refusal. The certificates, the login and the MQTT settings
-     * do not care which network the unit will attach to; only the network
-     * stage does, and it is the one that refuses.
-     */
-    if (identity.region) {
-        say('ok', 'region', `${identity.region} — the network profile ③ will send`);
+    if (facts.imei) say('ok', 'imei', facts.imei);
+    else bad('imei', 'not in the folder name — it has to carry the unit\'s 15 ' +
+                     'digits, because no file inside carries them');
+
+    if (facts.environment) say('ok', 'environment', facts.environment);
+    else bad('environment', 'not in the folder name — add WaterplanProduction ' +
+                            'or WaterplanStaging, which is what decides the broker');
+
+    if (facts.region) {
+        say('ok', 'region', `${facts.region} — the network profile ③ will send`);
     } else {
         say('note', 'region',
-            'the folder name does not end in -AR or -BR, so the network stage ' +
-            'has no APN or IOTMOD to send — rename it to enable that stage');
+            'not in the folder name — end it in -AR or -BR to enable ③; ' +
+            'nothing else on this screen needs it');
     }
 
+    /* ── The files ─────────────────────────────────────────────────────── */
     const { roles, ignored, unknown } = matchRoles(files.map(f => f.name));
+    const chosen = {};
+    let password = null;
 
-    /* Presence and ambiguity, before anything is read. */
-    let fatal = false;
     for (const [role] of FILE_ROLES) {
         const hits = roles[role];
+
         if (!hits.length) {
-            say('fail', role, 'missing');
-            fatal = true;
-        } else if (hits.length > 1) {
-            say('fail', role, `${hits.length} candidates — ${hits.join(', ')}`);
-            fatal = true;
+            bad(role, `missing — the folder needs ${WANTED[role]}`);
+            continue;
         }
-    }
-    if (fatal) {
-        if (ignored.length) {
-            say('info', 'ignored', listNames(ignored));
+        if (hits.length > 1) {
+            bad(role, `${hits.length} of them, so there is nothing to choose ` +
+                      `between: ${listNames(hits)}`);
+            continue;
         }
-        if (unknown.length) say('info', 'also present', listNames(unknown));
-        return { ok: false, identity, chosen: null, findings };
+
+        const file = files.find(f => f.name === hits[0]);
+        const text = await file.text();
+
+        if (role === 'password') {
+            password = text.split(/\r?\n/)[0].trim();
+            if (!password) {
+                bad(role, `${file.name} is empty — download it again from Drive`);
+                continue;
+            }
+            if (!PASSWORD_SHAPE.test(password)) {
+                /* A note, never a refusal: we know what these have looked like,
+                 * not that they can never look otherwise. */
+                say('note', role,
+                    `${file.name} found with ${password.length} characters — ` +
+                    'every unit so far has had 6 digits, so check this is the ' +
+                    'console password and not something else');
+            } else {
+                /* The value never appears. The shape is the whole of what can
+                 * be said safely in a log people screenshot. */
+                say('ok', role, `${file.name} found with 6 digits`);
+            }
+            chosen[role] = file;
+            continue;
+        }
+
+        const problem = pemProblem(text, role);
+        if (problem) { bad(role, problem); continue; }
+        say('ok', role, `${mask(file.name)} found, ${text.length} bytes`);
+        chosen[role] = file;
     }
 
-    const chosen = Object.fromEntries(FILE_ROLES.map(([role]) => [
-        role, files.find(f => f.name === roles[role][0]),
-    ]));
+    /* ── The tie between the two PEMs ──────────────────────────────────── */
+    const certId = chosen.certificate && certificateId(chosen.certificate.name);
+    const keyId = chosen.private_key && certificateId(chosen.private_key.name);
 
-    /* The pair. Both names carry the certificate they belong to, and material
-     * from two different certificates is the failure that writes cleanly and
-     * is refused by AWS IoT a cycle later. */
-    const certId = certificateId(chosen.certificate.name);
-    const keyId = certificateId(chosen.private_key.name);
-    if (certId && keyId && certId !== keyId) {
-        say('fail', 'pair',
-            `certificate is ${mask(certId)} but the key is ${mask(keyId)} — ` +
-            'two different certificates in one folder');
-        fatal = true;
+    if (!chosen.certificate || !chosen.private_key) {
+        say('info', 'pair', 'cannot be checked until both files are here');
+    } else if (certId && keyId && certId !== keyId) {
+        /* The check this module was written for. Material from two different
+         * certificates writes without complaint and is refused by AWS IoT a
+         * cycle later, which is the failure that looks like broken hardware. */
+        bad('pair', `certificate is ${mask(certId)} but the key is ` +
+                    `${mask(keyId)} — two different certificates in one folder`);
     } else if (certId && keyId) {
-        say('ok', 'pair',
-            `certificate and key both from ${mask(certId)}`);
+        say('ok', 'pair', `certificate and key both from ${mask(certId)}`);
     } else {
-        /* Renamed by hand, so the tie cannot be checked. Not a refusal — the
-         * files may be perfectly correct — but it is the check that would have
-         * caught a mixed folder, and its absence is worth one line. */
+        /* Renamed by hand, so the tie cannot be tested. Not a refusal — the
+         * files may be perfectly correct — but its absence is worth a line. */
         say('info', 'pair',
-            'file names carry no certificate id, so the two cannot be tied ' +
-            'together — they were renamed after AWS created them');
-    }
-
-    /* Contents. */
-    const certText = await chosen.certificate.text();
-    const certBad = pemProblem(certText, 'certificate');
-    if (certBad) { say('fail', 'certificate', certBad); fatal = true; }
-    else say('ok', 'certificate',
-             `${mask(chosen.certificate.name)} found, ${certText.length} bytes`);
-
-    const keyText = await chosen.private_key.text();
-    const keyBad = pemProblem(keyText, 'private_key');
-    if (keyBad) { say('fail', 'private key', keyBad); fatal = true; }
-    else say('ok', 'private key',
-             `${mask(chosen.private_key.name)} found, ${keyText.length} bytes`);
-
-    const password = (await chosen.password.text()).split(/\r?\n/)[0].trim();
-    if (!password) {
-        say('fail', 'password', 'password.txt is empty');
-        fatal = true;
-    } else if (!PASSWORD_SHAPE.test(password)) {
-        say('note', 'password',
-            `${chosen.password.name} found with ${password.length} characters ` +
-            '— every unit so far has had 6 digits, so check this is the ' +
-            'console password and not something else');
-    } else {
-        /* The value never appears. The shape is what the operator needs to
-         * know, and it is the whole of what can be said safely. */
-        say('ok', 'password',
-            `${chosen.password.name} found with 6 digits`);
+            'the file names carry no certificate id, so the two cannot be ' +
+            'tied together — they were renamed after AWS created them');
     }
 
     if (ignored.length) say('info', 'ignored', listNames(ignored));
@@ -319,7 +336,7 @@ export async function checkFolder(folder, files) {
 
     return {
         ok: !fatal,
-        identity,
+        identity: fatal ? null : { ...facts, folder },
         chosen: fatal ? null : chosen,
         password: fatal ? null : password,
         findings,
