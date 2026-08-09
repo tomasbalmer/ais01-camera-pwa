@@ -5,7 +5,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="mobile-web-app-capable" content="yes">
-    <meta name="theme-color" content="#0f172a">
+    <!-- The bar's colour, not the page's: this paints the strip the OS puts
+         directly above the bar, and those two touching must read as one. -->
+    <meta name="theme-color" content="#0a1120">
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
     <meta http-equiv="Pragma" content="no-cache">
     <meta http-equiv="Expires" content="0">
@@ -44,7 +46,12 @@
          *   · ONE line of text, 12px, --text2, flex:1, ellipsised — nothing
          *     bold, nothing monospaced, nothing competing
          *   · a 36x36 icon button on the end
-         *   · the same background as the page, separated by one hairline
+         *   · one hairline under it, and nothing heavier
+         *
+         * One rule of that bar is deliberately NOT copied: its background.
+         * The calibration page is a viewfinder with a bar on top, so a bar
+         * the same colour as the page is right there. This page is a log
+         * with furniture at both ends — see `--chrome` below.
          */
         :root {
             --bg: #0f172a;
@@ -52,6 +59,31 @@
             --text2: #94a3b8;
             --muted: #64748b;
             --border: #334155;
+
+            /*
+             * ── Furniture vs instrument ─────────────────────────────────
+             *
+             * Three bands on this page and only two kinds of thing. The bar
+             * and the console are FURNITURE: session controls, always there,
+             * never the reason anyone opened the page. Between them is the
+             * INSTRUMENT — the two logs, the one surface a technician
+             * actually reads.
+             *
+             * The console already sat on its own darker ground for exactly
+             * this reason; the bar did not, and shared `--bg` with the logs
+             * separated by a hairline. So the page had the rule and applied
+             * it to one end. These two values are that rule, named, applied
+             * to both ends, and the logs keep `--bg` — furniture recedes,
+             * the instrument sits on top of it.
+             *
+             * `--chrome-2` is the logs' OWN furniture: the pane headers, the
+             * legend, the line counter. It is a step, not a repeat, of
+             * `--chrome`: identical to the bar would fuse the HISTORY header
+             * into the bar above it, which is the seam this whole change
+             * exists to draw.
+             */
+            --chrome:    #0a1120;   /* top bar, console foot */
+            --chrome-2:  #0c1627;   /* pane heads, log foot */
 
             /*
              * The left rail.
@@ -105,8 +137,18 @@
             display: flex;
             align-items: center;
             gap: 8px;
-            background: var(--bg);
+            background: var(--chrome);
             border-bottom: 1px solid var(--border);
+            /* The console's shadow, pointing the other way. The hairline says
+               where the bar ends; the shadow says which of the two is on top,
+               and the answer has to be the log.
+
+               Shorter than the console's, and measured rather than guessed:
+               at the console's 6px/16px the falloff was still darkening the
+               HISTORY header 9px down, which put that header within a shade
+               of the bar itself — the one seam this change exists to draw. */
+            box-shadow: 0 2px 6px rgba(0,0,0,0.30);
+            position: relative; z-index: 2;
         }
         .icon-btn {
             width: 36px; height: 36px;
@@ -159,15 +201,24 @@
         main {
             flex: 1 1 auto; position: relative; min-height: 0;
             display: flex; flex-direction: column;
+            /* Stated rather than inherited. It is the same value `body` has,
+               but this is the one band on the page that is meant to be the
+               lit surface — leaving it to inheritance is how it silently
+               follows the next person who changes the page background. */
+            background: var(--bg);
         }
         .pane {
             flex: 1 1 0; min-height: 0; min-width: 0;
             display: flex; flex-direction: column; overflow: hidden;
         }
+        /* Furniture, not log: these label the pane, they are not written to
+           by anything the device says. Same reasoning as the bar and the
+           console, one step lighter — see `--chrome-2`. */
         .pane-head {
             flex: 0 0 auto; padding: 3px 12px;
             font-size: 9px; font-weight: 600; letter-spacing: 0.1em;
-            color: var(--muted); border-bottom: 1px solid #1e293b;
+            color: var(--muted); background: var(--chrome-2);
+            border-bottom: 1px solid #1e293b;
         }
         .pane-head.legend {
             display: flex; align-items: center; gap: 5px;
@@ -195,9 +246,12 @@
                               border-right: 1px solid #1e293b; }
             .pane-annotated { order: 2; }
         }
+        /* The counter measures the pane, it is not part of it — same ground
+           as the head it closes the pane against. */
         .log-foot {
             flex: 0 0 auto; height: 28px; padding: 0 12px;
             display: flex; align-items: center; justify-content: space-between;
+            background: var(--chrome-2);
             border-top: 1px solid #1e293b;
             font-size: 10px; color: var(--muted);
         }
@@ -548,9 +602,10 @@
          */
         .console-foot {
             flex: 0 0 auto;
-            background: #0a1120;
+            background: var(--chrome);
             border-top: 2px solid var(--border);
             box-shadow: 0 -6px 16px rgba(0,0,0,0.35);
+            position: relative; z-index: 2;
         }
 
         .at-row {
