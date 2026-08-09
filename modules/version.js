@@ -16,8 +16,8 @@
  * cached shell — pull to refresh, or reinstall the app from the home screen.
  */
 
-export const VERSION = '0.71.0';
+export const VERSION = '0.72.0';
 
 /* One line, for the places that want context rather than just a number. */
-export const VERSION_NOTE = '⓪ tells a folder that is wrong apart from a '
-    + 'folder that is right and short one file';
+export const VERSION_NOTE = '③ and ④ send at the console\'s own rate, and '
+    + 'an unheard answer stops being reported as a failed setting';

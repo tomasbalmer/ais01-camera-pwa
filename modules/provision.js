@@ -84,6 +84,8 @@ function redact(line) {
 
 const el = id => document.getElementById(id);
 
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+
 /* ── The raw log ─────────────────────────────────────────────────────────
  *
  * The CLI harness this replaces keeps a raw.log, and every claim about what a
@@ -1665,6 +1667,33 @@ function desiredSettings(bundle) {
 }
 
 /*
+ * How often this console will take a line — one number, three callers.
+ *
+ * The device has ONE 300-byte console line buffer and no queue
+ * (`console-line-law.js`): the RX handler fills it, the main loop dispatches it,
+ * then zeroes it, and anything that arrives in between is discarded outright.
+ * So the rate a sender may use is set by how often that loop comes round, and
+ * nothing else — not the baud rate, not the length of the line.
+ *
+ * The number is ② 's, measured rather than chosen: counting which upload parts
+ * survived put the acceptance period at about 2.1 s, and the long note in
+ * `doCerts` is the whole derivation.
+ *
+ * ③ and ④ sent at 350 ms and were losing lines to exactly this. On 2026-08-09
+ * four network settings went out inside one second and the device answered
+ * ONE `OK` — one line dispatched, three overwritten in a buffer that had not
+ * been emptied yet. The stage then reported `0/4` and the operator was left
+ * being told that settings had not persisted, when three of them had never
+ * been executed at all.
+ *
+ * These commands are answered by the app rather than forwarded to the modem, so
+ * their dispatch may well be cheaper than an upload part's — but that is a
+ * guess, and the two errors are not symmetric. Sending early loses the line in
+ * silence; sending late costs seconds.
+ */
+const CONSOLE_LINE_MS = 2500;
+
+/*
  * The two config stages differ in three strings and one function. Everything
  * else — stage, arm, apply, count, record — is identical, and writing it twice
  * is how the second copy quietly stops matching the first.
@@ -1714,55 +1743,160 @@ async function stageConfig(key) {
     setMark(spec.mark, 'staged', 'run');
 }
 
+/*
+ * A bare `OK` on a line of its own — never `\bOK\b` anywhere in one.
+ *
+ * The word test was matching device chatter, and this stream is never quiet:
+ * the firmware's own messages arrive in the middle of the exchange. Crediting a
+ * setting because the word appeared inside one of them is the same class of
+ * mistake as missing the answer entirely, in the direction nobody checks.
+ */
+const ANSWERED = /^\s*OK\s*$/;
+const REFUSED = /ERROR/i;
+
+/* After the last line, the stream is still carrying its answer. */
+const REPLY_DRAIN_MS = 1200;
+
+/*
+ * Send them on a clock, and read the answers off the stream afterwards.
+ *
+ * Gating each send on the previous answer would be the stronger design — an
+ * `OK` in hand proves the console buffer has been dispatched and zeroed, which
+ * is the only thing this pacing is trying to establish. It is the wrong design
+ * for THIS stream. These commands go out while the firmware is talking: boot
+ * lines, `Signal Strength`, upload notices. A bare `OK` inside that traffic is
+ * missed easily, and a sender that waits for a confirmation it failed to
+ * recognise stalls the whole stage on a line that did in fact arrive.
+ *
+ * So the clock paces the sends, and the stream is sliced by that same clock:
+ * every line is filed under whichever command was in flight when it arrived.
+ * ONE collector spans the stage rather than one per command — sequential
+ * collectors lose whatever lands between them, which is the bug that cost
+ * 2026-08-04 and it is not worth reintroducing here.
+ *
+ * The residual is named rather than hidden: an answer that arrives more than a
+ * slot late is credited to the following command. With `CONSOLE_LINE_MS` of
+ * spacing that is unlikely, it cannot turn silence into a pass, and it is
+ * exactly why nothing below treats a missing answer as a refusal.
+ */
 async function applyConfig(key) {
     if (!bundleReady()) return;
+    /*
+     * These stages used to be over in a couple of seconds and now hold the
+     * console for ten to thirty, which is long enough for a second tap to be a
+     * reasonable thing for a person to do. Two senders on one 300-byte buffer
+     * lose each other's lines, so the second one waits — the same guard ②
+     * already keeps, for the same reason and not because of anything the device
+     * is doing.
+     */
+    if (state.busy) { note('a stage is already running'); return; }
     const spec = CONFIG_STAGES[key];
     const deltas = state.pending[key] || [];
-    /* Only what the device ACCEPTED. A setting it answered ERROR to is not
-     * what this unit is meant to have — it is what somebody tried, and the
-     * record must not blur those two. */
-    const applied = [];
-    let accepted = 0;
+
+    /* One bucket per command, filled while that command is the one in flight. */
+    const heard = deltas.map(() => []);
+    let inFlight = -1;
+    const collector = { lines: [], each: line => {
+        if (inFlight >= 0) heard[inFlight].push(line);
+    } };
+    collectors.add(collector);
+
+    const seconds = Math.round(
+        (deltas.length * CONSOLE_LINE_MS + REPLY_DRAIN_MS) / 1000);
+    note(`sending ${deltas.length} lines, one every ${CONSOLE_LINE_MS / 1000} s ` +
+         `— about ${seconds} s. The console takes one line at a time.`);
     setMark(spec.mark, `0/${deltas.length}`, 'run');
 
-    for (const [i, cmd] of deltas.entries()) {
-        write(cmd, 'tx');
-        const replies = listen(350);
-        await link.sendLine(cmd);
-        /* Paced, not timed: the console is a 9600-baud bridge and swallows a
-         * burst. This is not a wait-for-the-window heuristic. */
-        const lines = await replies;
-        if (lines.some(l => /\bOK\b/.test(l))) {
-            accepted++;
-            /* First `=` only: values carry their own, as in `SERVADDR=host,8883`. */
-            const split = cmd.indexOf('=');
-            applied.push([cmd.slice(0, split), cmd.slice(split + 1)]);
+    state.busy = true;
+    try {
+        for (const [i, cmd] of deltas.entries()) {
+            write(cmd, 'tx');
+            /* Set before the send: a prompt answer belongs to this command's
+             * bucket, not to the one that has just stopped being in flight. */
+            inFlight = i;
+            await link.sendLine(cmd);
+            setMark(spec.mark, `${i + 1}/${deltas.length} sent`, 'run');
+            await sleep(CONSOLE_LINE_MS);
         }
-        else if (lines.some(l => /ERROR/i.test(l))) fail(`  ${cmd} → ERROR`);
-        setMark(spec.mark, `${i + 1}/${deltas.length}`, 'run');
+        /* The last command's slot ended with the loop, so its answer gets the
+         * drain — the same gap `certmod.js` leaves after every exchange. */
+        await sleep(REPLY_DRAIN_MS);
+    } finally {
+        collectors.delete(collector);
+        /* Released before the record below, like ② does: writing a file is not
+         * part of the device conversation and must not hold the console shut. */
+        state.busy = false;
     }
 
     /*
-     * Amber even at 9/9. `OK` means the command parsed, not that the setting
-     * survives a reboot — the only proof is re-reading AT+CFG after a reset,
-     * and this app does not get to claim it on the device's behalf.
+     * Three verdicts, not two. `silent` is the one the old code did not have:
+     * it counted anything that was not an `OK` as a failure, so a stage whose
+     * answers it had simply not waited long enough to hear closed as `0/4` —
+     * which reads as "the settings did not take" and is a claim nobody made.
      */
-    setMark(spec.mark, `${accepted}/${deltas.length} OK`,
-            accepted === deltas.length ? 'weak' : 'fail');
-    note(`${accepted}/${deltas.length} settings returned OK`);
-    note('OK is not persisted: verify with AT+CFG after a reset');
+    const verdicts = deltas.map((_, i) =>
+        heard[i].some(l => REFUSED.test(l)) ? 'refused'
+        : heard[i].some(l => ANSWERED.test(l)) ? 'ok'
+        : 'silent');
+
+    for (const [i, cmd] of deltas.entries()) {
+        if (verdicts[i] === 'refused') fail(`  ${cmd} → ERROR`);
+        else if (verdicts[i] === 'silent') note(`  ${cmd} → no answer in its slot`);
+    }
+
+    const tally = what => verdicts.filter(v => v === what).length;
+    const okN = tally('ok');
+    const refusedN = tally('refused');
+    const silentN = tally('silent');
+
+    /*
+     * Amber even at 4/4. An answer means the command parsed, not that the
+     * setting survives a reboot — only re-reading `AT+CFG` after a reset proves
+     * that, and this app does not get to claim it on the device's behalf.
+     *
+     * Red is kept for a device that actually said no. Silence is not a no.
+     */
+    setMark(spec.mark, `${okN}/${deltas.length} OK`, refusedN ? 'fail' : 'weak');
+    note(`${okN} of ${deltas.length} answered OK` +
+         (refusedN ? `, ${refusedN} returned ERROR` : '') +
+         (silentN ? `, ${silentN} did not answer in their slot` : ''));
+    note('An answer is the command parsing, not the setting surviving a reboot.');
+    if (silentN) {
+        note('No answer is not a refusal: the line may not have been dispatched, ' +
+             'or its OK may have landed a slot late.');
+    }
+    you('Send AT+CFG after a reset to read back what the unit actually holds — ' +
+        'it is in the command menu, and it is the only thing that settles this.');
+
     state.pending[key] = null;
     configLabel(key, null);
+
+    /*
+     * Everything the device did not REFUSE goes into `intended-config.json`.
+     *
+     * It used to be only what answered `OK`, on the rule that a setting the
+     * device rejected is not what the unit is meant to have. The rule is right;
+     * the implementation lumped silence in with refusal, so a stage whose
+     * answers were merely unheard wrote nothing at all. The file is named
+     * `intended` — it is the standing answer to "what is this unit meant to
+     * have". What was OBSERVED is the log entry below, verdict by verdict.
+     */
+    const applied = deltas
+        .filter((_, i) => verdicts[i] !== 'refused')
+        /* First `=` only: values carry their own, as in `SERVADDR=host,8883`. */
+        .map(cmd => [cmd.slice(0, cmd.indexOf('=')),
+                     cmd.slice(cmd.indexOf('=') + 1)]);
 
     await recordSettings(applied);
     await record({
         stage: STAGES.config,
         substep: spec.substep,
-        status: accepted === deltas.length ? 'done' : 'partial',
-        summary: `${accepted}/${deltas.length} settings returned OK. OK is the ` +
-                 'command parsing, not the setting surviving a reboot — only ' +
-                 're-reading AT+CFG after a reset proves that.',
-        evidence: applied.map(([name, value]) => `${name}=${value}`),
+        status: refusedN ? 'failed' : okN === deltas.length ? 'done' : 'partial',
+        summary: `${deltas.length} sent, ${okN} answered OK, ${refusedN} refused, ` +
+                 `${silentN} unanswered. An answer is the command parsing, not ` +
+                 'the setting surviving a reboot, and an unanswered line is not ' +
+                 'a refusal — only re-reading AT+CFG after a reset proves either.',
+        evidence: deltas.map((cmd, i) => `${cmd} → ${verdicts[i]}`),
     });
 }
 
@@ -1849,8 +1983,12 @@ async function doCerts() {
          * roughly two and a half minutes for all three. The idle window after
          * `NB module power-off successful` runs some nine minutes, so it fits
          * with room to spare.
+         *
+         * The number has a name now, and ③ and ④ send at it too: it is a
+         * property of the console's one line buffer, not of an upload, and the
+         * settings stages were losing lines to the same clock this measured.
          */
-        floorMs: 2500,
+        floorMs: CONSOLE_LINE_MS,
         log: (text, kind) => write(text, kind === 'ok' ? 'ok'
             : kind === 'fail' ? 'fail' : kind === 'tx' ? 'tx' : 'note'),
     };
