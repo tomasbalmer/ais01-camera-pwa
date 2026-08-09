@@ -242,6 +242,7 @@ async function doReset() {
     await link.sendLine('ATZ');
     /* The one boot we cause, so it is the one we can draw without being told. */
     divider('reset', 'RESET SENT');
+    sessionEnded();
     note('restarting — the link will drop and come back on its own');
     note('the AT window opens about 16 s after the boot banner');
 }
@@ -1549,6 +1550,37 @@ function judgeLogin(lines) {
 }
 
 /*
+ * The login mark dies with the session, because that is what a login IS here.
+ *
+ * The console asks for the password once per cycle. `ATZ` reboots the STM32, so
+ * the moment this app sends one the session it had is gone — and ① went on
+ * reading `correct` in green over a console that would now refuse every line.
+ * That is the mark claiming something no longer true, which is worse than
+ * claiming nothing: the operator's next tap is ② or ④, and the first symptom of
+ * a dead session is a stage that does nothing for thirty seconds.
+ *
+ * Blank rather than red. Red is a failure and this is not one — a restart is
+ * something we asked for. Blank says exactly what is the case: nobody has
+ * logged into THIS session yet.
+ *
+ * ONLY ① is cleared. Certificates live in the modem's flash and a reset does
+ * not touch them, and whether ③ and ④'s settings survive a reboot is precisely
+ * the question a reset exists to answer — wiping those marks would erase the
+ * before half of the comparison.
+ *
+ * This covers the resets this app causes and no others. A session also dies on
+ * the ~50 s idle timeout and when the unit sleeps, and neither is visible here
+ * without reading the device stream. `NB module power-off successful` is
+ * already watched for the ASLEEP divider and would be the honest next step;
+ * until then the mark can be stale, and it is stale in one direction only.
+ */
+function sessionEnded() {
+    if (!stageState.login || stageState.login === 'pending') return;
+    setMark('login', '', 'weak');
+    note('① cleared — the console asks for the password again after a restart');
+}
+
+/*
  * ② does NOT log in, and does not check whether ① did.
  *
  * A stage that requires a session would also have to know whether that session
@@ -2009,6 +2041,11 @@ async function doCerts() {
         });
         setMark('certs', '3/3 ✓', 'ok');
         ok('All three certificates verified by the modem.');
+        /* `writeCerts` ends on its own `ATZ` — Dragino requires a restart after
+         * a certificate change — so this session is over too, and ① must not
+         * keep reading `correct` into the next cycle. It is only reached on
+         * success: a run that threw before the restart may still have one. */
+        sessionEnded();
     } catch (err) {
         failure = err;
         setMark('certs', 'failed', 'fail');
