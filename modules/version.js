@@ -16,8 +16,8 @@
  * cached shell — pull to refresh, or reinstall the app from the home screen.
  */
 
-export const VERSION = '0.55.0';
+export const VERSION = '0.56.0';
 
 /* One line, for the places that want context rather than just a number. */
-export const VERSION_NOTE = '⓪ shows the unit in figures, green while '
-    + 'nothing contradicts it and red when the connected unit disagrees';
+export const VERSION_NOTE = '⓪ remembers the folder, not what is in it — the '
+    + 'key and the password are read from disk and stored nowhere';

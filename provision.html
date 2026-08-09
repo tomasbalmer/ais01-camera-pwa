@@ -395,9 +395,11 @@
                  restarts the unit without anyone reaching for the board. The
                  link drops with it and comes back on its own. -->
             <button id="btn-reset">RESET</button>
-            <!-- The bundle is remembered in this browser between reloads, so a
-                 bench session stops paying a file picker per attempt. FORGET is
-                 how it stops being remembered when the unit changes. -->
+            <!-- The FOLDER is remembered between reloads — the reference to it
+                 and the permission to open it, never the certificate, the key
+                 or the password, which are re-read from disk each session.
+                 FORGET drops the reference when the bench moves to another
+                 unit. -->
             <button id="btn-forget">FORGET</button>
             <span id="live">▼ live</span>
         </div>
@@ -418,9 +420,15 @@
     </div>
 
     <!--
-      The input lives outside the row that hides: a `display:none` input still
-      opens its picker from ⓪, but a hidden ancestor is a needless risk for the
-      one control a session cannot start without.
+      The fallback picker. ⓪ prefers `showDirectoryPicker()`, which hands back a
+      handle the app can keep and re-open — that is what lets the material be
+      re-read from disk instead of stored in this browser. This input is what
+      stands in where that API is absent, and it cannot do the same: a `File`
+      list is a one-time read with nothing behind it to remember.
+
+      It lives outside the row that hides: a `display:none` input still opens
+      its picker from ⓪, but a hidden ancestor is a needless risk for the one
+      control a session cannot start without.
 
       `webkitdirectory`, and it is the whole point of this input. The material
       is a FOLDER — the one the technician downloaded from Drive and saved on

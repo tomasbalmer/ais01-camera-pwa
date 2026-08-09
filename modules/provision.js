@@ -20,6 +20,7 @@ import {
     isHunting, stopHunting, sendLine, sendRaw, disconnect,
 } from './ble-transport.js';
 import { writeCerts } from './certmod.js';
+import { saveHandle, loadHandle, clearHandle } from './handle-store.js';
 import { VERSION, VERSION_NOTE } from './version.js';
 
 /*
@@ -34,7 +35,16 @@ const link = {
 
 /* Everything below is app state. None of it describes the device. */
 const state = {
+    /* The unit's material, in memory only, for as long as this page lives.
+     * Re-read from disk every session — see `handle-store.js`. */
     bundle: null,
+    /* The folder itself, as a reference to a place on this machine. Survives a
+     * reload; its permission usually does not. */
+    handle: null,
+    /* What we know about the unit before its material is back: the IMEI and the
+     * environment, both read out of the folder's NAME. Enough to say which unit
+     * ⓪ is waiting for, and to stop the app adopting a different one. */
+    remembered: null,
     /* One pin per pane. They are both on screen now, so scrolling back through
      * the raw stream to check a line must not stop the annotated one from
      * following the device. */
@@ -610,15 +620,6 @@ const FILE_ROLES = [
  * takes the detail: the folder, the endpoint it resolved to, and which file was
  * matched to which role, the question you actually have when a write goes wrong.
  */
-function rolesOf(bundle) {
-    const names = bundle.files || {};
-    return {
-        certificate: { name: names.certificate || '(remembered)' },
-        private_key: { name: names.private_key || '(remembered)' },
-        password:    { name: names.password || '(remembered)' },
-    };
-}
-
 function showLoaded(bundle, folder, found) {
     el('imei').textContent = bundle.imei;
     markUnit();
@@ -645,16 +646,40 @@ function showLoaded(bundle, folder, found) {
  *
  * Its colour is the comparison the app can make for you: green while nothing
  * contradicts it, red the moment the connected unit advertises a different
- * IMEI. Amber is not an option here. Either they agree or they do not.
+ * IMEI.
+ *
+ * Amber is the third state, and it is not a hedge between the two — it means
+ * the material is NOT loaded. A folder remembered across a reload comes back as
+ * a name and a permission to re-request, never as its contents, so between the
+ * reload and the tap that re-opens it the app knows which unit it is waiting
+ * for and holds nothing it could write. Saying that in amber is the honest
+ * reading; leaving it green would be the app claiming a key it does not have.
  */
 function markUnit() {
     const bundle = state.bundle;
-    if (!bundle) { setMark('bundle', '', 'weak'); return; }
-    setMark('bundle', bundle.imei, imeiMismatch(bundle) ? 'fail' : 'ok');
+    if (bundle) {
+        setMark('bundle', bundle.imei, imeiMismatch(bundle) ? 'fail' : 'ok');
+        return;
+    }
+    if (state.remembered) { setMark('bundle', state.remembered.imei, 'weak'); return; }
+    setMark('bundle', '', 'weak');
+}
+
+/* Which unit the app should be talking to, material or not. Used to keep BLE
+ * adoption pointed at the right unit on a bench with several granted ones —
+ * a guard that used to disappear with every reload. */
+function expectedImei() {
+    if (state.bundle) return state.bundle.imei;
+    return state.remembered ? state.remembered.imei : null;
 }
 
 function rejectFolder(reason, ...help) {
     state.bundle = null;
+    /* The folder that was pointed at is not usable, so the app stops claiming
+     * to know which unit it is on. Keeping the identity would put an amber IMEI
+     * under a rejection, which reads as "waiting for this unit" when what
+     * happened is "this folder is wrong". */
+    state.remembered = null;
     el('imei').textContent = '—';
     el('btn-bundle').title = '';
     setMark('bundle', 'rejected', 'fail');
@@ -662,40 +687,43 @@ function rejectFolder(reason, ...help) {
     for (const line of help) you(line);
 }
 
-async function loadFiles(fileList) {
-    const files = Array.from(fileList || []);
-    if (!files.length) return;
-
-    /*
-     * The folder name is read before the files are, because it decides what
-     * the files MEAN. Without it there is material and no identity: three
-     * correct files that could belong to any unit on the bench, and writing
-     * them is how unit A's identity ends up inside unit B — silent, and
-     * visible weeks later in the field.
-     *
-     * So this refuses rather than warning. It used to warn and write anyway,
-     * from a time when a phone picker could not hand over a directory at all;
-     * now that the folder comes off a laptop's own disk, an unnamed one is a
-     * mistake to correct, not a limitation to work around.
-     */
-    const folder = (files[0].webkitRelativePath || '').split('/')[0];
+/*
+ * The identity a folder's NAME carries, which is the only place it exists.
+ * Null when the name does not follow the convention.
+ */
+function identityOf(folder) {
     const imei = (folder.match(FOLDER_IMEI) || [])[1];
     const envName = (folder.match(FOLDER_ENV) || [])[1];
+    if (!imei || !envName) return null;
+    return { imei, environment: envName.toLowerCase(), folder };
+}
 
-    if (!folder) {
-        rejectFolder('that was a file, not a folder',
-                     'Pick the FOLDER that came from Drive — its name carries ' +
-                     'the IMEI, and no file inside it does.');
-        return;
-    }
-    if (!imei || !envName) {
+/*
+ * Turn a folder — its name and the files in it — into this session's material.
+ *
+ * Both ways of choosing a folder end here: the directory handle, which is the
+ * real path on a desktop browser, and the `webkitdirectory` input that stands
+ * in where the File System Access API is absent. They differ in what they can
+ * remember afterwards, not in what a folder means.
+ *
+ * The name is read before the files are, because it decides what the files
+ * MEAN. Without it there is material and no identity: three correct files that
+ * could belong to any unit on the bench, and writing them is how unit A's
+ * identity ends up inside unit B — silent, and visible weeks later in the
+ * field. So this refuses rather than warning.
+ *
+ * Returns true when the material is loaded.
+ */
+async function loadFromFolder(folder, files) {
+    const who = identityOf(folder);
+    if (!who) {
         rejectFolder(`"${folder}" does not name a unit`,
                      'Expected AIS01-CB-<15-digit IMEI>-Waterplan<Production|' +
                      'Staging>. Rename the folder to match what the server ' +
                      'created and pick it again.');
-        return;
+        return false;
     }
-    const env = ENVIRONMENTS[envName.toLowerCase()];
+    const env = ENVIRONMENTS[who.environment];
 
     const found = {};
     for (const [role, pattern] of FILE_ROLES) {
@@ -709,16 +737,16 @@ async function loadFiles(fileList) {
                      'The folder needs the certificate (*-certificate.pem.crt), ' +
                      'the key (*-private.pem.key) and password.txt.');
         note(`saw ${files.length} file(s): ${files.map(f => f.name).join(', ')}`);
-        return;
+        return false;
     }
 
     const bundle = {
-        imei,
-        thing_name: `AIS01-CB-${imei}`,
+        imei: who.imei,
+        thing_name: `AIS01-CB-${who.imei}`,
         password: (await found.password.text()).split(/\r?\n/)[0].trim(),
         certificate: await found.certificate.text(),
         private_key: await found.private_key.text(),
-        environment: envName.toLowerCase(),
+        environment: who.environment,
         folder,
         /* Which files, by name, ended up being the ones used. Kept so the
          * screen can answer "where am I standing" without the technician
@@ -732,11 +760,11 @@ async function loadFiles(fileList) {
 
     if (!bundle.password) {
         rejectFolder('password.txt is empty', 'Download it again from Drive.');
-        return;
+        return false;
     }
 
     state.bundle = bundle;
-    rememberBundle(bundle, folder);
+    state.remembered = who;
     showLoaded(bundle, folder, found);
     ok(`loaded ${folder}`);
     note(`  ${bundle.environment} · certificate ${bundle.certificate.length}B ` +
@@ -744,72 +772,238 @@ async function loadFiles(fileList) {
 
     const problem = imeiMismatch(bundle);
     if (problem) fail(`WRONG UNIT — ${problem}`);
+    return true;
 }
 
-/* ── Remembering the unit's material ─────────────────────────────────────
- *
- * A bench session is one unit and many attempts, and each attempt has been
- * costing a trip through the file picker for the same folder. So the last
- * bundle is kept and restored on load.
- *
- * It is kept HERE, in this browser, and not in the app's source. The bundle
- * carries the unit's private key and console password, and this app is served
- * from a public repository — anything committed to it is published. Storage on
- * the machine doing the provisioning is a different risk from storage on the
- * open internet, and only one of them is acceptable.
- *
- * `FORGET` is on the load control for when the bench moves to another unit,
- * because material that outlives its purpose is the other half of the same
- * problem.
+/*
+ * The fallback picker, for a browser without `showDirectoryPicker`. It hands
+ * over the files and nothing else — there is no handle to keep, so this path
+ * cannot survive a reload and does not pretend to.
  */
-const REMEMBERED = 'ais01.provision.bundle';
+async function loadFiles(fileList) {
+    const files = Array.from(fileList || []);
+    if (!files.length) return;
 
-function rememberBundle(bundle, label) {
+    const folder = (files[0].webkitRelativePath || '').split('/')[0];
+    if (!folder) {
+        rejectFolder('that was a file, not a folder',
+                     'Pick the FOLDER that came from Drive — its name carries ' +
+                     'the IMEI, and no file inside it does.');
+        return;
+    }
+    await loadFromFolder(folder, files);
+}
+
+/* ── Remembering the folder, never what is in it ─────────────────────────
+ *
+ * A bench session is one unit and many attempts, and each attempt was costing a
+ * trip through the file picker for the same folder — twice, on 2026-08-04, at
+ * the exact moment an AT window was open. That cost is real and this still pays
+ * it off; what changed is WHAT gets kept to pay it.
+ *
+ * The first answer was the bundle itself, in `localStorage`, and it was chosen
+ * against the only alternative then on the table: committing the material into
+ * an app served from a public repository. Between those two it was the right
+ * call. Two things were outside that frame:
+ *
+ *   · `localStorage` is scoped to an ORIGIN, not to an app. Every GitHub Pages
+ *     project under the same account is the same origin, so the key was not
+ *     kept "in this app" — it was readable by anything else published there.
+ *   · `CreateKeysAndCertificate` returns a private key ONCE. The copy in that
+ *     folder is not a cache that can be repopulated; it is the only copy.
+ *
+ * The third option did not exist yet, because it needs a folder on this
+ * machine's own disk rather than a phone reaching into Drive: keep a REFERENCE
+ * to the folder and re-read it. `FileSystemDirectoryHandle` is exactly that,
+ * and it is storable in IndexedDB — see `handle-store.js` for why not
+ * `localStorage`.
+ *
+ *     kept       the folder, and permission to open it again
+ *     not kept   the certificate, the private key, the password
+ *
+ * So the picker trip is still avoided, and the material's lifetime is now the
+ * page's. `FORGET` drops the reference as well, for when the bench moves on.
+ */
+
+/* The key the material used to live under. It is not merely unused now — it is
+ * removed on sight, because a browser that ran an older version is still
+ * holding a production unit's private key in it. */
+const STORED_MATERIAL = 'ais01.provision.bundle';
+
+/*
+ * Delete it, and salvage the one part of it that was never a secret.
+ *
+ * The folder's name is not material — it is the IMEI and the environment, both
+ * of which are printed on the unit. Keeping that much means a browser upgrading
+ * into this version still knows which unit it was on, and asks for the folder
+ * rather than for a decision.
+ */
+function purgeStoredMaterial() {
+    let raw;
+    try { raw = localStorage.getItem(STORED_MATERIAL); } catch { return null; }
+    if (!raw) return null;
+
+    try { localStorage.removeItem(STORED_MATERIAL); } catch { /* nothing to undo */ }
+    fail('removed the certificate, private key and password this browser had ' +
+         'stored from an earlier version');
+    note('  material now lives only in this page, and only while it is open');
+
+    let saved = null;
+    try { saved = JSON.parse(raw); } catch { return null; }
+    const folder = saved && saved.bundle && (saved.bundle.folder || saved.label);
+    return folder ? identityOf(folder) : null;
+}
+
+function hasFolderApi() {
+    return typeof window.showDirectoryPicker === 'function';
+}
+
+/*
+ * A stored handle is not stored access.
+ *
+ * The browser tracks the permission separately and, on most reloads, drops it
+ * back to `prompt`. Re-granting needs a user gesture, so this asks without one
+ * first (`interactive: false`) and only escalates from the ⓪ tap — which is the
+ * gesture, and which the operator was going to make anyway.
+ *
+ * `readwrite` rather than `read`, and not because anything is written yet: the
+ * next thing this folder has to hold is what we configured on the unit, beside
+ * the material it was configured from. Asking once for both is one prompt;
+ * asking for read now and write later is two, and the second one lands in the
+ * middle of a bench session.
+ */
+async function ensureAccess(handle, interactive) {
+    const opts = { mode: 'readwrite' };
+    if (!handle.queryPermission) return true;   /* older implementations */
     try {
-        localStorage.setItem(REMEMBERED, JSON.stringify({ bundle, label }));
+        if (await handle.queryPermission(opts) === 'granted') return true;
+        if (!interactive) return false;
+        return await handle.requestPermission(opts) === 'granted';
     } catch {
-        note('could not remember this folder — it will need picking again');
+        return false;
     }
 }
 
-function forgetBundle() {
-    try { localStorage.removeItem(REMEMBERED); } catch { /* nothing to undo */ }
+/* Every file directly inside the folder. Subdirectories are not walked: the
+ * material is flat, and `evidence/` is ours to write, not to read. */
+async function filesIn(handle) {
+    const files = [];
+    for await (const entry of handle.values()) {
+        if (entry.kind === 'file') files.push(await entry.getFile());
+    }
+    return files;
+}
+
+/*
+ * Read the folder now, and keep the reference if the read was good. A folder
+ * that fails to load is not remembered — the next reload should ask, not
+ * re-present a mistake.
+ */
+async function openFolder(handle, remember) {
+    let files;
+    try {
+        files = await filesIn(handle);
+    } catch (err) {
+        fail(`could not read ${handle.name}: ${err.message}`);
+        you('The folder may have been moved or renamed — pick it again with ⓪.');
+        await forgetFolder({ quiet: true });
+        return false;
+    }
+
+    if (!await loadFromFolder(handle.name, files)) return false;
+
+    state.handle = handle;
+    if (remember) {
+        try { await saveHandle(handle); } catch (err) {
+            note(`could not remember this folder (${err.message}) — it will ` +
+                 'need picking again after a reload');
+        }
+    }
+    return true;
+}
+
+/*
+ * ⓪. Three situations, one button.
+ *
+ * A folder that is remembered but locked needs its permission back, not a
+ * second trip through the picker — that is the whole saving, and opening a
+ * dialog to re-choose a folder the app already knows would give it away.
+ */
+async function chooseFolder() {
+    if (!hasFolderApi()) { el('bundle-input').click(); return; }
+
+    if (state.handle && !state.bundle) {
+        if (await ensureAccess(state.handle, true)) {
+            if (await openFolder(state.handle, false)) return;
+        } else {
+            note('permission was not granted — choosing the folder again');
+        }
+    }
+
+    let handle;
+    try {
+        handle = await window.showDirectoryPicker(
+            { id: 'ais01-device-folder', mode: 'readwrite' });
+    } catch (err) {
+        if (err && err.name === 'AbortError') return;   /* picker dismissed */
+        fail(`could not open a folder: ${err.message}`);
+        return;
+    }
+    await openFolder(handle, true);
+}
+
+async function forgetFolder({ quiet = false } = {}) {
+    try { await clearHandle(); } catch { /* nothing to undo */ }
+    try { localStorage.removeItem(STORED_MATERIAL); } catch { /* idem */ }
     state.bundle = null;
+    state.handle = null;
+    state.remembered = null;
     el('imei').textContent = '—';
     el('btn-bundle').title = '';
     setMark('bundle', '', 'weak');
-    note('forgotten — pick the next unit\'s folder with ⓪');
+    if (!quiet) note('forgotten — pick the next unit\'s folder with ⓪');
 }
 
-function restoreBundle() {
-    let saved;
-    try { saved = JSON.parse(localStorage.getItem(REMEMBERED) || 'null'); }
-    catch { return; }
-    if (!saved || !saved.bundle) return;
+/*
+ * On load: say which unit, ask for the folder.
+ *
+ * When the permission survived, the material is back with nothing pressed and
+ * the screen looks exactly as it did before the reload. When it did not — the
+ * usual case — the unit is named in amber and ⓪ is one tap away. What never
+ * happens again is the screen showing a green IMEI over material that came out
+ * of storage rather than off the disk.
+ */
+async function restoreFolder() {
+    const salvaged = purgeStoredMaterial();
 
-    /*
-     * What is in this browser can be older than what reads it. A bundle stored
-     * by the version that loaded a prepared `.json` has no environment and no
-     * endpoint, and restoring it would put a unit on screen with half its facts
-     * — worst of all a `STG` chip on material that never said so.
-     *
-     * There is nothing to migrate: the folder is still on the technician's
-     * disk, and picking it again is one click.
-     */
-    const b = saved.bundle;
-    if (!b.imei || !b.environment || !(b.mqtt && b.mqtt.endpoint)) {
-        try { localStorage.removeItem(REMEMBERED); } catch { /* nothing to undo */ }
-        you(`the remembered material (${saved.label}) predates this version — ` +
-            'pick the folder again with ⓪');
+    let handle = null;
+    if (hasFolderApi()) {
+        try { handle = await loadHandle(); } catch { /* no memory, no harm */ }
+    }
+
+    if (!handle) {
+        if (salvaged) {
+            state.remembered = salvaged;
+            markUnit();
+            you(`this browser was last on ${salvaged.imei} — open its folder ` +
+                `with ⓪ (${salvaged.folder}).`);
+        } else {
+            you('Pick the unit folder with ⓪ — the one downloaded from Drive.');
+        }
         return;
     }
 
-    state.bundle = b;
-    /* Restored material must look exactly like freshly picked material —
-     * the standing facts are about the unit, not about how it got here. */
-    showLoaded(b, b.folder || saved.label, rolesOf(b));
-    ok(`remembered ${saved.label} — stored in this browser, not in the app`);
-    note('  tap FORGET before provisioning a different unit');
+    state.handle = handle;
+    state.remembered = identityOf(handle.name) || salvaged;
+    markUnit();
+
+    if (await ensureAccess(handle, false)) {
+        await openFolder(handle, false);
+        return;
+    }
+    you(`${handle.name} is remembered — tap ⓪ to open it again.`);
+    note('  only the folder is remembered; the certificate, the key and the ' +
+         'password are read from disk each session and kept nowhere else');
 }
 
 /* Refuse to write anything without material that matches this unit. */
@@ -857,8 +1051,7 @@ async function doConnect(fromTap = false) {
          * one; with no bundle it only adopts when there is a single choice. */
         let name = null;
         try {
-            name = await link.adopt(
-                handlers, state.bundle ? state.bundle.imei : null);
+            name = await link.adopt(handlers, expectedImei());
             if (name) note(`re-adopted ${name} — no picker`);
         } catch (err) {
             /* Every failure here falls through to the picker, which is what
@@ -882,6 +1075,12 @@ async function doConnect(fromTap = false) {
         if (state.bundle) {
             const problem = imeiMismatch(state.bundle);
             if (problem) fail(`WRONG UNIT — ${problem}`);
+        } else if (state.remembered && !name.includes(state.remembered.imei)) {
+            /* No material to refuse yet, so this is a heads-up rather than a
+             * guard: the folder about to be opened is the last one, and it is
+             * not this unit's. */
+            you(`this is not the unit this browser was last on ` +
+                `(${state.remembered.imei}) — open ${name}'s own folder with ⓪`);
         }
     } catch (err) {
         fail(`connect failed: ${err.message}`);
@@ -1360,7 +1559,7 @@ export function initProvision() {
     };
 
     el('btn-connect').addEventListener('click', () => doConnect(true));
-    el('btn-bundle').addEventListener('click', () => el('bundle-input').click());
+    el('btn-bundle').addEventListener('click', chooseFolder);
     el('btn-login').addEventListener('click', staged('① LOGIN', doLogin));
     el('btn-certs').addEventListener('click', staged('② CERTS', doCerts));
     el('btn-verify').addEventListener('click', doVerify);
@@ -1373,8 +1572,7 @@ export function initProvision() {
 
     el('copy-log').addEventListener('click', copyRawLog);
     el('btn-reset').addEventListener('click', doReset);
-    el('btn-forget').addEventListener('click', forgetBundle);
-    restoreBundle();
+    el('btn-forget').addEventListener('click', () => forgetFolder());
 
     el('bundle-input').addEventListener('change', e => loadFiles(e.target.files));
 
@@ -1399,6 +1597,15 @@ export function initProvision() {
         });
     }
 
+    /* Before the radio, and in mock mode too: a simulated device still needs a
+     * unit's material, and the folder is where it comes from either way. It
+     * says its own piece in the log — which unit, and what is missing. */
+    restoreFolder();
+    if (!hasFolderApi()) {
+        note('this browser has no directory picker, so the folder cannot be ' +
+             'remembered between reloads — on Chrome for desktop it can');
+    }
+
     const kind = new URLSearchParams(location.search).get('mock');
     if (kind !== null || location.search.includes('mock')) {
         installMock(kind || '');
@@ -1409,7 +1616,6 @@ export function initProvision() {
         fail('No Web Bluetooth in this browser. On iOS use Bluefy.');
         return;
     }
-    you('Pick the unit folder with ⓪ — the one downloaded from Drive.');
 
     /*
      * Attach on load, with nobody pressing anything.
