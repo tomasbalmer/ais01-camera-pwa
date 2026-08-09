@@ -296,6 +296,10 @@
         .line-rx   { color: #cbd5e1; }
         .line-tx   { color: #7dd3fc; }
         .line-note { color: #64748b; }
+        /* Missing, and not fatal — see `warn()`. Amber rather than red because
+           it does not block the write, and rather than grey because grey is
+           what the app uses to talk and this is a thing that is absent. */
+        .line-warn { color: #fbbf24; }
         .line-ok   { color: #4ade80; font-weight: 600; }
         .line-fail { color: #f87171; font-weight: 600; }
 

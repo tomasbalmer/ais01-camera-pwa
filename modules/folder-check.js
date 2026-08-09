@@ -44,6 +44,10 @@ export const FOLDER_ENV = /(staging|production)/i;
  */
 export const FOLDER_REGION = /-(AR|BR)\s*$/i;
 
+/* The convention spelled out, for telling somebody what to rename a folder to.
+ * It sits beside the three patterns above so it cannot drift from them. */
+export const FOLDER_SHAPE = 'AIS01-CB-<15-digit IMEI>-WaterplanProduction-AR';
+
 /*
  * The three facts, each on its own, present or not.
  *
@@ -140,16 +144,17 @@ export function mask(text, keep = 10) {
 }
 
 /*
- * A file list for the log. Masked like everything else here — these are the
- * same 64-hex names, and the reason to print them at all is so a folder full
- * of files the app skipped can say which ones, not so anyone reads the ids.
+ * Shorten a file name by shrinking the part that is long, which is the
+ * certificate id, and leaving the part that says what the file IS.
+ *
+ * Blind truncation was worse than no truncation for anything that is not an
+ * AWS-generated name: `AmazonRootCA1.pem` came out as `AmazonRootC··········`,
+ * longer than the original and no longer recognisable. Only a 64-hex prefix is
+ * ever hidden, and the suffix that names the role always survives.
  */
-function listNames(entries) {
-    return entries
-        .map(entry => Array.isArray(entry)
-            ? `${mask(entry[0])} (${entry[1]})`
-            : mask(entry))
-        .join(', ');
+export function shortName(name) {
+    const id = certificateId(name);
+    return id ? mask(id) + name.slice(id.length) : name;
 }
 
 /*
@@ -244,9 +249,16 @@ export async function checkFolder(folder, files) {
     /* ── The name ──────────────────────────────────────────────────────── */
     const facts = nameFacts(folder);
 
+    /* First row, and green: picking a folder at all is the one thing that has
+     * definitely gone right by the time this runs, and a screen of red with no
+     * green in it does not tell you where you are. The browser never hands over
+     * a path — only this name — so this is the whole of what can be shown. */
+    say('ok', 'folder selected', folder);
+
     if (facts.imei) say('ok', 'imei', facts.imei);
     else bad('imei', 'not in the folder name — it has to carry the unit\'s 15 ' +
-                     'digits, because no file inside carries them');
+                     `digits, because no file inside carries them. Rename to ` +
+                     `${FOLDER_SHAPE}`);
 
     if (facts.environment) say('ok', 'environment', facts.environment);
     else bad('environment', 'not in the folder name — add WaterplanProduction ' +
@@ -255,7 +267,7 @@ export async function checkFolder(folder, files) {
     if (facts.region) {
         say('ok', 'region', `${facts.region} — the network profile ③ will send`);
     } else {
-        say('note', 'region',
+        say('warn', 'region',
             'not in the folder name — end it in -AR or -BR to enable ③; ' +
             'nothing else on this screen needs it');
     }
@@ -274,7 +286,7 @@ export async function checkFolder(folder, files) {
         }
         if (hits.length > 1) {
             bad(role, `${hits.length} of them, so there is nothing to choose ` +
-                      `between: ${listNames(hits)}`);
+                      `between: ${hits.map(shortName).join(' and ')}`);
             continue;
         }
 
@@ -290,7 +302,7 @@ export async function checkFolder(folder, files) {
             if (!PASSWORD_SHAPE.test(password)) {
                 /* A note, never a refusal: we know what these have looked like,
                  * not that they can never look otherwise. */
-                say('note', role,
+                say('warn', role,
                     `${file.name} found with ${password.length} characters — ` +
                     'every unit so far has had 6 digits, so check this is the ' +
                     'console password and not something else');
@@ -305,7 +317,7 @@ export async function checkFolder(folder, files) {
 
         const problem = pemProblem(text, role);
         if (problem) { bad(role, problem); continue; }
-        say('ok', role, `${mask(file.name)} found, ${text.length} bytes`);
+        say('ok', role, `${shortName(file.name)} found, ${text.length} bytes`);
         chosen[role] = file;
     }
 
@@ -331,8 +343,12 @@ export async function checkFolder(folder, files) {
             'tied together — they were renamed after AWS created them');
     }
 
-    if (ignored.length) say('info', 'ignored', listNames(ignored));
-    if (unknown.length) say('info', 'also present', listNames(unknown));
+    for (const [name, why] of ignored) {
+        say('info', 'ignored', `${shortName(name)} — ${why}`);
+    }
+    for (const name of unknown) {
+        say('info', 'also present', shortName(name));
+    }
 
     return {
         ok: !fatal,

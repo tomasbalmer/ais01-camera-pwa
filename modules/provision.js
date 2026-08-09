@@ -478,7 +478,8 @@ function stamp() {
  * a log to find out why a unit failed means telling those apart, and until now
  * they were the same shade of green.
  */
-const VOICE = { rx: 'DEV', tx: 'CMD', ok: 'SYS', fail: 'SYS', note: 'SYS', you: 'YOU' };
+const VOICE = { rx: 'DEV', tx: 'CMD', ok: 'SYS', fail: 'SYS', note: 'SYS',
+                warn: 'SYS', you: 'YOU' };
 
 /*
  * `field` turns a row into a labelled one: a column of its own for the name of
@@ -528,6 +529,16 @@ function write(text, kind = 'rx', field = null) {
 }
 
 function note(text) { write(text, 'note'); }
+/*
+ * Missing, and not fatal.
+ *
+ * `note` is this app's ordinary informational voice and there are hundreds of
+ * them, so it cannot be the one that means "something is absent" — a screen
+ * where every second line is amber says nothing at all. This is the third
+ * level: red blocks the write, amber is missing and blocks only what depends
+ * on it, grey is talking.
+ */
+function warn(text) { write(text, 'warn'); }
 function fail(text) { write(text, 'fail'); }
 function ok(text) { write(text, 'ok'); }
 /* Something for the person to do with their hands: press RESET, plug it in,
@@ -911,6 +922,7 @@ function reportFolder(report) {
     for (const { level, label, detail } of report.findings) {
         const kind = level === 'fail' ? 'fail'
             : level === 'ok' ? 'ok'
+            : level === 'warn' ? 'warn'
             : 'note';
         /* `private_key` is a role key, not a word. The column is the only
          * place these are read by a person. */
@@ -919,7 +931,6 @@ function reportFolder(report) {
 }
 
 async function loadFromFolder(folder, files) {
-    ok(`⓪ ${folder}`);
     const report = await checkFolder(folder, files);
     reportFolder(report);
 

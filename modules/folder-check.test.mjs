@@ -10,6 +10,7 @@
 
 import {
     identityOf, matchRoles, certificateId, pemProblem, checkFolder, mask,
+    shortName, FOLDER_SHAPE,
 } from './folder-check.js';
 
 let failed = 0;
@@ -118,7 +119,7 @@ check('a correct folder passes', good.ok, true);
  * settings do not care which SIM the unit will sit beside. Only ③ does. */
 check('a folder with no region still loads', good.ok, true);
 check('but the network stage is warned about',
-      good.findings.some(f => f.level === 'note' && f.label === 'region'), true);
+      good.findings.some(f => f.level === 'warn' && f.label === 'region'), true);
 check('and hands back the password, not the file', good.password, '482913');
 
 /* The password's VALUE is never in a finding — the shape is the whole of what
@@ -190,7 +191,7 @@ const oddPassword = await checkFolder(FOLDER, [
 ]);
 check('an unusual password is allowed through', oddPassword.ok, true);
 check('but it is called out',
-      oddPassword.findings.some(f => f.level === 'note' && f.label === 'password'),
+      oddPassword.findings.some(f => f.level === 'warn' && f.label === 'password'),
       true);
 
 /*
@@ -224,7 +225,7 @@ check('a failing folder still reports every check it got to',
  * which files were already in place. A checklist that stops at the first
  * unticked box is not a checklist.
  */
-const ROWS = ['imei', 'environment', 'region',
+const ROWS = ['folder selected', 'imei', 'environment', 'region',
               'certificate', 'private_key', 'password', 'pair'];
 const labelsOf = report => report.findings.map(f => f.label);
 
@@ -242,7 +243,24 @@ check('and the environment separately',
       true);
 check('while the files it DOES have still come back ok',
       nameless.findings.filter(f => f.level === 'ok').map(f => f.label).sort(),
-      ['certificate', 'pair', 'password', 'private_key']);
+      ['certificate', 'folder selected', 'pair', 'password', 'private_key']);
+
+/* The folder is the first row and it is green: picking one is the thing that
+ * has definitely gone right, and a screen of red with no green in it does not
+ * tell you where you are. */
+check('the folder leads, in its own row', nameless.findings[0],
+      { level: 'ok', label: 'folder selected', detail: 'AIS01-CB-Test' });
+
+/* A row that says what is wrong without saying what right looks like leaves
+ * the operator to reconstruct the convention from three other rows. */
+check('a missing IMEI suggests the whole name',
+      nameless.findings.find(f => f.label === 'imei').detail.includes(FOLDER_SHAPE),
+      true);
+
+/* Missing and not fatal is its own level. Red would say it blocks the write
+ * and grey would let it pass for conversation; it is neither. */
+check('a missing region is warned, not failed or muttered',
+      nameless.findings.find(f => f.label === 'region').level, 'warn');
 
 /* One fact missing is one row failing, not all of them. */
 const noRegionNoEnv = await checkFolder('AIS01-CB-869181072714122', goodFolder());
@@ -252,6 +270,35 @@ check('the IMEI is found even when the environment is not',
 check('and only the environment fails',
       noRegionNoEnv.findings.filter(f => f.level === 'fail').map(f => f.label),
       ['environment']);
+
+/* ── One row per thing ───────────────────────────────────────────────────
+ * A grouped line cannot say which of its members is there and which is not,
+ * which is the whole reason to read the list. */
+const extras = await checkFolder(FOLDER, [
+    ...goodFolder(),
+    file('AmazonRootCA3.pem', CERT),
+    file('.DS_Store', ''),
+    file('notes.md', 'x'),
+]);
+check('every ignored file gets its own row',
+      extras.findings.filter(f => f.label === 'ignored').length, 4);
+check('and so does every unexpected one',
+      extras.findings.filter(f => f.label === 'also present').length, 1);
+/* The claim is one FILE per row, not one comma — the reasons are prose and
+ * "public, ships in the app" is allowed a comma of its own. */
+check('and each row names exactly one file, with its reason',
+      extras.findings.filter(f => f.label === 'ignored')
+          .map(f => f.detail.split(' — ')[0]).sort(),
+      ['.DS_Store', 'AmazonRootCA1.pem', 'AmazonRootCA3.pem',
+       'dd1a1d7b3b··········-public.pem.key']);
+
+/* Shortening is for the 64-hex id and nothing else. Blind truncation made
+ * `AmazonRootCA1.pem` into something longer and unrecognisable. */
+check('a name with no id is left alone', shortName('AmazonRootCA1.pem'),
+      'AmazonRootCA1.pem');
+check('a name with one keeps the suffix that says what it is',
+      shortName(`${ID_A}-certificate.pem.crt`),
+      'dd1a1d7b3b··········-certificate.pem.crt');
 
 const empty = await checkFolder('AIS01-CB-Test', []);
 check('an empty folder names all three files it wants',
