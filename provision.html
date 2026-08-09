@@ -7,7 +7,7 @@
     <meta name="mobile-web-app-capable" content="yes">
     <!-- The bar's colour, not the page's: this paints the strip the OS puts
          directly above the bar, and those two touching must read as one. -->
-    <meta name="theme-color" content="#0a1120">
+    <meta name="theme-color" content="#070c17">
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
     <meta http-equiv="Pragma" content="no-cache">
     <meta http-equiv="Expires" content="0">
@@ -26,7 +26,7 @@
         * { box-sizing: border-box; }
         html, body {
             margin: 0; height: 100%;
-            background: #0f172a; color: #e2e8f0;
+            background: #070c17; color: #e2e8f0;
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
             overscroll-behavior: none;
         }
@@ -54,7 +54,7 @@
          * with furniture at both ends — see `--chrome` below.
          */
         :root {
-            --bg: #0f172a;
+            --bg: #141f33;
             --text: #f1f5f9;
             --text2: #94a3b8;
             --muted: #64748b;
@@ -82,8 +82,22 @@
              * into the bar above it, which is the seam this whole change
              * exists to draw.
              */
-            --chrome:    #0a1120;   /* top bar, console foot */
-            --chrome-2:  #0c1627;   /* pane heads, log foot */
+            --chrome:    #070c17;   /* top bar, console foot */
+            --chrome-2:  #0c1424;   /* pane heads, log foot */
+
+            /*
+             * The calibration page's accent, from `styles/base.css`.
+             *
+             * That page says one thing with colour that this one did not: a
+             * control the session turns on is outlined in sky blue before it
+             * is used, not left grey until something happens to it. Same two
+             * values, same names, so the two pages agree on what blue means.
+             */
+            --accent:    #38bdf8;
+            --accent-bg: rgba(56,189,248,0.12);
+            /* Its `--surface`, under the same name: the grey the bar's own
+               buttons already sat on, as a literal, in one place. */
+            --surface:   #1e293b;
 
             /*
              * The left rail.
@@ -132,11 +146,14 @@
         }
         header {
             flex-shrink: 0;
-            height: 44px;
-            padding: 0 12px;
+            /* 44 was the calibration bar's height, and it is sized around a
+               12px line. This bar reads a 17px unit number, so the line sets
+               the height: 17px at 1.2, with 16px of air above and below. */
+            height: 52px;
+            padding: 0 10px 0 4px;
             display: flex;
             align-items: center;
-            gap: 8px;
+            gap: 10px;
             background: var(--chrome);
             border-bottom: 1px solid var(--border);
             /* The console's shadow, pointing the other way. The hairline says
@@ -167,18 +184,64 @@
         .dot.link-connected    { background: #22c55e; }
         .dot.link-reconnecting { background: #fbbf24; }
         .dot.link-disconnected { background: var(--muted); }
-        .bar-text {
-            flex: 1;
-            font-size: 12px; color: var(--text2);
+        /*
+         * ── The bar's type: two roles at one size ────────────────────────
+         *
+         * The bar was four sizes deep — a 12px line, 11px buttons, an 11px
+         * version — and enlarging the sentence to 17px only made that worse:
+         * the biggest thing on the bar became the one string that never
+         * changes and tells a technician nothing.
+         *
+         * So the two things that matter are the SAME size, and they are told
+         * apart by FAMILY instead. Sans is the app talking; mono is the
+         * device. That distinction is already the law everywhere else on this
+         * page — the log, the raw pane, the line counter and the version are
+         * all mono because they are all facts that came off a wire — so the
+         * IMEI being mono is this bar catching up with the rest of the page
+         * rather than a new idea.
+         *
+         * Everything else on the bar is utility at 10px. Two roles and one
+         * utility size is a scale; four sizes is an accident.
+         */
+        .bar-id {
+            flex: 1 1 auto; min-width: 0;
+            display: flex; align-items: center; gap: 11px;
+        }
+        .bar-title {
+            /* `flex: 0 1 auto` and the ellipsis are on THIS, not on the unit:
+               when the bar runs out of room the app's name is what gives way,
+               and the IMEI is never the thing that gets truncated. */
+            flex: 0 1 auto; min-width: 0;
+            font-size: 17px; font-weight: 600; letter-spacing: -0.01em;
+            color: var(--text);
             overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
         }
-        /* The IMEI is the one thing in the line worth landing on. Same weight
-           `#stats.active` uses when it has something real to say. */
-        .bar-text b { color: var(--text); font-weight: 500; }
+        /* One rule, at the one seam worth marking: the app on the left of it,
+           the device on the right. */
+        .bar-rule {
+            flex: 0 0 auto; width: 1px; height: 20px;
+            background: var(--border);
+        }
+        .bar-unit {
+            flex: 0 0 auto;
+            display: flex; align-items: center; gap: 9px;
+        }
+        .bar-unit b {
+            font-family: ui-monospace, "SF Mono", Menlo, monospace;
+            font-size: 17px; font-weight: 600;
+            /* 15 digits that get read off a label and compared by eye. */
+            font-variant-numeric: tabular-nums; letter-spacing: 0.02em;
+            color: var(--text);
+        }
         .version {
             flex-shrink: 0;
-            font-size: 11px; color: var(--muted);
+            font-size: 10px; color: var(--muted);
             font-family: ui-monospace, "SF Mono", Menlo, monospace;
+        }
+        /* Below this the app's name is the first thing to go: the unit and the
+           controls are what a phone at a bench has room for. */
+        @media (max-width: 700px) {
+            .bar-title, .bar-rule { display: none; }
         }
 
         /*
@@ -387,16 +450,34 @@
          * there is a link at all. One line, one cluster.
          */
         .bar-tools { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+        /*
+         * Three filled chips of equal weight, and they are not equal things.
+         *
+         * SHARE LOG and CHANGE UNIT FOLDER are housekeeping — used once a
+         * session, or never. PAIR is the way in: nothing on this page works
+         * until it has been pressed. Giving all three the same fill made the
+         * bar read as a toolbar of equals and left the one control that has
+         * to be found looking like the other two.
+         *
+         * So these two lose their fill and keep only their words, and the
+         * outline arrives when a finger or a cursor does. The only outlined
+         * thing on a resting bar is the one worth pressing.
+         */
         .bar-tools button {
             display: inline-flex; align-items: center; gap: 5px;
-            padding: 5px 9px;
-            font-size: 11px; font-weight: 600; letter-spacing: 0.04em;
-            color: #94a3b8; background: #1e293b;
-            border: 1px solid var(--border); border-radius: 6px;
+            padding: 6px 10px;
+            font-size: 10px; font-weight: 700; letter-spacing: 0.06em;
+            color: var(--text2); background: transparent;
+            border: 1px solid transparent; border-radius: 7px;
             white-space: nowrap;
+            transition: color .12s, border-color .12s, background .12s;
             -webkit-tap-highlight-color: transparent;
         }
-        .bar-tools button:active { background: #334155; }
+        .bar-tools button:hover { color: var(--text); border-color: var(--border); }
+        .bar-tools button:focus-visible {
+            outline: none; color: var(--text); border-color: var(--accent);
+        }
+        .bar-tools button:active { background: var(--surface); color: var(--text); }
         .bar-tools svg { width: 12px; height: 12px; flex-shrink: 0; }
 
         /*
@@ -418,8 +499,28 @@
          * green the dot uses, said in words for the one fact worth confirming
          * at a glance from a bench.
          */
-        #btn-connect { border-color: #475569; color: #e2e8f0; }
-        #btn-connect svg { color: #7dd3fc; }
+        /*
+         * The one control on the bar that is about the radio, so it wears the
+         * radio's colour — the calibration page's accent, which is the blue
+         * Bluetooth is drawn in everywhere.
+         *
+         * The OUTLINE carries that, and it carries it from the first paint:
+         * this button is the way in, and a grey button beside two other grey
+         * buttons does not say so. The INSIDE stays the bar's own grey with a
+         * near-white label, because blue on blue would spend the accent on a
+         * state that has not happened yet.
+         *
+         * Then the states below take the outline away from blue, which is the
+         * point of it being blue: green is not "one more colour on the bar",
+         * it is this button no longer asking to be pressed.
+         */
+        #btn-connect {
+            border-color: var(--accent);
+            background: var(--surface);
+            color: var(--text);
+        }
+        #btn-connect:hover { border-color: var(--accent); background: #24344a; }
+        #btn-connect svg { color: var(--accent); }
         #btn-connect.link-connected {
             color: #4ade80; border-color: #22c55e66; background: #14532d44;
         }
@@ -539,9 +640,20 @@
          * only issues to a certificate that is registered, active, attached
          * and key-matched. "9/9 OK" is not that, and stays grey.
          */
+        /*
+         * Clipped rather than allowed to push the chip wider.
+         *
+         * The row is one line of equal chips and there are seven of them now,
+         * so a mark carrying an advertised device name is the one thing here
+         * long enough to break the layout for the other six. It is clipped with
+         * an ellipsis and `setMark` puts the whole value in the element's
+         * title, so nothing is lost — it is one hover away on the only
+         * platform this runs on.
+         */
         .mark {
             font-size: 11px; font-weight: 500; line-height: 1.3;
             color: var(--txt-faint); min-height: 13px;
+            overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
         }
         /*
          * ⓪ reports the unit, in full, in figures you can compare against the
@@ -600,6 +712,112 @@
          * one strong line on the screen. The hairline between the two control
          * rows stays a hairline: those two ARE the same kind of thing.
          */
+        /*
+         * ── FeedbackAlert ────────────────────────────────────────────────
+         *
+         * The `<dialog>` had markup and no rules at all, so what shipped was
+         * the browser's own default: a white slab, Times-ish, with two OS
+         * buttons. Every number below is the platform component's, read out
+         * of `design-seastem` rather than guessed:
+         *
+         *     width 450 · radius 10 · padding 24 · mask rgba(0,0,0,.40)
+         *     title 24/1.334/700 in the type's colour
+         *     description 16/1.5/500 · note 14/1.43/600
+         *     buttons 14/1.43/600 · radius 6 · padding 8 12 · gap 12
+         *     rhythm: title 24 below, description 20, note 12, footer 12
+         *
+         * Two deviations, both deliberate:
+         *
+         * SURFACE. The component is `#ffffff` with grey text because the
+         * platform ships no dark mode. Here the roles are mapped onto this
+         * page's own ground — panel, border-2, text, text2 — so the alert is
+         * the same object in this room's light.
+         *
+         * FACE. It sets Inter, loaded from Google. This page is opened at a
+         * bench on whatever the phone has, and a font request is a network
+         * dependency for a screen that has to work when the network is the
+         * thing being provisioned. Same scale, the page's own stack.
+         */
+        #confirm-dialog {
+            width: 450px; max-width: calc(100vw - 32px);
+            padding: 24px;
+            border: 1px solid var(--border-2); border-radius: 10px;
+            background: var(--panel); color: var(--text);
+            text-align: center;
+            box-shadow: 0 4px 6px -2px rgba(0,0,0,0.30),
+                        0 12px 16px -4px rgba(0,0,0,0.45);
+        }
+        #confirm-dialog::backdrop { background: rgba(0,0,0,0.40); }
+        /* The component's zoom-in, at its own duration. */
+        #confirm-dialog[open] { animation: dialog-in .07s ease-out; }
+        @keyframes dialog-in {
+            from { opacity: 0; transform: scale(0.96); }
+            to   { opacity: 1; transform: scale(1); }
+        }
+        @media (prefers-reduced-motion: reduce) {
+            #confirm-dialog[open] { animation: none; }
+        }
+        /* 40x40 from a 16 viewBox, in the warning colour the platform uses. */
+        .dialog-icon {
+            width: 40px; height: 40px; display: block; margin: 0 auto;
+            fill: #f79009;
+        }
+        /* The title wears the type's colour — that is the component's rule,
+           and it is what makes the icon and the question one gesture. */
+        #confirm-title {
+            margin: 0 0 24px;
+            font-size: 24px; line-height: 1.334; font-weight: 700;
+            color: #f79009;
+        }
+        #confirm-body p {
+            margin: 0 0 20px;
+            font-size: 16px; line-height: 1.5; font-weight: 500;
+            color: var(--text2);
+        }
+        /* The `note` slot, and here it always holds the same thing: the name
+           of the folder being let go of. Mono, because it is a name off a
+           disk rather than a sentence, and every other name this page shows
+           off a disk is mono too. */
+        #confirm-body .subject {
+            margin: 0 0 12px;
+            font-family: ui-monospace, "SF Mono", Menlo, monospace;
+            font-size: 14px; line-height: 1.43; font-weight: 600;
+            color: var(--text);
+            word-break: break-all;
+        }
+        #confirm-body p:last-child { margin-bottom: 0; }
+        .dialog-actions {
+            display: flex; justify-content: center; gap: 12px;
+            margin-top: 12px;
+        }
+        .dialog-actions button {
+            display: inline-flex; align-items: center; justify-content: center;
+            padding: 8px 12px; border-radius: 6px; border: none;
+            font-size: 14px; line-height: 1.43; font-weight: 600;
+            font-family: inherit;
+            transition: all .25s ease-out;
+            -webkit-tap-highlight-color: transparent;
+        }
+        /* secondary-gray */
+        .dialog-actions button[value="cancel"] {
+            color: var(--text2); background: transparent;
+            outline: 1px solid var(--border-2);
+        }
+        .dialog-actions button[value="cancel"]:hover {
+            color: var(--text); background: var(--panel-up);
+            outline-color: var(--border);
+        }
+        /* primary. FIREFLY[600] and [700] straight off the token file — the
+           one colour on this page that is the platform's rather than this
+           app's, and it is on the platform's own component. */
+        #confirm-ok {
+            color: #fdfdfd; background: #2b81a0; outline: 1px solid #2b81a0;
+        }
+        #confirm-ok:hover { background: #206078; outline-color: #86c6de; }
+        .dialog-actions button:focus-visible {
+            outline: 2px solid var(--accent); outline-offset: 2px;
+        }
+
         .console-foot {
             flex: 0 0 auto;
             background: var(--chrome);
@@ -737,8 +955,24 @@
 <body>
     <header>
         <a class="icon-btn" href="index.html" aria-label="Back">←</a>
-        <span id="link-state" class="dot link-disconnected" title="BLE link"></span>
-        <span class="bar-text">AIS01 End node configuration · <b id="imei">—</b></span>
+        <!--
+          Two questions, one line: what is this screen, and which unit is it
+          pointed at. They are separated by a rule rather than a dot, because
+          they are not two halves of one sentence — the second one changes
+          every time the bench moves on and the first one never does.
+
+          The link dot belongs to the IMEI, not to the bar. A number with a
+          live dot in front of it answers "which unit" and "is it listening"
+          as one object, which is the pair of facts this bar exists for.
+        -->
+        <span class="bar-id">
+            <span class="bar-title">AIS01 End node configuration</span>
+            <span class="bar-rule" aria-hidden="true"></span>
+            <span class="bar-unit">
+                <span id="link-state" class="dot link-disconnected" title="BLE link"></span>
+                <b id="imei">—</b>
+            </span>
+        </span>
         <!--
           One button, and only until it has been pressed once, ever.
 
@@ -753,15 +987,21 @@
             <button id="copy-log" title="Hand the whole raw serial buffer to whoever has to diagnose it">
                 SHARE LOG
             </button>
-            <!-- Named for the moment it is used, not for what it clears. The
-                 FOLDER is remembered between reloads — the reference to it and
-                 the permission to open it, never the certificate, the key or
-                 the password, which are re-read from disk each session. This
-                 lets that reference go, which is what you want exactly once
-                 per unit: when the bench moves to the next one. -->
+            <!-- Named for what it does, which took two tries. It was CHANGE
+                 UNIT, then CHANGE UNIT FOLDER — both named for the MOMENT it
+                 is used, the bench moving on to the next unit. But nothing
+                 here changes a unit or reaches a folder: it lets go of the
+                 one this screen is pointed at, and ⓪ is what points it
+                 somewhere new. A control named for the errand instead of the
+                 effect is one its own confirm dialog cannot agree with.
+
+                 What is let go of is the REFERENCE to the folder and the
+                 permission to open it, which is all that survives a reload —
+                 never the certificate, the key or the password, which are
+                 re-read from disk each session. -->
             <button id="btn-forget"
-                    title="Let go of this unit's folder, so ⓪ asks for the next one. The BLE link is not touched.">
-                CHANGE UNIT FOLDER
+                    title="Let go of the folder this screen is pointed at, so ⓪ asks for one again. The BLE link is not touched.">
+                CLEAR FOLDER
             </button>
             <!-- It stays on screen once paired and goes green instead of
                  vanishing. A control that disappears on success leaves the bar
@@ -852,11 +1092,30 @@
          selection would be a stray tap away from an ATZ mid-write. -->
     <!-- The controls, on their own ground. Above this line is what the device
          says; below it is what you can do to it. -->
-    <dialog id="confirm-dialog">
-        <div class="dialog-body">
-            <h2 id="confirm-title"></h2>
-            <div id="confirm-body"></div>
-        </div>
+    <!--
+      The platform's `FeedbackAlert`, rebuilt.
+
+      `packages/design-seastem/src/components/Feedback/FeedbackAlert/` in
+      waterplan-frontend: centred, one icon over one question, a line of prose
+      under it, two buttons side by side with Cancel on the left. This markup
+      is that component's DOM order — icon, message, description, note,
+      footer — so the two read as the same object even though one is React on
+      antd and this is a `<dialog>` on a static page.
+
+      The one thing not copied is its surface. That component is white on
+      white because the platform has no dark mode; this page is a console a
+      technician reads at a bench, and a full-bleed white card is the one
+      thing on it that would be looked away from. Same geometry, same scale,
+      this page's ground — see the CSS.
+    -->
+    <dialog id="confirm-dialog" aria-labelledby="confirm-title">
+        <!-- Warning, which is the component's default type and the honest one
+             here: this asks before letting go of something. -->
+        <svg class="dialog-icon" viewBox="0 0 16 16" aria-hidden="true">
+            <path d="M7.019.855a2 2 0 0 1 2.691.706l.002.003 5.647 9.427.005.009a2 2 0 0 1-1.71 3H2.347a2 2 0 0 1-1.71-3l.005-.01L6.29 1.56a2 2 0 0 1 .73-.704M8 1.931a.67.67 0 0 0-.569.32l-5.642 9.42a.667.667 0 0 0 .569.996h11.285a.667.667 0 0 0 .569-.996L8.57 2.252a.67.67 0 0 0-.57-.32m0 2.736c.368 0 .667.298.667.666V8a.667.667 0 1 1-1.333 0V5.333c0-.368.298-.666.666-.666m-.666 6c0-.368.298-.667.666-.667h.007a.667.667 0 0 1 0 1.333H8a.667.667 0 0 1-.666-.666"/>
+        </svg>
+        <h2 id="confirm-title"></h2>
+        <div id="confirm-body"></div>
         <!-- `method="dialog"` closes and sets returnValue from the pressed
              button, so Cancel, Escape and the backdrop all land on the same
              "not ok" without a line of script between them. -->
@@ -910,6 +1169,30 @@
             <span class="chip-txt">
                 <span class="name">Select provisioning folder</span>
                 <span id="mark-bundle" class="mark"></span>
+            </span>
+        </button>
+        <!--
+          Pairing is in this row AND in the bar above, which is a duplicate on
+          purpose and the only one on this screen.
+
+          They answer different questions. The bar answers "is the link up",
+          which is asked continuously and from across a bench — so it keeps its
+          words, its colour and its place beside the link dot. This chip answers
+          "where am I in the sequence", which is asked once per unit by somebody
+          walking the steps in order, and a sequence that silently omits the step
+          between picking a folder and logging in is a step learned by memory
+          instead of read off the screen.
+
+          Its mark is the name the unit advertises, in the same figures ⓪ prints
+          for the folder. Side by side they are the comparison this whole screen
+          exists to make: which unit the material is for, and which unit is
+          answering.
+        -->
+        <button id="btn-ble">
+            <span class="status-circle" id="dot-ble"></span>
+            <span class="chip-txt">
+                <span class="name">Connect via Bluetooth</span>
+                <span id="mark-ble" class="mark"></span>
             </span>
         </button>
         <button id="btn-login">

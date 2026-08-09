@@ -578,6 +578,21 @@ function endPhase(handle) {
     if (!handle) return;
     const i = openPhases.indexOf(handle);
     if (i >= 0) openPhases.splice(i, 1);
+
+    /*
+     * A section that said nothing is removed rather than drawn.
+     *
+     * Every stage a person taps reports something, so this changes none of
+     * them. What it makes possible is opening a section around work that MIGHT
+     * be silent — the BLE attempt runs by itself on every load and on every
+     * return to the screen, and finding nothing to adopt is its normal, wordless
+     * outcome. A heading over nothing is worse than no heading: it claims an
+     * event, and a log full of empty claims is one nobody scans.
+     */
+    if (!handle.node.nextSibling) {
+        handle.node.remove();
+        return;
+    }
     if (!handle.failed) handle.node.classList.add('is-ok');
 }
 
@@ -709,6 +724,9 @@ const stageState = {};
 function setMark(stage, text, kind = 'weak') {
     const mark = el(`mark-${stage}`);
     mark.textContent = text;
+    /* The chip clips a long mark to keep seven of them the same width, so the
+     * whole value has to survive somewhere — see `.mark` in provision.html. */
+    mark.title = text || '';
     mark.className = `mark mark-${kind}`;
 
     /* An empty mark is a stage put back to untouched — ⓪ does it on FORGET. */
@@ -754,6 +772,27 @@ function setLink(status, detail) {
         up ? 'PAIRED VIA BLE'
         : status === 'reconnecting' ? 'PAIRING…'
         : 'PAIR DEVICE VIA BLE';
+
+    /*
+     * The same fact, in the sequence row, from the one call that already knows
+     * it. A second setter for the pairing chip would be a second thing to
+     * forget — the rule the marks already follow.
+     *
+     * The mark is the name the unit advertises rather than a word for the
+     * state, because the state is already the ring's job and the name is the
+     * thing ⓪ 's IMEI has to be compared against. What it deliberately does NOT
+     * do is go red on a mismatch: the link is fine, the folder is the one that
+     * is wrong, and two numbers side by side with one of them red says which.
+     *
+     * Blank when no unit has ever been chosen — an empty ring for a step not
+     * taken, which is what `setMark` gives an empty string.
+     */
+    const paired = link.deviceName();
+    setMark('ble',
+        up ? (paired || 'connected')
+        : status === 'reconnecting' ? 'pairing…'
+        : paired ? 'link down' : '',
+        up ? 'ok' : status === 'reconnecting' ? 'run' : 'weak');
 
     /* The folder is usually chosen before the link comes up, so the comparison
      * it enables only becomes possible here. Re-marking on every connect is
@@ -1264,18 +1303,21 @@ function askConfirm({ title, lines, subject = null, confirmLabel = 'Confirm' }) 
     el('confirm-title').textContent = title;
     el('confirm-ok').textContent = confirmLabel;
 
+    /* Description first, then the subject — the platform's FeedbackAlert puts
+     * its `note` under the prose, and the order is the point: the sentence
+     * says what is about to happen, the name says what it happens to. */
     const body = el('confirm-body');
     body.textContent = '';
+    for (const line of lines) {
+        const p = document.createElement('p');
+        p.textContent = line;
+        body.appendChild(p);
+    }
     if (subject) {
         const it = document.createElement('p');
         it.className = 'subject';
         it.textContent = subject;
         body.appendChild(it);
-    }
-    for (const line of lines) {
-        const p = document.createElement('p');
-        p.textContent = line;
-        body.appendChild(p);
     }
 
     return new Promise(resolve => {
@@ -1313,32 +1355,84 @@ async function changeUnit() {
 
     if (!folder) {
         /*
-         * Nothing is held, so there is nothing to confirm — but there can
-         * still be residue on the screen. A folder that was picked and refused
-         * leaves ⓪ marked `rejected`, and pressing this to clear that and
-         * being told "no unit is loaded" is the app answering a question
-         * nobody asked. Clear it and say the screen is ready.
+         * Nothing is held in this session — but "held" and "remembered" are
+         * not the same thing, and this branch used to treat them as one.
+         *
+         * `rejectFolder` nulls all three of the above, so a folder that was
+         * picked and refused lands here with ⓪ still marked `rejected` and
+         * the name still on screen. Clearing that residue is right and needs
+         * no question: it is what the technician just asked for.
+         *
+         * What it must not do silently is what `forgetFolder` ALSO does —
+         * `clearHandle()`, which drops the folder this browser remembered
+         * from an earlier session. That folder is not on screen, so its loss
+         * is invisible, which is the whole reason this control asks before
+         * acting. Refusing one folder is not a decision about the last good
+         * one, and the next reload is where the difference shows up.
          */
+        const remembered = await rememberedFolder();
+        if (remembered) {
+            const confirmed = await askConfirm({
+                title: 'Forget the remembered folder?',
+                subject: remembered,
+                lines: [
+                    'Nothing is open right now, but this browser can still ' +
+                    're-open that folder without the picker. ⓪ would ask from ' +
+                    'scratch instead, here and after every reload.',
+                ],
+                confirmLabel: 'Forget folder',
+            });
+            if (!confirmed) { note(`still remembering ${remembered}`); return; }
+        }
         await forgetFolder({ quiet: true });
         note('no folder is held — ⓪ is ready for the next one');
         return;
     }
 
+    /*
+     * One question and one sentence.
+     *
+     * This asked three paragraphs' worth: that the disk is untouched, that
+     * nothing is sent, that the link stays up, that the log stays. All true,
+     * and all of it reassurance about things the control never threatened —
+     * which is what a wall of text in a confirm actually communicates: that
+     * something here is worth being afraid of. Nothing is. The one fact worth
+     * a reader's time is what STOPS being true, and that is a single line.
+     *
+     * The title said "change unit folder", which is what the button is called
+     * and not what this does. Nothing here changes a unit or a folder; it
+     * lets go of the one this screen is pointed at, and ⓪ is what points it
+     * somewhere new. Naming the effect is the whole job of the question.
+     */
     const confirmed = await askConfirm({
-        title: 'Change unit folder?',
+        title: 'Clear the selected folder?',
         subject: folder,
         lines: [
-            'This app lets go of that folder. ⓪ will ask for the next unit\'s ' +
-            'folder the next time you tap it.',
-            'The folder on your disk is not touched, nothing is sent to the ' +
-            'unit, and the BLE link stays exactly as it is — this only changes ' +
-            'which folder this screen is pointed at.',
-            'The log stays too. SHARE LOG still has everything from this session.',
+            '⓪ will ask for a folder again. Nothing is sent to the unit and ' +
+            'the folder on your disk is not touched.',
         ],
-        confirmLabel: 'Change folder',
+        confirmLabel: 'Clear folder',
     });
     if (!confirmed) { note(`still on ${folder}`); return; }
     await forgetFolder();
+}
+
+/*
+ * The folder this browser remembers, by name, or null.
+ *
+ * Read rather than assumed: `state.handle` is only set once a folder has
+ * LOADED, so between a refused pick and a reload the stored handle is a thing
+ * the session knows nothing about — which is exactly when it must not be
+ * thrown away without asking.
+ */
+async function rememberedFolder() {
+    if (!hasFolderApi()) return null;
+    try {
+        const handle = await loadHandle();
+        return (handle && handle.name) || null;
+    } catch {
+        return null;   /* no memory to lose */
+    }
 }
 
 async function forgetFolder({ quiet = false } = {}) {
@@ -1460,6 +1554,17 @@ function needLink() {
         fail('Device not connected yet.');
         you('Tap PAIR DEVICE VIA BLE at the top to choose the unit, then try ' +
             'again.');
+        /*
+         * The one thing that looks like a broken unit and is not.
+         *
+         * The BT24 only advertises while the unit is awake, so a unit that has
+         * finished its cycle is invisible to the chooser — an empty scan list
+         * next to a board with a light on it. Without this line the reading is
+         * "the Bluetooth is dead"; with it, it is one press of a button that is
+         * already under their thumb.
+         */
+        note('  If the unit is not in the scan list, press its RESET — it only ' +
+             'advertises over BLE while it is awake.');
         return false;
     }
 
@@ -1501,6 +1606,25 @@ async function doConnect(fromTap = false) {
     }
     if (link.isConnected() || link.isHunting()) return;
 
+    /*
+     * Pairing opens a section like every stage that reports something.
+     *
+     * Its lines — `re-adopted …`, `paired with …`, `link connected` — were
+     * landing loose in the History between whatever came before and whatever
+     * came after, which is the same complaint that got ⓪ its own section: the
+     * eye has to work out where the attempt started and stopped.
+     *
+     * It carries no number. The numbered sections are the things this app does
+     * TO a unit, in the order `firmware-factory/stages.json` puts them, and
+     * pairing is not one of them — it is what makes a unit reachable at all.
+     * Renumbering ①–⑤ to fit it in would move six labels, every glyph in this
+     * file's comments, and the sequence the operator already has in their head,
+     * to say something the section's position already says.
+     *
+     * `endPhase` drops it when nothing was logged, which is the normal outcome
+     * of the automatic attempt on load.
+     */
+    const phase = startPhase('BLUETOOTH');
     try {
         /* Redact for the screen only — the collectors that decide whether a
          * write landed must still see the real bytes. */
@@ -1549,6 +1673,11 @@ async function doConnect(fromTap = false) {
         }
     } catch (err) {
         fail(`connect failed: ${err.message}`);
+    } finally {
+        /* `finally`, not the end of the try: the body returns early on both the
+         * "nothing to adopt" and the "scan dismissed" paths, and a section left
+         * open would take the next stage's failures as its own. */
+        endPhase(phase);
     }
 }
 
@@ -2345,6 +2474,7 @@ const SHELL_NEEDS = [
     'terminal', 'terminal-raw', 'link-state', 'app-version',
     'at-menu', 'at-panel', 'at-list', 'at-filter',
     'btn-network', 'mark-network',
+    'btn-ble', 'mark-ble',
 ];
 
 function shellIsStale() {
@@ -2384,7 +2514,10 @@ export function initProvision() {
         try { return await fn(...args); } finally { endPhase(phase); }
     };
 
+    /* Two controls, one action. The bar answers "is the link up" from across a
+     * bench; the chip answers "where am I in the sequence" — see the markup. */
     el('btn-connect').addEventListener('click', () => doConnect(true));
+    el('btn-ble').addEventListener('click', () => doConnect(true));
     el('btn-bundle').addEventListener('click', chooseFolder);
     el('btn-login').addEventListener('click', staged('① LOGIN', doLogin));
     el('btn-certs').addEventListener('click', staged('② CERTS', doCerts));
