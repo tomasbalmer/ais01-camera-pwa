@@ -16,8 +16,8 @@
  * cached shell — pull to refresh, or reinstall the app from the home screen.
  */
 
-export const VERSION = '0.67.0';
+export const VERSION = '0.67.1';
 
 /* One line, for the places that want context rather than just a number. */
-export const VERSION_NOTE = '⓪ drops the row that had nothing of its own to '
-    + 'say, and rules off the one that changes the subject';
+export const VERSION_NOTE = 'room between the log rows, and a section rule '
+    + 'drawn in a colour that shows on the log\'s own background';

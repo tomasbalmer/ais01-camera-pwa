@@ -225,7 +225,10 @@
          * BOOT DIVIDERS. The cycle boundaries, drawn where the raw log draws
          * them, so a line can be placed in the boot it belongs to.
          */
-        .line { display: flex; gap: 8px; align-items: baseline; }
+        /* 2px between rows. At 12px/1.45 the log was a solid block of text and
+           the eye had nothing to step on; the gap is what lets a row be scanned
+           as a row rather than found by reading. */
+        .line { display: flex; gap: 8px; align-items: baseline; margin-bottom: 2px; }
         .line .t { flex: 0 0 auto; color: #475569; }
         .line .v {
             flex: 0 0 auto; min-width: 26px; padding: 0 4px;
@@ -296,9 +299,15 @@
         .line-rx   { color: #cbd5e1; }
         .line-tx   { color: #7dd3fc; }
         .line-note { color: #64748b; }
-        /* Between two groups of rows that ask different questions — see
-           `rule()`. Faint enough to be a boundary and not an entry. */
-        .line-rule { height: 1px; margin: 7px 0; background: #1e293b; }
+        /*
+         * Between two groups of rows that ask different questions — see
+         * `rule()`. It was #1e293b, which is the divider colour used BETWEEN
+         * panels, over a panel background; inside the log, on #0f172a, it was
+         * a line nobody could see. --border is the one that reads here.
+         */
+        .line-rule {
+            height: 1px; margin: 9px 0; background: var(--border);
+        }
         .line-ok   { color: #4ade80; font-weight: 600; }
         .line-fail { color: #f87171; font-weight: 600; }
 
