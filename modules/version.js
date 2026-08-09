@@ -16,8 +16,8 @@
  * cached shell — pull to refresh, or reinstall the app from the home screen.
  */
 
-export const VERSION = '0.58.2';
+export const VERSION = '0.61.0';
 
 /* One line, for the places that want context rather than just a number. */
-export const VERSION_NOTE = 'all 58 AT commands in a picker that lines up with '
-    + 'the raw pane, and ②③④ write their verdict into the unit\'s folder';
+export const VERSION_NOTE = 'the dashboard\'s stage chips, six equal ones, and '
+    + 'CHANGE UNIT asks first';

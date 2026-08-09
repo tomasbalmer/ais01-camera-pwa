@@ -21,6 +21,7 @@ import {
 } from './ble-transport.js';
 import { writeCerts } from './certmod.js';
 import { catalogueGroups, DANGEROUS } from './at-catalogue.js';
+import { checkFolder, identityOf } from './folder-check.js';
 import { saveHandle, loadHandle, clearHandle } from './handle-store.js';
 import {
     STAGES, LOG_FILE, CONFIG_FILE, logEntry, appendLog, saveIntendedConfig,
@@ -53,10 +54,12 @@ const state = {
      * the raw stream to check a line must not stop the annotated one from
      * following the device. */
     pinned: { annotated: true, raw: true },
-    pendingDeltas: null, /* config deltas awaiting a confirming second tap */
+    /* Per stage, because ③ and ④ are two independent two-tap sequences and one
+     * shared slot would let arming either one disarm the other. */
+    pending: { network: null, mqtt: null },
     redacting: false,  /* key material may be on the wire — see redact() */
     busy: false,       /* a stage's own loop is running */
-    verifying: null,   /* ④ is watching the stream — {stop} while armed */
+    verifying: null,   /* ⑤ is watching the stream — {stop} while armed */
     mock: false,       /* ?mock — simulated device, no radio */
 };
 
@@ -273,20 +276,29 @@ async function doReset() {
  * the same list ③ stages, so picking one sends exactly what ③ would have sent
  * for that line and nothing else.
  */
-/* The unit's own settings come first when there is a folder, because they are
- * the only entries carrying real values rather than templates — they are built
- * from `desiredSettings`, the same list ③ stages. */
+/*
+ * The unit's own settings come first when there is a folder, because they are
+ * the only entries carrying real values rather than templates — they are the
+ * same lists ③ and ④ stage, from the same functions, so sending one line alone
+ * sends exactly what the stage would have sent for it.
+ *
+ * `networkSettings` throws when the folder names no region. That is the right
+ * behaviour for a stage about to write and the wrong one for a menu, so here it
+ * simply contributes nothing and the rest of the list still builds.
+ */
 function atGroups() {
     const groups = catalogueGroups();
     if (!state.bundle) return groups;
-    let settings = [];
-    try { settings = desiredSettings(state.bundle); } catch { return groups; }
-    if (!settings.length) return groups;
-    return [
-        [`This unit · ${state.bundle.imei}`,
-         settings.map(([name, value]) => [`${name}=${value}`, 'what ③ would send'])],
-        ...groups,
-    ];
+
+    const mine = [];
+    for (const spec of Object.values(CONFIG_STAGES)) {
+        let settings;
+        try { settings = spec.settings(state.bundle); } catch { continue; }
+        mine.push(...settings.map(([name, value]) =>
+            [`${name}=${value}`, `what ${spec.glyph} would send`]));
+    }
+    if (!mine.length) return groups;
+    return [[`This unit · ${state.bundle.imei}`, mine], ...groups];
 }
 
 function buildAtMenu(filter = '') {
@@ -513,9 +525,9 @@ function you(text) { write(text, 'you'); }
  */
 /*
  * Sections can overlap, so each one is a handle its opener holds rather than a
- * single "current phase" variable. ④ arms a watcher and stays open for up to a
+ * single "current phase" variable. ⑤ arms a watcher and stays open for up to a
  * duty cycle; tapping ② during that is normal, and with one shared variable
- * the second section would take the first's place and leave ④ amber for good.
+ * the second section would take the first's place and leave ⑤ amber for good.
  *
  * A failure belongs to the innermost section running when it happened — the
  * one that was doing something — not to a watcher that happens to be open.
@@ -628,17 +640,58 @@ function until(pattern, ms) {
 
 /*
  * The per-stage mark. Its wording is deliberately uneven across stages: only
- * ② and ④ carry evidence strong enough to be called proof — a checksum the
+ * ② and ⑤ carry evidence strong enough to be called proof — a checksum the
  * modem computed over what it stored, and a CONNACK from AWS IoT, which is only
  * issued to a certificate that is registered, active, attached to a policy and
  * matched by its key. ① and ③ get an amber mark that says what was observed and
  * nothing more, because a green tick on "OK was returned" would be a claim this
  * app cannot support.
  */
+/*
+ * The mark's `kind` was already the stage's whole state, so the chip's circle
+ * and the cards read it rather than being told separately. One call site, one
+ * truth — a second setter is a second thing to forget.
+ *
+ * The mapping is the dashboard's status→style table (DESIGN-SYSTEM.md §2),
+ * with this app's four kinds standing in for its seven statuses:
+ *
+ *     ok    → done      the stage closed on evidence it can defend
+ *     run   → current   its own loop is going
+ *     weak  → partial   it finished, and what it saw is not proof
+ *     fail  → fail
+ */
+const MARK_STATE = { ok: 'done', run: 'current', weak: 'partial', fail: 'fail' };
+/*
+ * The glyph per state. `pending` has none — an untouched stage has nothing to
+ * report, and the ring alone says so. That is the dashboard's own rule
+ * (`color: transparent` on the atom); the stage's order comes from where it
+ * sits in the row, not from a character inside a circle.
+ */
+const STATE_GLYPH = { done: '✓', current: '●', partial: '●', fail: '✗', pending: '' };
+
+/* Blank, before a stage has ever run. Not a state a mark can produce, which is
+ * why it lives here and not in the table above. */
+const stageState = {};
+
 function setMark(stage, text, kind = 'weak') {
     const mark = el(`mark-${stage}`);
     mark.textContent = text;
     mark.className = `mark mark-${kind}`;
+
+    /* An empty mark is a stage put back to untouched — ⓪ does it on FORGET. */
+    const state_ = text ? (MARK_STATE[kind] || 'partial') : 'pending';
+    stageState[stage] = state_;
+
+    const dot = el(`dot-${stage}`);
+    if (dot) {
+        dot.className = `status-circle is-${state_}`;
+        dot.textContent = STATE_GLYPH[state_];
+    }
+    const chip = dot && dot.parentElement;
+    if (chip) {
+        chip.classList.remove('is-done', 'is-current', 'is-partial', 'is-fail');
+        if (state_ !== 'pending') chip.classList.add(`is-${state_}`);
+    }
 }
 
 /* The bar says the link with a colour, the way the calibration bar does. The
@@ -654,15 +707,20 @@ function setLink(status, detail) {
     foot.lastChild.textContent = up ? 'live' : status;
 
     /*
-     * Visible unless the link is up.
+     * Always on screen, and coloured by the link rather than hidden by it.
      *
-     * It was hidden until something decided to show it, and that is backwards:
-     * every way of failing to connect then ends with no control on the screen
-     * at all, and the app looks broken rather than busy. A link that is down is
-     * exactly when a way to pair belongs in reach — including mid-hunt, where
-     * it is the escape hatch to a different unit.
+     * It used to vanish once a unit was adopted, on the reasoning that pairing
+     * is a one-time act. True, and beside the point: the bar was then left with
+     * nothing where the link had been, so the state you most want confirmed at
+     * a bench — it IS paired — was the one state with no words on it. Green
+     * says it, and the button stays where the eye already learned to look.
      */
-    el('pair-row').hidden = up;
+    const pair = el('btn-connect');
+    pair.className = `link-${status}`;
+    el('pair-label').textContent =
+        up ? 'PAIRED VIA BLE'
+        : status === 'reconnecting' ? 'PAIRING…'
+        : 'PAIR DEVICE VIA BLE';
 
     /* The folder is usually chosen before the link comes up, so the comparison
      * it enables only becomes possible here. Re-marking on every connect is
@@ -684,18 +742,6 @@ function setLink(status, detail) {
  * a phone picker cannot ask a cloud provider for a folder — and that reason
  * belongs to a flow that no longer runs from the phone's own storage.
  */
-
-/*
- * What the folder must be called, because it is the only place two facts
- * exist. A PEM carries no identity: the IMEI is in the directory name or it is
- * nowhere. And the environment decides which broker the unit will talk to,
- * which is not written in any file either.
- *
- *     AIS01-CB-869181072714122-WaterplanProduction
- *              └─── IMEI ────┘ └──── where ─────┘
- */
-const FOLDER_IMEI = /(\d{15})/;
-const FOLDER_ENV = /(staging|production)/i;
 
 /*
  * Account-level, identical for every unit in an environment, and therefore not
@@ -733,24 +779,10 @@ function imeiMismatch(bundle) {
 }
 
 /*
- * Files are identified by the names the server gives them, never by order or
- * position — the prefix is the certificate ID, so only the suffix is ours to
- * match on:
- *
- *   *-certificate.pem.crt   the client certificate
- *   *-private.pem.key       the private key
- *   password.txt            the device PIN (added by us, not by AWS)
- *   AmazonRootCA*.pem       ignored — public, identical everywhere, in the app
- *   *-public.pem.key        ignored — the modem never sees it
- *
- * Anything else in the folder is ignored too. The technician downloads what
- * Drive gives them; deciding what matters is this list's job, not theirs.
+ * What a folder must contain, and what it must not be ambiguous about, lives
+ * in `folder-check.js` — it is a set of rules about a folder rather than about
+ * this screen, and every one of them can be checked with no device attached.
  */
-const FILE_ROLES = [
-    ['certificate', /-certificate\.pem\.crt$/i],
-    ['private_key', /-private\.pem\.key$/i],
-    ['password',    /^password\.txt$/i],
-];
 
 /*
  * Say where we are standing, in the three places it matters.
@@ -767,16 +799,16 @@ const FILE_ROLES = [
  * takes the detail: the folder, the endpoint it resolved to, and which file was
  * matched to which role, the question you actually have when a write goes wrong.
  */
-function showLoaded(bundle, folder, found) {
+function showLoaded(bundle) {
     el('imei').textContent = bundle.imei;
     markUnit();
 
     el('btn-bundle').title = [
-        folder,
+        bundle.folder,
         `environment: ${bundle.environment} → ${bundle.mqtt.endpoint}`,
-        `certificate: ${found.certificate.name}`,
-        `private key: ${found.private_key.name}`,
-        `password:    ${found.password.name}`,
+        `certificate: ${bundle.files.certificate}`,
+        `private key: ${bundle.files.private_key}`,
+        `password:    ${bundle.files.password}`,
         '',
         'The browser never reveals where this folder is on disk — only its name.',
     ].join('\n');
@@ -835,17 +867,6 @@ function rejectFolder(reason, ...help) {
 }
 
 /*
- * The identity a folder's NAME carries, which is the only place it exists.
- * Null when the name does not follow the convention.
- */
-function identityOf(folder) {
-    const imei = (folder.match(FOLDER_IMEI) || [])[1];
-    const envName = (folder.match(FOLDER_ENV) || [])[1];
-    if (!imei || !envName) return null;
-    return { imei, environment: envName.toLowerCase(), folder };
-}
-
-/*
  * Turn a folder — its name and the files in it — into this session's material.
  *
  * Both ways of choosing a folder end here: the directory handle, which is the
@@ -861,61 +882,68 @@ function identityOf(folder) {
  *
  * Returns true when the material is loaded.
  */
+/*
+ * Print the verdict line by line, in the voices the log already has: a failure
+ * is the app refusing, a note is the app hedging, and the rest is what it saw.
+ * The whole list is printed either way — a folder that failed on its key is
+ * still a folder whose name and certificate were fine, and knowing which line
+ * broke is the difference between re-downloading one file and re-downloading
+ * everything.
+ */
+function reportFolder(report) {
+    const pad = label => `${label}${' '.repeat(Math.max(0, 12 - label.length))}`;
+    for (const { level, label, detail } of report.findings) {
+        const line = `  ${pad(label)} ${detail}`;
+        if (level === 'fail') fail(line);
+        else if (level === 'note') note(line);
+        else write(line, level === 'ok' ? 'ok' : 'note');
+    }
+}
+
 async function loadFromFolder(folder, files) {
-    const who = identityOf(folder);
-    if (!who) {
-        rejectFolder(`"${folder}" does not name a unit`,
-                     'Expected AIS01-CB-<15-digit IMEI>-Waterplan<Production|' +
-                     'Staging>. Rename the folder to match what the server ' +
-                     'created and pick it again.');
-        return false;
-    }
-    const env = ENVIRONMENTS[who.environment];
+    ok(`⓪ ${folder}`);
+    const report = await checkFolder(folder, files);
+    reportFolder(report);
 
-    const found = {};
-    for (const [role, pattern] of FILE_ROLES) {
-        const hit = files.find(f => pattern.test(f.name));
-        if (hit) found[role] = hit;
-    }
-
-    const missing = FILE_ROLES.map(([r]) => r).filter(r => !found[r]);
-    if (missing.length) {
-        rejectFolder(`${folder} is missing: ${missing.join(', ')}`,
-                     'The folder needs the certificate (*-certificate.pem.crt), ' +
-                     'the key (*-private.pem.key) and password.txt.');
-        note(`saw ${files.length} file(s): ${files.map(f => f.name).join(', ')}`);
+    if (!report.ok) {
+        rejectFolder(`${folder} is not ready to write`,
+                     'Fix the lines marked above and pick the folder again. ' +
+                     'Nothing was sent to the unit.');
         return false;
     }
 
+    const who = report.identity;
+    const found = report.chosen;
     const bundle = {
         imei: who.imei,
         thing_name: `AIS01-CB-${who.imei}`,
-        password: (await found.password.text()).split(/\r?\n/)[0].trim(),
+        password: report.password,
         certificate: await found.certificate.text(),
         private_key: await found.private_key.text(),
         environment: who.environment,
+        /* AR / BR / null — the network stage refuses on null rather than
+         * choosing a profile on the operator's behalf. */
+        region: who.region,
         folder,
         /* Which files, by name, ended up being the ones used. Kept so the
          * screen can answer "where am I standing" without the technician
          * re-opening the folder to check. */
-        files: Object.fromEntries(
-            Object.entries(found).map(([role, f]) => [role, f.name])),
+        files: {
+            certificate: found.certificate.name,
+            private_key: found.private_key.name,
+            password: found.password.name,
+        },
         /* Not in the folder and not per unit: where this environment's broker
          * is. The folder says which environment; the app knows the rest. */
-        mqtt: { ...env },
+        mqtt: { ...ENVIRONMENTS[who.environment] },
     };
-
-    if (!bundle.password) {
-        rejectFolder('password.txt is empty', 'Download it again from Drive.');
-        return false;
-    }
 
     state.bundle = bundle;
     state.remembered = who;
-    showLoaded(bundle, folder, found);
-    ok(`loaded ${folder}`);
-    note(`  ${bundle.environment} · certificate ${bundle.certificate.length}B ` +
-         `· key ${bundle.private_key.length}B`);
+    showLoaded(bundle);
+    /* The checklist above already said the environment, the file names and
+     * their sizes. This line only has to say the folder passed. */
+    ok(`  ready — ${bundle.environment} → ${bundle.mqtt.endpoint}`);
 
     const problem = imeiMismatch(bundle);
     if (problem) fail(`WRONG UNIT — ${problem}`);
@@ -1097,6 +1125,77 @@ async function chooseFolder() {
         return;
     }
     await openFolder(handle, true);
+}
+
+/*
+ * Ask before doing something whose effect cannot be seen.
+ *
+ * Resolves true only on the confirm button. Escape, the backdrop and Cancel
+ * all close the dialog with a different `returnValue`, which is why there is
+ * no per-button wiring here — the form does it.
+ *
+ * `lines` are plain strings, set with textContent: one of them is a folder
+ * name somebody else chose.
+ */
+function askConfirm({ title, lines, subject = null, confirmLabel = 'Confirm' }) {
+    const dialog = el('confirm-dialog');
+    el('confirm-title').textContent = title;
+    el('confirm-ok').textContent = confirmLabel;
+
+    const body = el('confirm-body');
+    body.textContent = '';
+    if (subject) {
+        const it = document.createElement('p');
+        it.className = 'subject';
+        it.textContent = subject;
+        body.appendChild(it);
+    }
+    for (const line of lines) {
+        const p = document.createElement('p');
+        p.textContent = line;
+        body.appendChild(p);
+    }
+
+    return new Promise(resolve => {
+        const onClose = () => {
+            dialog.removeEventListener('close', onClose);
+            resolve(dialog.returnValue === 'ok');
+        };
+        dialog.addEventListener('close', onClose);
+        dialog.returnValue = '';
+        dialog.showModal();
+    });
+}
+
+/*
+ * The confirmed half of CHANGE UNIT.
+ *
+ * Nothing here is destructive — the folder on disk is untouched and the device
+ * hears nothing — and that is exactly why it is worth asking about: a control
+ * whose entire effect is invisible is the one a person presses without knowing
+ * what they pressed. The dialog says the three things that are true and stops.
+ */
+async function changeUnit() {
+    const standing = state.bundle || state.remembered;
+    if (!standing) {
+        note('no unit is loaded — ⓪ is where you pick one');
+        return;
+    }
+    const confirmed = await askConfirm({
+        title: 'Change unit?',
+        subject: standing.folder || standing.imei,
+        lines: [
+            'This app lets go of that folder. ⓪ will ask for the next unit\'s ' +
+            'folder the next time you tap it.',
+            'The folder on your disk is not touched, and nothing is sent to ' +
+            'the unit — this only changes which unit this screen is pointed at.',
+            'The log stays as it is. SHARE LOG still has everything from this ' +
+            'session.',
+        ],
+        confirmLabel: 'Change unit',
+    });
+    if (!confirmed) { note(`still on ${standing.imei}`); return; }
+    await forgetFolder();
 }
 
 async function forgetFolder({ quiet = false } = {}) {
@@ -1335,15 +1434,70 @@ function judgeLogin(lines) {
  */
 
 /*
- * `AT+CFG` returns the whole property dump in one command, which is why this
- * never queries settings one at a time. The reply arrives asynchronously and is
- * shown in the terminal — the operator reads it, exactly like everything else.
+ * Reading the dump used to live on this button, on the branch where no folder
+ * was loaded. It is `AT+CFG` in the command picker now, where it can be sent at
+ * any point rather than only before a folder is chosen — which was the one time
+ * it was least useful.
  */
-async function doReadConfig() {
-    if (!link.isConnected()) { fail('not connected'); return; }
-    write('AT+CFG', 'tx');
-    await link.sendLine('AT+CFG');
-    note('read the dump above, then tap ③ again to stage the deltas');
+
+/*
+ * ── The two halves of the configuration ─────────────────────────────────
+ *
+ * `firmware-factory/scripts/` splits this in two and the app had merged them
+ * back into one button labelled "network and MQTT". Reading the two scripts
+ * says why that label was wrong rather than merely coarse:
+ *
+ *     configure-network.py (4A)      APN, CSQTIME, IOTMOD, QCOPS
+ *     configure-mqtt.py    (4B)      PRO, SERVADDR, PUB/SUBTOPIC, CLIENT,
+ *                                    TLSMOD, MQOS, SNI, TDC, BKDNS
+ *
+ * The app sent all ten of 4B and none of the four of 4A. It never configured
+ * the network at all — a unit that attached did so on whatever its firmware
+ * already had.
+ *
+ * The two are different in kind, not just in name. 4B is derived from facts the
+ * folder carries: the IMEI makes the topics, the environment makes the broker.
+ * 4A is derived from the SIM the unit will sit beside, which no file in the
+ * folder knows about — hence the region in the folder's name.
+ */
+
+/*
+ * Source: `firmware-factory/docs/golden-config.md`. Two profiles, and the two
+ * that differ are the two that decide whether the modem attaches.
+ */
+const REGIONS = {
+    AR: {
+        label: 'Argentina · EMnify',
+        settings: [
+            ['AT+APN', 'em'],
+            ['AT+CSQTIME', '1'],
+            ['AT+IOTMOD', '0'],      /* eMTC */
+            ['AT+QCOPS', 'NULL'],    /* let the multi-IMSI SIM choose */
+        ],
+    },
+    BR: {
+        label: 'Brazil · Vivo',
+        settings: [
+            ['AT+APN', 'NULL'],
+            ['AT+CSQTIME', '1'],
+            ['AT+IOTMOD', '2'],      /* eMTC + NB-IoT */
+            ['AT+QCOPS', 'NULL'],
+        ],
+    },
+};
+
+/* Refuses rather than defaulting. Picking a region on the operator's behalf is
+ * how a BR unit gets an EMnify APN and never attaches — and the failure looks
+ * like bad hardware, not like a guess this code made. */
+function networkSettings(bundle) {
+    const profile = REGIONS[bundle.region];
+    if (!profile) {
+        throw new Error(
+            'the folder name does not say which network — rename it to end in ' +
+            `-AR (${REGIONS.AR.label}) or -BR (${REGIONS.BR.label}) and pick ` +
+            'it again with ⓪');
+    }
+    return profile.settings;
 }
 
 /*
@@ -1370,30 +1524,66 @@ function desiredSettings(bundle) {
     ];
 }
 
-async function doStageConfig() {
-    if (!bundleReady()) return;
-    let wanted;
-    try { wanted = desiredSettings(state.bundle); } catch (err) {
-        fail(err.message); return;
-    }
-    state.pendingDeltas = wanted.map(([k, v]) => `${k}=${v}`);
-    note(`staged ${state.pendingDeltas.length} settings:`);
-    state.pendingDeltas.forEach(line => note(`  ${line}`));
-    el('btn-config').querySelector('.label').textContent =
-        `③ APPLY ${state.pendingDeltas.length}`;
-    el('btn-config').classList.add('armed');
-    setMark('config', 'staged', 'run');
+/*
+ * The two config stages differ in three strings and one function. Everything
+ * else — stage, arm, apply, count, record — is identical, and writing it twice
+ * is how the second copy quietly stops matching the first.
+ *
+ * The labels live here rather than only in the markup because the button's text
+ * is swapped while it is armed, and a label the code puts back has to be the
+ * one the page shipped with.
+ */
+const CONFIG_STAGES = {
+    network: {
+        button: 'btn-network', mark: 'network', glyph: '③',
+        label: 'Apply cellular network settings',
+        armed: n => `Send ${n} network settings`,
+        substep: 'network_settings_set',
+        settings: bundle => networkSettings(bundle),
+    },
+    mqtt: {
+        button: 'btn-config', mark: 'config', glyph: '④',
+        label: 'Apply MQTT broker settings',
+        armed: n => `Send ${n} MQTT settings`,
+        substep: 'mqtt_settings_set',
+        settings: bundle => desiredSettings(bundle),
+    },
+};
+
+function configLabel(key, text) {
+    const spec = CONFIG_STAGES[key];
+    const button = el(spec.button);
+    button.querySelector('.name').textContent = text || spec.label;
+    button.classList.toggle('armed', !!text);
 }
 
-async function doApplyConfig() {
+/* First tap stages and shows what would go out; second tap sends it. The pause
+ * between them is the point — these are the settings a unit is judged by, and
+ * reading them before they leave costs one tap. */
+async function stageConfig(key) {
     if (!bundleReady()) return;
-    const deltas = state.pendingDeltas || [];
+    const spec = CONFIG_STAGES[key];
+    let wanted;
+    try { wanted = spec.settings(state.bundle); } catch (err) {
+        fail(err.message); setMark(spec.mark, 'no region', 'fail'); return;
+    }
+    state.pending[key] = wanted.map(([name, value]) => `${name}=${value}`);
+    note(`staged ${state.pending[key].length} settings:`);
+    state.pending[key].forEach(line => note(`  ${line}`));
+    configLabel(key, spec.armed(state.pending[key].length));
+    setMark(spec.mark, 'staged', 'run');
+}
+
+async function applyConfig(key) {
+    if (!bundleReady()) return;
+    const spec = CONFIG_STAGES[key];
+    const deltas = state.pending[key] || [];
     /* Only what the device ACCEPTED. A setting it answered ERROR to is not
      * what this unit is meant to have — it is what somebody tried, and the
      * record must not blur those two. */
     const applied = [];
     let accepted = 0;
-    setMark('config', `0/${deltas.length}`, 'run');
+    setMark(spec.mark, `0/${deltas.length}`, 'run');
 
     for (const [i, cmd] of deltas.entries()) {
         write(cmd, 'tx');
@@ -1409,7 +1599,7 @@ async function doApplyConfig() {
             applied.push([cmd.slice(0, split), cmd.slice(split + 1)]);
         }
         else if (lines.some(l => /ERROR/i.test(l))) fail(`  ${cmd} → ERROR`);
-        setMark('config', `${i + 1}/${deltas.length}`, 'run');
+        setMark(spec.mark, `${i + 1}/${deltas.length}`, 'run');
     }
 
     /*
@@ -1417,18 +1607,17 @@ async function doApplyConfig() {
      * survives a reboot — the only proof is re-reading AT+CFG after a reset,
      * and this app does not get to claim it on the device's behalf.
      */
-    setMark('config', `${accepted}/${deltas.length} OK`,
+    setMark(spec.mark, `${accepted}/${deltas.length} OK`,
             accepted === deltas.length ? 'weak' : 'fail');
     note(`${accepted}/${deltas.length} settings returned OK`);
     note('OK is not persisted: verify with AT+CFG after a reset');
-    state.pendingDeltas = null;
-    el('btn-config').querySelector('.label').textContent = '③ CONFIG';
-    el('btn-config').classList.remove('armed');
+    state.pending[key] = null;
+    configLabel(key, null);
 
     await recordSettings(applied);
     await record({
         stage: STAGES.config,
-        substep: 'network_settings_set',
+        substep: spec.substep,
         status: accepted === deltas.length ? 'done' : 'partial',
         summary: `${accepted}/${deltas.length} settings returned OK. OK is the ` +
                  'command parsing, not the setting surviving a reboot — only ' +
@@ -1436,6 +1625,9 @@ async function doApplyConfig() {
         evidence: applied.map(([name, value]) => `${name}=${value}`),
     });
 }
+
+const runConfigStage = key =>
+    state.pending[key] ? applyConfig(key) : stageConfig(key);
 
 /*
  * The stage that decides whether a phone can replace the laptop at all. One
@@ -1568,7 +1760,7 @@ async function doCerts() {
     });
 }
 
-/* ── ④ VERIFY ─────────────────────────────────────────────────────────────
+/* ── ⑤ VERIFY ─────────────────────────────────────────────────────────────
  *
  * What the device says about its own cycle, over the link that is already open.
  *
@@ -1619,13 +1811,13 @@ function doVerify() {
         return;
     }
 
-    const phase = startPhase('④ VERIFY');
+    const phase = startPhase('⑤ VERIFY');
     const seen = new Set();
     const collector = { lines: [], each: line => {
         PUBLISH_EVIDENCE.forEach(([pattern, meaning], i) => {
             if (seen.has(i) || !pattern.test(line)) return;
             seen.add(i);
-            write(`④ ${meaning}`, i === CONNECTED ? 'ok' : 'note');
+            write(`⑤ ${meaning}`, i === CONNECTED ? 'ok' : 'note');
             setMark('verify', `${seen.size}/${PUBLISH_EVIDENCE.length}`, 'run');
             /* Stop at the verdict, or when the cycle closes without one —
              * a failed cycle is diagnosable now, not in twenty minutes. */
@@ -1660,13 +1852,13 @@ function doVerify() {
 
         if (published) {
             setMark('verify', 'published ✓', 'ok');
-            ok('④ AWS IoT accepted this unit\'s certificate and the reading left ' +
+            ok('⑤ AWS IoT accepted this unit\'s certificate and the reading left ' +
                'the modem.');
             note('QoS 0 has no delivery receipt: confirm the uplink landed in ' +
                  `AWS IoT for ${state.bundle ? state.bundle.imei : 'this IMEI'}.`);
         } else if (seen.has(0)) {
             setMark('verify', 'no MQTT', 'fail');
-            fail('④ The cycle ran and never connected to the server.');
+            fail('⑤ The cycle ran and never connected to the server.');
             note(seen.has(4)
                 ? 'It reached the broker and was refused: the certificate is ' +
                   'not registered/active/attached, or the key does not match it.'
@@ -1675,7 +1867,7 @@ function doVerify() {
             note('SNI=0 and MQOS=0 are the two settings that fail silently here.');
         } else {
             setMark('verify', 'nothing seen', 'weak');
-            fail('④ No cycle was observed before the budget ran out.');
+            fail('⑤ No cycle was observed before the budget ran out.');
             note('The link only carries lines while the unit is awake, so a ' +
                  'cycle that ran while BLE was re-attaching can be missed.');
         }
@@ -1688,7 +1880,7 @@ function doVerify() {
 
     setMark('verify', 'watching', 'run');
     note(`Watching for a publish, up to ${Math.round(verifyBudgetMs() / 60000)} min.`);
-    you('Press RESET to start a cycle now, or wait for the next one. Tap ④ ' +
+    you('Press RESET to start a cycle now, or wait for the next one. Tap ⑤ ' +
         'again to stop watching and report what was seen.');
 }
 
@@ -1761,6 +1953,7 @@ const SHELL_NEEDS = [
     'pair-row', 'btn-bundle', 'mark-bundle', 'raw-live', 'raw-count',
     'terminal', 'terminal-raw', 'link-state', 'app-version',
     'at-menu', 'at-panel', 'at-list', 'at-filter',
+    'btn-network', 'mark-network',
 ];
 
 function shellIsStale() {
@@ -1792,7 +1985,7 @@ export function initProvision() {
      * around the whole run — here, at the seam, rather than inside four stage
      * bodies that are about the device and not about the log.
      *
-     * ④ is not wrapped: it arms a watcher and returns, and its verdict arrives
+     * ⑤ is not wrapped: it arms a watcher and returns, and its verdict arrives
      * minutes later. It opens and closes its own section around the watch.
      */
     const staged = (label, fn) => async (...args) => {
@@ -1806,14 +1999,13 @@ export function initProvision() {
     el('btn-certs').addEventListener('click', staged('② CERTS', doCerts));
     el('btn-verify').addEventListener('click', doVerify);
 
-    el('btn-config').addEventListener('click', staged('③ CONFIG', () => {
-        if (state.pendingDeltas) return doApplyConfig();
-        if (!state.bundle) return doReadConfig();
-        return doStageConfig();
-    }));
+    el('btn-network').addEventListener('click',
+        staged('③ NETWORK', () => runConfigStage('network')));
+    el('btn-config').addEventListener('click',
+        staged('④ MQTT', () => runConfigStage('mqtt')));
 
     el('copy-log').addEventListener('click', copyRawLog);
-    el('btn-forget').addEventListener('click', () => forgetFolder());
+    el('btn-forget').addEventListener('click', changeUnit);
 
     el('bundle-input').addEventListener('change', e => loadFiles(e.target.files));
 

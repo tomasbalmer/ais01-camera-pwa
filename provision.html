@@ -68,6 +68,35 @@
              */
             --rail: 400px;
             --rail-pad: 8px;
+
+            /*
+             * ── Borrowed from the dashboard's design system ──────────────
+             *
+             * `cli/ais01_cli/dashboard/tokens.css` and its DESIGN-SYSTEM.md.
+             * This page already copies that dashboard's History — the voices,
+             * the phase headers, the boot dividers — because a technician
+             * reading one and then the other should not have to learn two
+             * languages. The stage chips and the state cards are the rest of
+             * the same borrowing.
+             *
+             * Values are copied rather than the file imported, for the reason
+             * at the top of this page: no shared stylesheet with anything. A
+             * second look must not become a second design, and an import from
+             * another repo is not available to a static page anyway.
+             */
+            --panel:     #0f1d30;   /* cards and chips */
+            --panel-up:  #16263d;   /* raised inner surfaces */
+            --border-2:  #2a3f5a;   /* stronger dividers, chip outlines */
+            --green:     #22c55e;
+            --green-txt: #4ade80;
+            --green-glow: rgba(34,197,94,.35);
+            --partial:   #a3e635;   /* advancing toward done, not stalled */
+            --amber-bd:  rgba(251,191,36,.50);
+            --amber-glow: rgba(251,191,36,.35);
+            --red:       #ef4444;
+            --red-bd:    rgba(239,68,68,.45);
+            --txt-faint: #5b6f86;   /* labels, timestamps, meta */
+            --fs-label:  10px;
         }
         header {
             flex-shrink: 0;
@@ -264,18 +293,28 @@
             color: #cbd5e1;
         }
 
-        #log-controls {
-            position: absolute; right: 8px; bottom: 6px;
-            display: flex; align-items: center; gap: 6px;
-        }
-        #log-controls button {
-            font-size: 10px; font-weight: 600; letter-spacing: 0.04em;
-            color: #94a3b8; background: #1e293bdd;
-            border: 1px solid #334155; border-radius: 4px;
-            padding: 4px 8px;
+        /*
+         * The session's controls, all on the bar.
+         *
+         * SHARE and CHANGE UNIT used to float over the bottom-right corner of
+         * the terminal, which put them on top of the one thing on this screen
+         * that must never be covered — and gave three controls of the same
+         * kind three different homes. They are all about the session rather
+         * than about the device: which unit, where the log goes, and whether
+         * there is a link at all. One line, one cluster.
+         */
+        .bar-tools { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+        .bar-tools button {
+            display: inline-flex; align-items: center; gap: 5px;
+            padding: 5px 9px;
+            font-size: 11px; font-weight: 600; letter-spacing: 0.04em;
+            color: #94a3b8; background: #1e293b;
+            border: 1px solid var(--border); border-radius: 6px;
+            white-space: nowrap;
             -webkit-tap-highlight-color: transparent;
         }
-        #log-controls button:active { background: #334155; }
+        .bar-tools button:active { background: #334155; }
+        .bar-tools svg { width: 12px; height: 12px; flex-shrink: 0; }
 
         /*
          * Pairing sits in the bar, next to the dot that reports the link.
@@ -290,15 +329,22 @@
          * and the fix is the next thing along.
          */
         #pair-row { flex-shrink: 0; display: flex; }
-        #pair-row[hidden] { display: none; }
-        #btn-connect {
-            padding: 5px 10px;
-            border: 1px solid #475569; border-radius: 6px;
-            background: #1e293b; color: #e2e8f0;
-            font-size: 11px; font-weight: 600; letter-spacing: 0.04em;
-            -webkit-tap-highlight-color: transparent;
+        /*
+         * The one control on the bar that reports rather than acts, so it is
+         * the one that carries colour. Green is the link being up — the same
+         * green the dot uses, said in words for the one fact worth confirming
+         * at a glance from a bench.
+         */
+        #btn-connect { border-color: #475569; color: #e2e8f0; }
+        #btn-connect svg { color: #7dd3fc; }
+        #btn-connect.link-connected {
+            color: #4ade80; border-color: #22c55e66; background: #14532d44;
         }
-        #btn-connect:active { background: #334155; }
+        #btn-connect.link-connected svg { color: #4ade80; }
+        #btn-connect.link-reconnecting {
+            color: #fbbf24; border-color: #b4530966; background: #b4530922;
+        }
+        #btn-connect.link-reconnecting svg { color: #fbbf24; }
 
         .actions {
             display: flex; gap: 6px;
@@ -306,14 +352,87 @@
             border-top: 1px solid #1e293b;
             padding-bottom: calc(8px + env(safe-area-inset-bottom));
         }
+        /*
+         * The stage chip — `.step-chip` from the dashboard's design system.
+         *
+         * The buttons had been a number glyph and a shouted sentence stacked
+         * centre-aligned, which is what you get from styling a label instead
+         * of designing a component. The dashboard had already solved it and
+         * the solution is a hierarchy rather than a size: a status circle,
+         * the name in ordinary sentence case, and the stage's own mark under
+         * it. Nothing shouts, and nothing is centred.
+         *
+         * The circle carries state and nothing else. A number inside it was
+         * this app's invention and it broke the one rule the atom has: in
+         * every state the system defines, the glyph and the ring are chosen
+         * together. A grey number in an amber ring is not one of them, and
+         * the order it was carrying is already given by the position.
+         */
         .actions button {
-            flex: 1; min-height: 56px; padding: 6px 4px;
-            display: flex; flex-direction: column;
-            align-items: center; justify-content: center; gap: 3px;
-            border: 1px solid #334155; border-radius: 8px;
-            background: #1e293b; color: #e2e8f0;
-            font-size: 12px; font-weight: 600;
+            flex: 1; min-width: 0;
+            padding: 12px 13px; border-radius: 14px;
+            border: 1.5px solid var(--border-2); background: var(--panel);
+            display: flex; flex-direction: row; align-items: center; gap: 10px;
+            text-align: left; color: var(--text);
+            transition: border-color .15s, box-shadow .15s;
             -webkit-tap-highlight-color: transparent;
+        }
+        .actions button:active { background: var(--panel-up); }
+        .actions .chip-txt {
+            display: flex; flex-direction: column; gap: 3px;
+            min-width: 0; flex: 1 1 auto;
+        }
+        .actions .name {
+            font-size: 14px; font-weight: 600; color: var(--text);
+            line-height: 1.35;
+        }
+
+        /*
+         * StatusCircle (C12). One atom, four states, used by the chips and the
+         * cards alike — which is the point of taking it from a system rather
+         * than inventing a dot per place.
+         */
+        .status-circle {
+            width: 30px; height: 30px; border-radius: 999px; flex-shrink: 0;
+            display: inline-flex; align-items: center; justify-content: center;
+            border: 2px solid var(--amber-bd); background: transparent;
+            font-size: 13px; font-weight: 700; line-height: 1;
+            /* Transparent by default, so a state that has no glyph shows an
+               empty ring rather than whatever colour was left over. In every
+               state below, what is inside the ring and what draws it are
+               chosen together — there is no state where they disagree. */
+            color: transparent;
+        }
+        .status-circle.is-done {
+            background: var(--green); border-color: var(--green); color: #06210f;
+        }
+        .status-circle.is-current { border-color: var(--green); color: var(--green-txt); }
+        .status-circle.is-partial { border-color: var(--partial); color: var(--partial); }
+        /* Empty on purpose: an untouched stage has nothing to report, and the
+           order it sits in is given by its position in the row. */
+        .status-circle.is-pending { border-color: var(--amber-bd); color: transparent; }
+        .status-circle.is-fail {
+            background: var(--red); border-color: var(--red); color: #2a0808;
+        }
+
+        /* The chip takes its status colour from the circle it carries, so a
+           finished stage reads as all-green rather than half-lit. */
+        .actions button.is-done    { border-color: var(--green);
+                                     box-shadow: 0 0 16px var(--green-glow); }
+        .actions button.is-done .name { color: var(--green-txt); }
+        .actions button.is-current { border-color: var(--green);
+                                     box-shadow: 0 0 16px var(--green-glow); }
+        /* No name colour for partial or current: the circle already carries
+           them, and a chip that tints its title for every state spends its
+           whole colour budget on the states with the least to say. */
+        .actions button.is-partial { border-color: var(--partial); }
+        .actions button.is-fail    { border-color: var(--red);
+                                     box-shadow: 0 0 16px var(--red-bd); }
+        .actions button.is-fail .name { color: #fca5a5; }
+
+        @media (max-width: 1100px) {
+            .actions .name { font-size: 13px; }
+            .status-circle { width: 26px; height: 26px; font-size: 12px; }
         }
         .actions button:active { background: #334155; }
         .actions button.armed { background: #b45309; border-color: #f59e0b; }
@@ -324,9 +443,22 @@
           deliberately uneven: stages whose evidence is weak must not wear the
           same green tick as stages the modem or the platform actually proved.
         */
+        /*
+         * The validation line — the dashboard's `.date`/`.by` meta, which is
+         * the closest thing its system has to this. Faint by default and
+         * coloured only when it carries proof, because five permanently
+         * coloured marks compete with five status circles that already say
+         * the state.
+         *
+         * Which marks get to be green is the uneven part, and it is
+         * deliberate: only ② and ⑤ hold evidence strong enough — a checksum
+         * the modem computed over what it stored, and a CONNACK that AWS IoT
+         * only issues to a certificate that is registered, active, attached
+         * and key-matched. "9/9 OK" is not that, and stays grey.
+         */
         .mark {
-            font-size: 10px; font-weight: 500; line-height: 1;
-            color: #64748b; min-height: 11px;
+            font-size: 11px; font-weight: 500; line-height: 1.3;
+            color: var(--txt-faint); min-height: 13px;
         }
         /*
          * ⓪ reports the unit, in full, in figures you can compare against the
@@ -334,19 +466,20 @@
          * instead of 869181072714122 looks identical under a checkmark, and
          * that is the exact mistake every guard on this screen exists to catch.
          *
-         * Which is why the button is wider than its neighbours — fifteen digits
-         * have to fit without shrinking to a size nobody checks.
+         * It used to be 1.7 chips wide to fit those fifteen digits beside a
+         * centred label. The chip layout gives the mark its own line at the
+         * full width of the text column, so the room is already there and the
+         * six stages can be six equal things — which is what they are.
          */
-        #btn-bundle { flex: 1.7; }
         #mark-bundle {
             font-family: ui-monospace, "SF Mono", Menlo, monospace;
             font-variant-numeric: tabular-nums;
             letter-spacing: -0.2px;
         }
-        .mark-ok    { color: #4ade80; }
-        .mark-weak  { color: #fbbf24; }
-        .mark-fail  { color: #f87171; }
-        .mark-run   { color: #7dd3fc; }
+        .mark-ok    { color: var(--green-txt); }   /* proof */
+        .mark-fail  { color: #fca5a5; }            /* refused */
+        .mark-weak  { color: var(--txt-faint); }   /* observed, not proof */
+        .mark-run   { color: var(--txt-faint); }   /* still going */
 
         /*
          * The manual AT row.
@@ -390,6 +523,7 @@
             border-top: 2px solid var(--border);
             box-shadow: 0 -6px 16px rgba(0,0,0,0.35);
         }
+
         .at-row {
             display: flex; gap: 6px;
             padding: 10px var(--rail-pad) 10px;
@@ -531,7 +665,36 @@
           browser insists a person start, so that is the one thing left here,
           and it hides the moment there is something to adopt instead.
         -->
-        <span id="pair-row"><button id="btn-connect">PAIR</button></span>
+        <div class="bar-tools">
+            <button id="copy-log" title="Hand the whole raw serial buffer to whoever has to diagnose it">
+                SHARE LOG
+            </button>
+            <!-- Named for the moment it is used, not for what it clears. The
+                 FOLDER is remembered between reloads — the reference to it and
+                 the permission to open it, never the certificate, the key or
+                 the password, which are re-read from disk each session. This
+                 lets that reference go, which is what you want exactly once
+                 per unit: when the bench moves to the next one. -->
+            <button id="btn-forget" title="Let go of this unit's folder, so ⓪ asks for the next one">
+                CHANGE UNIT
+            </button>
+            <!-- It stays on screen once paired and goes green instead of
+                 vanishing. A control that disappears on success leaves the bar
+                 with nothing where the link used to be, so the state you most
+                 want confirmed is the one state with no words on it. -->
+            <span id="pair-row">
+                <button id="btn-connect">
+                    <!-- The Bluetooth rune, drawn rather than typed: it has no
+                         dependable glyph across the platforms this runs on. -->
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                         stroke-width="2.2" stroke-linecap="round"
+                         stroke-linejoin="round" aria-hidden="true">
+                        <path d="M8 7l8 10-4 4V3l4 4-8 10"/>
+                    </svg>
+                    <span id="pair-label">PAIR DEVICE VIA BLE</span>
+                </button>
+            </span>
+        </div>
         <span id="app-version" class="version"></span>
     </header>
 
@@ -561,22 +724,6 @@
         <!-- Controls sit on the log they act on. SHARE hands the whole raw
              buffer to whoever has to diagnose it, which on a bench is not the
              person holding the phone. -->
-        <!-- Two controls, both about the log's own material. RESET moved into
-             the AT menu: restarting is a command, and this strip is for the
-             log, not for the device. -->
-        <div id="log-controls">
-            <button id="copy-log">SHARE</button>
-            <!-- Named for the moment it is used, not for what it clears.
-                 The FOLDER is remembered between reloads — the reference to it
-                 and the permission to open it, never the certificate, the key
-                 or the password, which are re-read from disk each session. This
-                 lets that reference go, which is what you want exactly once per
-                 unit: when the bench moves to the next one. -->
-            <button id="btn-forget"
-                    title="Let go of this unit's folder, so ⓪ asks for the next one">
-                CHANGE UNIT
-            </button>
-        </div>
     </main>
 
     <!--
@@ -620,6 +767,20 @@
          selection would be a stray tap away from an ATZ mid-write. -->
     <!-- The controls, on their own ground. Above this line is what the device
          says; below it is what you can do to it. -->
+    <dialog id="confirm-dialog">
+        <div class="dialog-body">
+            <h2 id="confirm-title"></h2>
+            <div id="confirm-body"></div>
+        </div>
+        <!-- `method="dialog"` closes and sets returnValue from the pressed
+             button, so Cancel, Escape and the backdrop all land on the same
+             "not ok" without a line of script between them. -->
+        <form method="dialog" class="dialog-actions">
+            <button value="cancel">Cancel</button>
+            <button value="ok" id="confirm-ok"></button>
+        </form>
+    </dialog>
+
     <div class="console-foot">
     <div class="at-row">
         <div class="at-picker">
@@ -649,21 +810,66 @@
       ② needs the PEMs — so it belongs in the same sequence, in the position
       that says "before anything else", wearing the same mark the others wear.
     -->
+    <!--
+      Each button says what it DOES, not what it is about.
+
+      `CERTS` and `CONFIG` are what the thing is called once you already know
+      the sequence; they are useless to anyone reading the screen to find out
+      what it is. The numbers carry the order, so the words are free to carry
+      the action — and the difference between "CONFIG" and "Apply network and
+      MQTT settings" is the difference between a label and an instruction.
+    -->
     <div class="actions">
         <button id="btn-bundle">
-            <span class="label">⓪&nbsp;FOLDER</span><span id="mark-bundle" class="mark"></span>
+            <span class="status-circle" id="dot-bundle"></span>
+            <span class="chip-txt">
+                <span class="name">Select provisioning folder</span>
+                <span id="mark-bundle" class="mark"></span>
+            </span>
         </button>
         <button id="btn-login">
-            <span class="label">①&nbsp;LOGIN</span><span id="mark-login" class="mark"></span>
+            <span class="status-circle" id="dot-login"></span>
+            <span class="chip-txt">
+                <span class="name">Log in to device console</span>
+                <span id="mark-login" class="mark"></span>
+            </span>
         </button>
         <button id="btn-certs">
-            <span class="label">②&nbsp;CERTS</span><span id="mark-certs" class="mark"></span>
+            <span class="status-circle" id="dot-certs"></span>
+            <span class="chip-txt">
+                <span class="name">Write certificates into modem</span>
+                <span id="mark-certs" class="mark"></span>
+            </span>
+        </button>
+        <!--
+          ③ and ④ were one button called "network and MQTT", and it only ever
+          sent the MQTT half — `firmware-factory/scripts/` splits the job in
+          two and this app had implemented one of them. They are separate
+          because they are answerable to different things: ④ is derived from
+          the folder (IMEI makes the topics, environment makes the broker),
+          while ③ is derived from the SIM the unit will sit beside, which is
+          why the folder name has to end in -AR or -BR.
+        -->
+        <button id="btn-network">
+            <span class="status-circle" id="dot-network"></span>
+            <span class="chip-txt">
+                <span class="name">Apply cellular network settings</span>
+                <span id="mark-network" class="mark"></span>
+            </span>
         </button>
         <button id="btn-config">
-            <span class="label">③&nbsp;CONFIG</span><span id="mark-config" class="mark"></span>
+            <span class="status-circle" id="dot-config"></span>
+            <span class="chip-txt">
+                <span class="name">Apply MQTT broker settings</span>
+                <span id="mark-config" class="mark"></span>
+            </span>
         </button>
         <button id="btn-verify">
-            <span class="label">④&nbsp;VERIFY</span><span id="mark-verify" class="mark"></span>
+            <span class="status-circle" id="dot-verify"></span>
+            <span class="chip-txt">
+                <span class="name">Verify publish to AWS IoT</span>
+                <span id="mark-verify" class="mark"></span>
+            </span>
         </button>
     </div>
     </div>
