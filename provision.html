@@ -347,29 +347,105 @@
          * terminal as the rest of the session.
          *
          * The menu is the paved path and the field is the escape hatch, so the
-         * width is split that way round: most commands are picked, and the ones
-         * that are typed are short. The field had the whole row when it was the
-         * only way in.
+         * row is split that way round: the picker takes the width, and the
+         * field keeps only what a short command needs. It had the whole row
+         * when it was the only way in, and kept it for one version after it
+         * stopped being that, which read as the menu being the afterthought.
          */
-        .at-row { flex: 0 0 auto; display: flex; gap: 6px; padding: 0 8px 8px; }
-        .at-row select {
-            flex: 0 0 132px; min-width: 0; min-height: 40px; padding: 0 8px;
+        .at-row {
+            flex: 0 0 auto; display: flex; gap: 6px; padding: 0 8px 8px;
+            align-items: stretch;
+        }
+
+        /*
+         * A picker of our own rather than a `<select>`.
+         *
+         * A native select on the second-to-last row of a full-height page opens
+         * wherever the platform decides — upward, overlapping, sized to the
+         * viewport, and on 58 entries that is a full-screen native list with no
+         * grouping the eye can use. Here the direction is a decision: the panel
+         * is anchored to the TOP of the control and grows up, over the terminal,
+         * because there is nothing below this row but the stage buttons.
+         *
+         * It is a listbox, not a menu: picking writes into the field and closes.
+         * Nothing is sent, so nothing here needs confirming.
+         */
+        .at-picker { position: relative; flex: 1 1 auto; min-width: 0; display: flex; }
+        #at-menu {
+            flex: 1 1 auto; min-width: 0; min-height: 40px;
+            display: flex; align-items: center; justify-content: space-between;
+            gap: 8px; padding: 0 10px;
             border: 1px solid #334155; border-radius: 8px;
-            background: #0f172a; color: #cbd5e1; font-size: 12px;
+            background: #0f172a; color: #cbd5e1;
+            font-size: 13px; text-align: left;
             -webkit-tap-highlight-color: transparent;
         }
-        .at-row input {
-            flex: 1 1 auto; min-width: 0; min-height: 40px; padding: 0 10px;
+        #at-menu:active { background: #1e293b; }
+        #at-menu .chev { color: var(--muted); font-size: 10px; flex-shrink: 0; }
+        #at-menu[aria-expanded="true"] { border-color: #475569; background: #1e293b; }
+
+        .at-panel {
+            position: absolute; bottom: calc(100% + 6px); left: 0; right: 0;
+            z-index: 20;
+            display: flex; flex-direction: column;
+            max-height: min(52vh, 420px);
+            border: 1px solid #475569; border-radius: 10px;
+            background: #0b1220;
+            box-shadow: 0 -8px 28px rgba(0,0,0,0.55);
+            overflow: hidden;
+        }
+        .at-panel[hidden] { display: none; }
+        #at-filter {
+            flex: 0 0 auto; min-height: 38px; padding: 0 12px;
+            border: none; border-bottom: 1px solid #1e293b;
+            background: #0f172a; color: #e2e8f0;
+            font-family: ui-monospace, monospace; font-size: 13px;
+        }
+        #at-filter::placeholder { color: #475569; }
+        #at-list { flex: 1 1 auto; overflow-y: auto; -webkit-overflow-scrolling: touch; }
+        .at-group {
+            padding: 7px 12px 3px;
+            font-size: 9px; font-weight: 700; letter-spacing: 0.1em;
+            text-transform: uppercase; color: var(--muted);
+            background: #0b1220; position: sticky; top: 0;
+        }
+        .at-opt {
+            display: flex; align-items: baseline; gap: 8px;
+            width: 100%; padding: 7px 12px;
+            border: none; background: none; text-align: left;
+            color: #cbd5e1; font-size: 13px;
+            -webkit-tap-highlight-color: transparent;
+        }
+        .at-opt:hover, .at-opt.is-on { background: #1e293b; }
+        .at-opt .cmd {
+            flex: 0 0 auto;
+            font-family: ui-monospace, "SF Mono", Menlo, monospace;
+            color: #7dd3fc;
+        }
+        .at-opt .why {
+            flex: 1 1 auto; min-width: 0;
+            font-size: 11px; color: var(--muted);
+            overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+        }
+        /* A factory reset undoes a provisioning session. It is in the list
+           because the list is the whole table, and it is red because being in
+           the list is not the same as being an ordinary choice. */
+        .at-opt.is-danger .cmd { color: #f87171; }
+        .at-empty { padding: 14px 12px; font-size: 12px; color: var(--muted); }
+
+        .at-row input#at-input {
+            flex: 0 0 116px; min-width: 0; min-height: 40px; padding: 0 10px;
             border: 1px solid #334155; border-radius: 8px;
             background: #0b1220; color: #e2e8f0;
             font-family: ui-monospace, monospace; font-size: 13px;
         }
         .at-row input::placeholder { color: #475569; }
-        .at-row button {
-            flex: 0 0 72px; min-height: 40px;
+        #at-send {
+            flex: 0 0 68px; min-height: 40px;
             border: 1px solid #334155; border-radius: 8px;
             background: #0f172a; color: #cbd5e1; font-size: 13px;
         }
+        #at-send:active { background: #1e293b; }
     </style>
 </head>
 <body>
@@ -475,12 +551,24 @@
          principle the four stage buttons follow, and a menu that sent on
          selection would be a stray tap away from an ATZ mid-write. -->
     <div class="at-row">
-        <select id="at-menu" aria-label="AT commands">
-            <option value="">AT ▾</option>
-        </select>
+        <div class="at-picker">
+            <button id="at-menu" type="button" aria-haspopup="listbox"
+                    aria-expanded="false" aria-controls="at-panel">
+                <span>Pick an AT command</span><span class="chev">▲</span>
+            </button>
+            <!-- Opens upward on purpose: there is nothing below this row but
+                 the stage buttons, and a list of 58 needs the terminal's
+                 height rather than the six rows a native select would get. -->
+            <div class="at-panel" id="at-panel" hidden>
+                <input id="at-filter" type="text" spellcheck="false"
+                       autocapitalize="off" autocorrect="off"
+                       placeholder="filter — Enter takes the first">
+                <div id="at-list" role="listbox" aria-label="AT commands"></div>
+            </div>
+        </div>
         <input id="at-input" type="text" spellcheck="false"
                autocapitalize="off" autocorrect="off"
-               placeholder="or type one">
+               placeholder="or type">
         <button id="at-send">SEND</button>
     </div>
 

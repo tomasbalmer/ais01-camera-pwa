@@ -1,73 +1,89 @@
 /*
- * The commands worth offering, and only those.
+ * Every command the firmware answers, and what we can honestly say about each.
  *
- * The free-text field is the escape hatch and stays exactly as it was: whatever
- * is typed is sent as typed. This list is the paved path — the handful of
- * commands a bench session actually reaches for, spelled correctly, so nobody
- * is recalling `AT+CSQTIME` from memory at the one moment an AT window is open.
+ * The list itself is not ours: `APP_AT_COMMANDS` in `console-line-law.js` is
+ * the 58-entry table read off the app firmware at 0x0801b4d4, and it is the
+ * authority. This file adds two things to it — an order that puts the ones a
+ * bench session reaches for at the top, and a description where THIS REPO can
+ * back one up.
  *
- * Two rules decide what is in here:
+ * The descriptions are deliberately incomplete. A command with no line beside
+ * it is a command whose behaviour is documented in `AIS01-CB-LTE` and not here;
+ * inventing a plausible sentence for it would make the list feel authoritative
+ * exactly where it is guessing, and this screen talks to hardware.
  *
- *   IT MUST BE PROVEN IN THIS REPO. Every command below is one this app already
- *   sends, or one named in `console-line-law.js`'s table of the 58 the firmware
- *   answers. Nothing is here because a datasheet suggested it.
- *
- *   NOTHING DESTRUCTIVE. `AT+FDR` is a factory reset and is deliberately
- *   absent: a list you scroll is the wrong place for a command that undoes a
- *   provisioning session. It is still one thing to type, which is the right
- *   amount of friction for it.
- *
- * Picking an entry only FILLS the field. Sending stays a separate, deliberate
- * press — the technician owns when a command goes out, which is the same
- * principle the four stage buttons follow.
+ * Picking an entry only FILLS the field. Sending stays a separate press.
  */
+
+import { APP_AT_COMMANDS } from './console-line-law.js';
 
 /*
- * `AT+CFG` returns the whole property dump in one command, which is why there
- * is no per-setting query form here. Reading is one entry, not twenty.
+ * The ones with a value already in them are written as a template with a
+ * sensible value, because a command with the value missing is a command the
+ * technician has to remember the syntax of — which is the thing this list
+ * exists to stop.
  */
-export const AT_CATALOGUE = [
-    ['Read', [
-        ['AT+CFG', 'every setting, in one dump'],
-        ['AT+GETLOG', 'the firmware\'s own log'],
-    ]],
+const DESCRIBED = {
+    'AT+CFG': ['AT+CFG', 'every setting, in one dump'],
+    'AT+CERTMOD': ['AT+CERTMOD', 'toggle BG95 passthrough — no query form, it just flips'],
+    'AT+CSQTIME': ['AT+CSQTIME=1', 'minutes hunting for a network before power-off'],
+    'AT+TDC': ['AT+TDC=1200', 'seconds between duty cycles'],
+    'AT+PRO': ['AT+PRO=3,5', 'protocol — 3,5 is MQTT/TLS'],
+    'AT+SERVADDR': ['AT+SERVADDR=', 'broker host and port'],
+    'AT+PUBTOPIC': ['AT+PUBTOPIC=', 'uplink topic'],
+    'AT+SUBTOPIC': ['AT+SUBTOPIC=', 'downlink topic'],
+    'AT+CLIENT': ['AT+CLIENT=', 'MQTT client id — the AWS IoT thing name'],
+    'AT+TLSMOD': ['AT+TLSMOD=1,2', 'TLS mode'],
+    'AT+MQOS': ['AT+MQOS=0', 'QoS 0 — law, MQOS>0 has no PUBACK here'],
+    'AT+SNI': ['AT+SNI=0', 'law — SNI=1 breaks the MQTT CONNECT silently'],
+    'AT+BKDNS': ['AT+BKDNS=', 'fallback IP for when DNS does not answer'],
+    'AT+GETLOG': ['AT+GETLOG', 'the firmware\'s own log'],
+    'ATZ': ['ATZ', 'restart the unit — the link drops and comes back'],
+    'AT+FDR': ['AT+FDR', 'FACTORY RESET — undoes provisioning'],
+    'AT+FDR1': ['AT+FDR1', 'factory reset, second form'],
+};
 
-    /*
-     * `ATZ` is answered by the app itself, so it restarts the STM32 — the same
-     * thing the board button does. It had a dedicated button on the log strip;
-     * it is here instead, because a restart is a command like any other and the
-     * strip is for the log, not for the device. `sendManual` still routes it
-     * through the reset path so the boot divider and the window guidance
-     * survive the move.
-     */
-    ['Restart', [
-        ['ATZ', 'restart the unit — the link drops and comes back'],
-    ]],
+/* Destructive enough that the list says so rather than just listing it. */
+export const DANGEROUS = new Set(['AT+FDR', 'AT+FDR1']);
 
-    /*
-     * The two that decide how long a bench session waits. `AT+CSQTIME` is the
-     * search window — how long the firmware hunts for a network before powering
-     * the modem down, and therefore how long until the idle state a certificate
-     * write needs. It is the command that made the manual row exist.
-     */
-    ['Timing', [
-        ['AT+CSQTIME=1', 'minutes spent hunting for a network before power-off'],
-        ['AT+TDC=1200', 'seconds between duty cycles'],
-    ]],
-
-    /*
-     * Passthrough. `AT+CERTMOD` is a TOGGLE with no query form — sending it
-     * blind is how a unit ends up inside passthrough without anyone knowing,
-     * which certmod.js spends real code recovering from. It is here because
-     * diagnosing a failed write needs it, not because it is routine.
-     *
-     * The three below it only answer once the BG95 is reachable, which on this
-     * firmware means inside passthrough.
-     */
-    ['BG95 · inside passthrough', [
-        ['AT+CERTMOD', 'toggle passthrough — no query form, it just flips'],
-        ['AT+QFLST="*"', 'what the modem has stored, and at what size'],
-        ['ATI', 'modem identity — also the echo probe'],
-        ['AT+CFUN=1', 'radio back on after a certificate write'],
-    ]],
+/*
+ * What a bench session actually reaches for, in the order it reaches for them.
+ * Everything else is still one scroll away — this is ordering, not filtering.
+ */
+const FIRST = [
+    'AT+CFG', 'ATZ', 'AT+CSQTIME', 'AT+TDC', 'AT+CERTMOD', 'AT+GETLOG',
 ];
+
+/*
+ * Commands the app does NOT intercept, so they cross into the BG95. They only
+ * answer once the modem is reachable, which on this firmware means inside
+ * passthrough — hence the separate group rather than a footnote.
+ */
+const BG95 = [
+    ['AT+QFLST="*"', 'what the modem has stored, and at what size'],
+    ['ATI', 'modem identity — also the echo probe'],
+    ['AT+CFUN=1', 'radio back on after a certificate write'],
+    ['AT+CFUN=0', 'radio off — what a certificate write runs under'],
+    ['AT+QFDEL=', 'delete one stored file'],
+];
+
+const entryFor = name => DESCRIBED[name] || [name, ''];
+
+/*
+ * Three groups, and the third one is the whole table.
+ *
+ * A caller adds "this unit" in front when a folder is loaded; those come from
+ * `desiredSettings`, so they carry real values rather than templates.
+ */
+export function catalogueGroups() {
+    const rest = APP_AT_COMMANDS
+        .filter(name => !FIRST.includes(name))
+        .sort()
+        .map(entryFor);
+
+    return [
+        ['Common', FIRST.map(entryFor)],
+        ['BG95 · inside passthrough', BG95],
+        [`All ${APP_AT_COMMANDS.length} app commands`, rest],
+    ];
+}

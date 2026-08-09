@@ -864,7 +864,10 @@ async function writeTarget(io, target, retries = 3) {
 
             if (got && got.size === want.size && got.checksum === want.checksum) {
                 io.log(`  VERIFIED +QFUPL: ${got.size},${hex4(got.checksum)}`, 'ok');
-                return true;
+                /* The verdict itself, not a boolean about it. It is the only
+                 * evidence in this path the modem computed rather than we did,
+                 * so it is what the caller records. */
+                return got;
             }
             if (!got) {
                 io.log('  no +QFUPL result received', 'fail');
@@ -890,7 +893,11 @@ async function writeTarget(io, target, retries = 3) {
 /*
  * Write all three. Resolves when every file passed its gate; throws on the
  * first that did not, leaving nothing half-written behind it.
- * `onProgress(done, total)` fires after each verified file.
+ *
+ * `onProgress(done, total, proof)` fires after each verified file, where
+ * `proof` is `{ label, name, size, checksum }` — the modem's own `+QFUPL`
+ * verdict for that file, carried out so the caller can record it rather than
+ * re-derive it. A count says a file passed; the checksum says which bytes.
  */
 export async function writeCerts(io, bundle, onProgress = () => {}) {
     const targets = buildTargets(bundle);
@@ -943,8 +950,13 @@ export async function writeCerts(io, bundle, onProgress = () => {}) {
             if (targets[i].secret && io.echoOff !== true) {
                 io.echoOff = await silenceEcho(io);
             }
-            await writeTarget(io, targets[i]);
-            onProgress(i + 1, targets.length);
+            const proof = await writeTarget(io, targets[i]);
+            onProgress(i + 1, targets.length, {
+                label: targets[i].label,
+                name: targets[i].bg95Name,
+                size: proof.size,
+                checksum: hex4(proof.checksum),
+            });
         }
         await listFiles(io);
     } finally {

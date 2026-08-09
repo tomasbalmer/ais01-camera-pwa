@@ -20,8 +20,11 @@ import {
     isHunting, stopHunting, sendLine, sendRaw, disconnect,
 } from './ble-transport.js';
 import { writeCerts } from './certmod.js';
-import { AT_CATALOGUE } from './at-catalogue.js';
+import { catalogueGroups, DANGEROUS } from './at-catalogue.js';
 import { saveHandle, loadHandle, clearHandle } from './handle-store.js';
+import {
+    STAGES, LOG_FILE, CONFIG_FILE, logEntry, appendLog, saveIntendedConfig,
+} from './device-record.js';
 import { VERSION, VERSION_NOTE } from './version.js';
 
 /*
@@ -270,53 +273,128 @@ async function doReset() {
  * the same list ③ stages, so picking one sends exactly what ③ would have sent
  * for that line and nothing else.
  */
-function buildAtMenu() {
-    const menu = el('at-menu');
-    menu.textContent = '';
+/* The unit's own settings come first when there is a folder, because they are
+ * the only entries carrying real values rather than templates — they are built
+ * from `desiredSettings`, the same list ③ stages. */
+function atGroups() {
+    const groups = catalogueGroups();
+    if (!state.bundle) return groups;
+    let settings = [];
+    try { settings = desiredSettings(state.bundle); } catch { return groups; }
+    if (!settings.length) return groups;
+    return [
+        [`This unit · ${state.bundle.imei}`,
+         settings.map(([name, value]) => [`${name}=${value}`, 'what ③ would send'])],
+        ...groups,
+    ];
+}
 
-    const placeholder = document.createElement('option');
-    placeholder.value = '';
-    placeholder.textContent = 'AT ▾';
-    menu.appendChild(placeholder);
+function buildAtMenu(filter = '') {
+    const list = el('at-list');
+    list.textContent = '';
+    const needle = filter.trim().toLowerCase();
+    let shown = 0;
 
-    const groups = [...AT_CATALOGUE];
-    if (state.bundle) {
-        let settings = [];
-        try { settings = desiredSettings(state.bundle); } catch { settings = []; }
-        if (settings.length) {
-            groups.unshift([`This unit · ${state.bundle.imei}`,
-                settings.map(([k, v]) => [`${k}=${v}`, 'what ③ would send'])]);
+    for (const [label, entries] of atGroups()) {
+        const matching = needle
+            ? entries.filter(([command, why]) =>
+                `${command} ${why}`.toLowerCase().includes(needle))
+            : entries;
+        if (!matching.length) continue;
+
+        const head = document.createElement('div');
+        head.className = 'at-group';
+        head.textContent = label;
+        list.appendChild(head);
+
+        for (const [command, why] of matching) {
+            const option = document.createElement('button');
+            option.type = 'button';
+            option.className = 'at-opt' +
+                (DANGEROUS.has(command.replace(/=.*$/, '')) ? ' is-danger' : '');
+            option.setAttribute('role', 'option');
+            option.dataset.command = command;
+
+            /* Built as elements with textContent, never markup: these carry
+             * endpoints and topics assembled from a folder name. */
+            const cmd = document.createElement('span');
+            cmd.className = 'cmd';
+            cmd.textContent = command;
+            const note_ = document.createElement('span');
+            note_.className = 'why';
+            note_.textContent = why;
+            option.append(cmd, note_);
+            list.appendChild(option);
+            shown++;
         }
     }
 
-    for (const [label, entries] of groups) {
-        const group = document.createElement('optgroup');
-        group.label = label;
-        for (const [command, why] of entries) {
-            const option = document.createElement('option');
-            option.value = command;
-            /* textContent, never markup: these carry endpoints and topics
-             * built from a folder name somebody else chose. */
-            option.textContent = why ? `${command}  ·  ${why}` : command;
-            group.appendChild(option);
-        }
-        menu.appendChild(group);
+    if (!shown) {
+        const empty = document.createElement('div');
+        empty.className = 'at-empty';
+        empty.textContent = `Nothing matches "${filter}". The field beside the ` +
+            'menu still sends anything, as typed.';
+        list.appendChild(empty);
     }
 }
 
-function pickCommand() {
-    const menu = el('at-menu');
-    const command = menu.value;
-    menu.selectedIndex = 0;   /* back to the label; this is not a mode */
-    if (!command) return;
+function atPanelOpen() { return !el('at-panel').hidden; }
+
+function openAtPanel(open) {
+    el('at-panel').hidden = !open;
+    el('at-menu').setAttribute('aria-expanded', String(open));
+    if (!open) return;
+    buildAtMenu('');
+    const filter = el('at-filter');
+    filter.value = '';
+    /* A physical keyboard filters 58 entries faster than a thumb scrolls them;
+     * a touch keyboard would cover the list it is filtering. */
+    if (matchMedia('(pointer: fine)').matches) filter.focus();
+}
+
+/*
+ * Picking fills the field and closes. Nothing is sent — the technician owns
+ * when a command goes out, which is the same principle the stage buttons
+ * follow, and a list that sent on tap would put `ATZ` one stray touch away
+ * from restarting a unit mid-write.
+ */
+function takeCommand(command) {
+    openAtPanel(false);
     const input = el('at-input');
     input.value = command;
     input.focus();
-    /* Everything after the `=` is what usually needs changing, and selecting it
-     * whole means the next keystroke replaces it rather than appending. */
+    /* Everything after the `=` is what usually needs changing, so selecting it
+     * means the next keystroke replaces it rather than appending. */
     const at = command.indexOf('=');
     if (at >= 0) input.setSelectionRange(at + 1, command.length);
     else input.setSelectionRange(command.length, command.length);
+}
+
+function wireAtPicker() {
+    el('at-menu').addEventListener('click', () => openAtPanel(!atPanelOpen()));
+
+    el('at-list').addEventListener('click', event => {
+        const option = event.target.closest('.at-opt');
+        if (option) takeCommand(option.dataset.command);
+    });
+
+    el('at-filter').addEventListener('input', e => buildAtMenu(e.target.value));
+    el('at-filter').addEventListener('keydown', e => {
+        if (e.key === 'Escape') { openAtPanel(false); el('at-menu').focus(); return; }
+        if (e.key !== 'Enter') return;
+        const first = el('at-list').querySelector('.at-opt');
+        if (first) takeCommand(first.dataset.command);
+    });
+
+    /* Anywhere else closes it. The panel covers the terminal, which is the
+     * instrument — it must never be something you have to dismiss twice. */
+    document.addEventListener('click', event => {
+        if (!atPanelOpen()) return;
+        if (!event.target.closest('.at-picker')) openAtPanel(false);
+    });
+    document.addEventListener('keydown', event => {
+        if (event.key === 'Escape' && atPanelOpen()) openAtPanel(false);
+    });
 }
 
 async function sendManual() {
@@ -752,7 +830,6 @@ function rejectFolder(reason, ...help) {
     el('imei').textContent = '—';
     el('btn-bundle').title = '';
     setMark('bundle', 'rejected', 'fail');
-    buildAtMenu();
     fail(reason);
     for (const line of help) you(line);
 }
@@ -836,7 +913,6 @@ async function loadFromFolder(folder, files) {
     state.bundle = bundle;
     state.remembered = who;
     showLoaded(bundle, folder, found);
-    buildAtMenu();   /* this unit's settings become individually sendable */
     ok(`loaded ${folder}`);
     note(`  ${bundle.environment} · certificate ${bundle.certificate.length}B ` +
          `· key ${bundle.private_key.length}B`);
@@ -1032,7 +1108,6 @@ async function forgetFolder({ quiet = false } = {}) {
     el('imei').textContent = '—';
     el('btn-bundle').title = '';
     setMark('bundle', '', 'weak');
-    buildAtMenu();
     if (!quiet) note('let go of that unit — open the next one\'s folder with ⓪');
 }
 
@@ -1076,6 +1151,39 @@ async function restoreFolder() {
     you(`${handle.name} is remembered — tap ⓪ to open it again.`);
     note('  only the folder is remembered; the certificate, the key and the ' +
          'password are read from disk each session and kept nowhere else');
+}
+
+/* ── The record, back in the unit's folder ───────────────────────────────
+ *
+ * Best-effort, always. A stage is talking to a device on a window that costs
+ * a reset to reopen; a folder that has gone read-only since it was picked is
+ * a thing to mention, never a thing to fail a write over. Every call here
+ * reports in the terminal and returns.
+ */
+function canRecord() {
+    return !!(state.handle && state.bundle);
+}
+
+async function record(fields) {
+    if (!canRecord()) return;
+    const entry = logEntry({ imei: state.bundle.imei, version: VERSION, ...fields });
+    try {
+        await appendLog(state.handle, entry);
+        note(`  recorded in ${LOG_FILE}`);
+    } catch (err) {
+        note(`  could not write ${LOG_FILE} (${err.message}) — the folder may ` +
+             'need re-opening with ⓪; nothing about the device changed');
+    }
+}
+
+async function recordSettings(applied) {
+    if (!canRecord() || !applied.length) return;
+    try {
+        await saveIntendedConfig(state.handle, applied);
+        note(`  ${applied.length} setting(s) merged into ${CONFIG_FILE}`);
+    } catch (err) {
+        note(`  could not update ${CONFIG_FILE} (${err.message})`);
+    }
 }
 
 /* Refuse to write anything without material that matches this unit. */
@@ -1280,6 +1388,10 @@ async function doStageConfig() {
 async function doApplyConfig() {
     if (!bundleReady()) return;
     const deltas = state.pendingDeltas || [];
+    /* Only what the device ACCEPTED. A setting it answered ERROR to is not
+     * what this unit is meant to have — it is what somebody tried, and the
+     * record must not blur those two. */
+    const applied = [];
     let accepted = 0;
     setMark('config', `0/${deltas.length}`, 'run');
 
@@ -1290,7 +1402,12 @@ async function doApplyConfig() {
         /* Paced, not timed: the console is a 9600-baud bridge and swallows a
          * burst. This is not a wait-for-the-window heuristic. */
         const lines = await replies;
-        if (lines.some(l => /\bOK\b/.test(l))) accepted++;
+        if (lines.some(l => /\bOK\b/.test(l))) {
+            accepted++;
+            /* First `=` only: values carry their own, as in `SERVADDR=host,8883`. */
+            const split = cmd.indexOf('=');
+            applied.push([cmd.slice(0, split), cmd.slice(split + 1)]);
+        }
         else if (lines.some(l => /ERROR/i.test(l))) fail(`  ${cmd} → ERROR`);
         setMark('config', `${i + 1}/${deltas.length}`, 'run');
     }
@@ -1307,6 +1424,17 @@ async function doApplyConfig() {
     state.pendingDeltas = null;
     el('btn-config').querySelector('.label').textContent = '③ CONFIG';
     el('btn-config').classList.remove('armed');
+
+    await recordSettings(applied);
+    await record({
+        stage: STAGES.config,
+        substep: 'network_settings_set',
+        status: accepted === deltas.length ? 'done' : 'partial',
+        summary: `${accepted}/${deltas.length} settings returned OK. OK is the ` +
+                 'command parsing, not the setting surviving a reboot — only ' +
+                 're-reading AT+CFG after a reset proves that.',
+        evidence: applied.map(([name, value]) => `${name}=${value}`),
+    });
 }
 
 /*
@@ -1398,12 +1526,21 @@ async function doCerts() {
     state.busy = true;
     state.redacting = true;
     setMark('certs', '0/3', 'run');
+
+    /* The modem's own `+QFUPL` verdicts, kept as they arrive so a run that
+     * fails on the third file still records what the first two proved. */
+    const proofs = [];
+    let failure = null;
+
     try {
-        await writeCerts(io, state.bundle,
-            done => setMark('certs', `${done}/3`, done === 3 ? 'ok' : 'run'));
+        await writeCerts(io, state.bundle, (done, total, proof) => {
+            setMark('certs', `${done}/${total}`, done === total ? 'ok' : 'run');
+            if (proof) proofs.push(proof);
+        });
         setMark('certs', '3/3 ✓', 'ok');
         ok('All three certificates verified by the modem.');
     } catch (err) {
+        failure = err;
         setMark('certs', 'failed', 'fail');
         fail(`② CERTS: ${err.message}`);
         note('Nothing half-written survives — every attempt starts with QFDEL.');
@@ -1415,6 +1552,20 @@ async function doCerts() {
         state.redacting = false;
         state.busy = false;
     }
+
+    /* After the redaction comes down and the stage is no longer busy: writing
+     * a file is not part of the device conversation and must not sit inside
+     * the window it holds open. */
+    await record({
+        stage: STAGES.certs,
+        substep: 'certificates_written',
+        status: failure ? 'failed' : 'done',
+        summary: failure
+            ? `Stopped after ${proofs.length}/3 files — ${failure.message}`
+            : 'Three files accepted, each gated on the checksum the modem ' +
+              'computed over what it stored',
+        evidence: proofs.map(p => `${p.name}: +QFUPL: ${p.size},${p.checksum}`),
+    });
 }
 
 /* ── ④ VERIFY ─────────────────────────────────────────────────────────────
@@ -1489,7 +1640,25 @@ function doVerify() {
         collectors.delete(collector);
         state.verifying = null;
 
-        if (seen.has(CONNECTED) && seen.has(SENT)) {
+        const published = seen.has(CONNECTED) && seen.has(SENT);
+        /* What the device actually said, in the order the cycle says it. This
+         * is the whole verdict: the stage sends nothing, so its evidence is
+         * only ever the lines it watched go past. */
+        record({
+            stage: STAGES.verify,
+            substep: 'full_cycle_observed',
+            status: published ? 'done' : 'failed',
+            summary: published
+                ? 'AWS IoT returned CONNACK for this unit\'s certificate and a ' +
+                  'reading left the modem (QoS 0 — the broker does not ack it)'
+                : seen.has(0)
+                    ? 'A cycle ran and never connected to the server'
+                    : 'No cycle was observed before the budget ran out',
+            evidence: PUBLISH_EVIDENCE
+                .filter((_, i) => seen.has(i)).map(([, meaning]) => meaning),
+        });
+
+        if (published) {
             setMark('verify', 'published ✓', 'ok');
             ok('④ AWS IoT accepted this unit\'s certificate and the reading left ' +
                'the modem.');
@@ -1590,7 +1759,8 @@ async function installMock(kind) {
  */
 const SHELL_NEEDS = [
     'pair-row', 'btn-bundle', 'mark-bundle', 'raw-live', 'raw-count',
-    'terminal', 'terminal-raw', 'link-state', 'app-version', 'at-menu',
+    'terminal', 'terminal-raw', 'link-state', 'app-version',
+    'at-menu', 'at-panel', 'at-list', 'at-filter',
 ];
 
 function shellIsStale() {
@@ -1647,8 +1817,7 @@ export function initProvision() {
 
     el('bundle-input').addEventListener('change', e => loadFiles(e.target.files));
 
-    buildAtMenu();
-    el('at-menu').addEventListener('change', pickCommand);
+    wireAtPicker();
     el('at-send').addEventListener('click', sendManual);
     el('at-input').addEventListener('keydown', e => {
         if (e.key === 'Enter') sendManual();
