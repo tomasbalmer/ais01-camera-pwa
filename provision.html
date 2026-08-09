@@ -115,6 +115,24 @@
             --rail: 400px;
             --rail-pad: 8px;
 
+            /*
+             * The command cluster is WIDER than the rail, and that is the one
+             * place the alignment above is given up on purpose.
+             *
+             * The trigger used to end on the raw pane's divider, and it was
+             * right while the list held bare command names. It does not any
+             * more: the entries carry real values now — a publish topic is
+             * `waterplan/meters/869181072714122/uplink` and the row also has
+             * to say what the setting does. At the rail's width almost every
+             * row in the two most-used groups wrapped, so the column was
+             * costing the list its readability to keep an edge tidy.
+             *
+             * The panel inherits this (it is `left: 0; right: 0` on the
+             * trigger) and so does the field, because picking one and typing
+             * one are the same act and they still read as a pair.
+             */
+            --picker: 620px;
+
 
             /*
              * ── Borrowed from the dashboard's design system ──────────────
@@ -997,9 +1015,8 @@
          */
         .at-picker {
             position: relative;
-            /* The rail, minus the padding this row is inset by, so the right
-               edge lands on the raw pane's divider rather than past it. */
-            flex: 0 0 calc(var(--rail) - var(--rail-pad));
+            /* Wider than the rail on purpose — see `--picker`. */
+            flex: 0 0 calc(var(--picker) - var(--rail-pad));
             max-width: calc(100vw - 216px);   /* leave the field and SEND their room */
             min-width: 0; display: flex;
         }
@@ -1085,9 +1102,12 @@
         .at-empty { padding: 14px 12px; font-size: 12px; color: var(--muted); }
 
         /* The same width as the trigger, from the same number — the two are a
-           pair (pick one, or type one) and a pair that reads as a pair. */
+           pair (pick one, or type one) and a pair that reads as a pair.
+           It may SHRINK where the trigger may not: on a narrow window one of
+           them has to give, and a list you are reading beats a field you have
+           not typed in yet. */
         .at-row input#at-input {
-            flex: 0 0 calc(var(--rail) - var(--rail-pad));
+            flex: 0 1 calc(var(--picker) - var(--rail-pad));
             min-width: 0; min-height: 40px; padding: 0 10px;
             border: 1px solid #334155; border-radius: 8px;
             background: #0b1220; color: #e2e8f0;
