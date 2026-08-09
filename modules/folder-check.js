@@ -38,6 +38,9 @@ export const FOLDER_ENV = /(staging|production)/i;
 export const FOLDER_SHAPE =
     'AIS01-CB-<15-digit IMEI>-Waterplan<Staging|Production>';
 
+/* One sentence for both halves of the name — see the environment row. */
+export const BAD_NAME = `BAD FOLDER NAME — expected ${FOLDER_SHAPE}`;
+
 /*
  * The region is a FILE, not part of the name.
  *
@@ -94,13 +97,22 @@ export const FILE_ROLES = [
     ['region',      /^region\.txt$/i],
 ];
 
-/* What to tell an operator who is missing one. The patterns above are for
- * matching; these are for reading. */
+/*
+ * What to tell an operator who is missing one. The patterns above are for
+ * matching; these are for reading, and they are what somebody types or looks
+ * for in a file listing.
+ *
+ * The verdict in front of them is uppercase and the name itself is not. Every
+ * one of these is a literal to be copied — a folder really is called
+ * `WaterplanProduction` and a file really is called `password.txt` — so
+ * shouting the name would be teaching the wrong one. Only the part that is a
+ * judgement gets to shout.
+ */
 const WANTED = {
-    certificate: 'one *-certificate.pem.crt',
-    private_key: 'one *-private.pem.key',
+    certificate: '*-certificate.pem.crt',
+    private_key: '*-private.pem.key',
     password: 'password.txt',
-    region: `region.txt, holding ${REGION_CODES.join(' or ')}`,
+    region: `region.txt (${REGION_CODES.join(' or ')})`,
 };
 
 /*
@@ -266,11 +278,14 @@ export async function checkFolder(folder, files) {
     say('ok', 'folder selected', folder);
 
     if (facts.imei) say('ok', 'imei', facts.imei);
-    else bad('imei', `bad folder name — expected ${FOLDER_SHAPE}`);
+    else bad('imei', BAD_NAME);
 
     if (facts.environment) say('ok', 'environment', facts.environment);
-    else bad('environment', 'not in the folder name — add WaterplanProduction ' +
-                            'or WaterplanStaging, which is what decides the broker');
+    /* The same sentence as the IMEI row above, deliberately. They are two
+     * halves of one name, and an operator fixing either one is renaming the
+     * same directory to the same shape — two different instructions for one
+     * action is how you get a folder that satisfies neither. */
+    else bad('environment', BAD_NAME);
 
     /* ── The files ─────────────────────────────────────────────────────── */
     const { roles, ignored, unknown } = matchRoles(files.map(f => f.name));
@@ -282,12 +297,12 @@ export async function checkFolder(folder, files) {
         const hits = roles[role];
 
         if (!hits.length) {
-            bad(role, `missing — the folder needs ${WANTED[role]}`);
+            bad(role, `MISSING FILE — expected ${WANTED[role]}`);
             continue;
         }
         if (hits.length > 1) {
-            bad(role, `${hits.length} of them, so there is nothing to choose ` +
-                      `between: ${hits.map(shortName).join(' and ')}`);
+            bad(role, `TOO MANY FILES — expected one ${WANTED[role]}, found ` +
+                      `${hits.length}: ${hits.map(shortName).join(' and ')}`);
             continue;
         }
 
@@ -349,21 +364,22 @@ export async function checkFolder(folder, files) {
     const keyId = chosen.private_key && certificateId(chosen.private_key.name);
 
     if (!chosen.certificate || !chosen.private_key) {
-        say('info', 'pair', 'cannot be checked until both files are here');
+        say('info', 'cert + key',
+            'not compared — both files have to be here first');
     } else if (certId && keyId && certId !== keyId) {
         /* The check this module was written for. Material from two different
          * certificates writes without complaint and is refused by AWS IoT a
          * cycle later, which is the failure that looks like broken hardware. */
-        bad('pair', `certificate is ${mask(certId)} but the key is ` +
-                    `${mask(keyId)} — two different certificates in one folder`);
+        bad('cert + key', `certificate is ${mask(certId)} but the key is ` +
+                          `${mask(keyId)} — two different certificates`);
     } else if (certId && keyId) {
-        say('ok', 'pair', `certificate and key both from ${mask(certId)}`);
+        say('ok', 'cert + key', `same certificate — ${mask(certId)}`);
     } else {
         /* Renamed by hand, so the tie cannot be tested. Not a refusal — the
          * files may be perfectly correct — but its absence is worth a line. */
-        say('info', 'pair',
-            'the file names carry no certificate id, so the two cannot be ' +
-            'tied together — they were renamed after AWS created them');
+        say('info', 'cert + key',
+            'not compared — the names carry no certificate id, so they were ' +
+            'renamed after AWS created them');
     }
 
     for (const [name, why] of ignored) {

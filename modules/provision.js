@@ -917,6 +917,27 @@ function reportFolder(report) {
 }
 
 async function loadFromFolder(folder, files) {
+    /*
+     * ⓪ opens a section like every other stage.
+     *
+     * Its rows were landing loose in the History between whatever came before
+     * and whatever came after, so the eye had to work out where the folder
+     * report started and stopped. The app already had the answer — a stage
+     * opens a section whose header carries its verdict — and ⓪ is a stage; it
+     * simply was not wrapped, because it is the one that runs without touching
+     * the device.
+     *
+     * The header goes red on its own: `write(…, 'fail')` calls `failPhase`.
+     */
+    const phase = startPhase('⓪ FOLDER');
+    try {
+        return await readFolder(folder, files);
+    } finally {
+        endPhase(phase);
+    }
+}
+
+async function readFolder(folder, files) {
     const report = await checkFolder(folder, files);
     reportFolder(report);
 

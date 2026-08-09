@@ -10,7 +10,7 @@
 
 import {
     identityOf, matchRoles, certificateId, pemProblem, checkFolder, mask,
-    shortName, FOLDER_SHAPE,
+    shortName, FOLDER_SHAPE, BAD_NAME,
 } from './folder-check.js';
 
 let failed = 0;
@@ -141,7 +141,8 @@ const mixed = await checkFolder(FOLDER, [
 ]);
 check('material from two certificates is refused', mixed.ok, false);
 check('and the reason names both',
-      mixed.findings.some(f => f.level === 'fail' && f.label === 'pair'), true);
+      mixed.findings.some(f => f.level === 'fail' && f.label === 'cert + key'),
+      true);
 
 /*
  * Ambiguity used to resolve itself silently — the matcher took the first hit,
@@ -157,7 +158,8 @@ const ambiguous = await checkFolder(FOLDER, [
 check('two candidates for one role are refused, not guessed at',
       ambiguous.ok, false);
 check('and both names are shown',
-      ambiguous.findings.some(f => f.detail.includes('2 of them')), true);
+      ambiguous.findings.some(f => f.detail.startsWith('TOO MANY FILES')
+                                && f.detail.includes(' and ')), true);
 
 const noKey = await checkFolder(FOLDER, [
     file(`${ID_A}-certificate.pem.crt`, CERT),
@@ -165,8 +167,8 @@ const noKey = await checkFolder(FOLDER, [
 ]);
 check('a missing role is refused', noKey.ok, false);
 check('and named exactly, with what would fix it',
-      noKey.findings.some(f => f.label === 'private_key'
-                            && f.detail.includes('*-private.pem.key')), true);
+      noKey.findings.find(f => f.label === 'private_key').detail,
+      'MISSING FILE — expected *-private.pem.key');
 
 const emptyPassword = await checkFolder(FOLDER, [
     file(`${ID_A}-certificate.pem.crt`, CERT),
@@ -187,7 +189,7 @@ const noRegion = await checkFolder(FOLDER,
 check('a folder with no region.txt is refused', noRegion.ok, false);
 check('and the row names the file and its contents',
       noRegion.findings.find(f => f.label === 'region').detail,
-      'missing — the folder needs region.txt, holding AR or BR');
+      'MISSING FILE — expected region.txt (AR or BR)');
 
 const badRegion = await checkFolder(FOLDER,
     goodFolder().map(f => f.name === 'region.txt' ? file(f.name, 'US') : f));
@@ -218,7 +220,8 @@ const renamed = await checkFolder(FOLDER, [
 ]);
 check('hand-renamed files still load', renamed.ok, true);
 check('but the untestable tie is said out loud',
-      renamed.findings.some(f => f.label === 'pair' && f.level === 'info'), true);
+      renamed.findings.some(f => f.label === 'cert + key' && f.level === 'info'),
+      true);
 
 /* A folder is judged in full even when it fails: knowing which line broke is
  * the difference between re-downloading one file and re-downloading all. */
@@ -234,7 +237,7 @@ check('a failing folder still reports every check it got to',
  * unticked box is not a checklist.
  */
 const ROWS = ['folder selected', 'imei', 'environment',
-              'certificate', 'private_key', 'password', 'region', 'pair'];
+              'certificate', 'private_key', 'password', 'region', 'cert + key'];
 const labelsOf = report => report.findings.map(f => f.label);
 
 check('a good folder reports every row',
@@ -251,8 +254,8 @@ check('and the environment separately',
       true);
 check('while the files it DOES have still come back ok',
       nameless.findings.filter(f => f.level === 'ok').map(f => f.label).sort(),
-      ['certificate', 'folder selected', 'pair', 'password', 'private_key',
-       'region']);
+      ['cert + key', 'certificate', 'folder selected', 'password',
+       'private_key', 'region']);
 
 /* The folder is the first row and it is green: picking one is the thing that
  * has definitely gone right, and a screen of red with no green in it does not
@@ -262,9 +265,16 @@ check('the folder leads, in its own row', nameless.findings[0],
 
 /* A row that says what is wrong without saying what right looks like leaves
  * the operator to reconstruct the convention from three other rows. */
+/* The verdict shouts and the literal does not: every one of these names is
+ * something to be copied, and a shouted `WATERPLANPRODUCTION` teaches a folder
+ * name that does not exist. */
 check('a bad name says what right looks like, and briefly',
-      nameless.findings.find(f => f.label === 'imei').detail,
-      `bad folder name — expected ${FOLDER_SHAPE}`);
+      nameless.findings.find(f => f.label === 'imei').detail, BAD_NAME);
+check('and the verdict is the only part shouting',
+      BAD_NAME, `BAD FOLDER NAME — expected ${FOLDER_SHAPE}`);
+check('both halves of the name give the same instruction, because it is one ' +
+      'rename', nameless.findings.find(f => f.label === 'environment').detail,
+      BAD_NAME);
 
 /* One fact missing is one row failing, not all of them. */
 const noRegionNoEnv = await checkFolder('AIS01-CB-869181072714122', goodFolder());
@@ -305,12 +315,14 @@ check('a name with one keeps the suffix that says what it is',
       'dd1a1d7b3b··········-certificate.pem.crt');
 
 const empty = await checkFolder('AIS01-CB-Test', []);
-check('an empty folder names all three files it wants',
-      ['certificate', 'private_key', 'password'].every(role =>
-          empty.findings.some(f => f.label === role && f.detail.includes('missing'))),
+check('an empty folder names all four files it wants',
+      ['certificate', 'private_key', 'password', 'region'].every(role =>
+          empty.findings.some(f => f.label === role
+                                && f.detail.startsWith('MISSING FILE'))),
       true);
-check('and says the pair cannot be judged yet',
-      empty.findings.some(f => f.label === 'pair' && f.level === 'info'), true);
+check('and says the two PEMs were not compared, rather than going quiet',
+      empty.findings.find(f => f.label === 'cert + key').detail,
+      'not compared — both files have to be here first');
 
 console.log(failed ? `\n${failed} failed` : '\nall passed');
 process.exit(failed ? 1 : 0);
