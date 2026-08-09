@@ -480,7 +480,16 @@ function stamp() {
  */
 const VOICE = { rx: 'DEV', tx: 'CMD', ok: 'SYS', fail: 'SYS', note: 'SYS', you: 'YOU' };
 
-function write(text, kind = 'rx') {
+/*
+ * `field` turns a row into a labelled one: a column of its own for the name of
+ * the thing, and the value beside it.
+ *
+ * It used to be spaces. `⓪`'s checklist padded its labels to twelve characters
+ * inside the message span, which lines up only while the font is monospaced
+ * and the label is short, and which makes the label and its value one string —
+ * so neither can be styled without styling the other. A column is a column.
+ */
+function write(text, kind = 'rx', field = null) {
     const out = el('terminal');
     const voice = VOICE[kind] || 'SYS';
     const line = document.createElement('div');
@@ -497,7 +506,15 @@ function write(text, kind = 'rx') {
     const m = document.createElement('span');
     m.className = 'm';
     m.textContent = text;
-    line.append(t, v, m);
+
+    if (field) {
+        const k = document.createElement('span');
+        k.className = 'k';
+        k.textContent = field;
+        line.append(t, v, k, m);
+    } else {
+        line.append(t, v, m);
+    }
     out.appendChild(line);
 
     /* A failure anywhere inside a stage is the stage's verdict, immediately and
@@ -891,12 +908,13 @@ function rejectFolder(reason, ...help) {
  * everything.
  */
 function reportFolder(report) {
-    const pad = label => `${label}${' '.repeat(Math.max(0, 12 - label.length))}`;
     for (const { level, label, detail } of report.findings) {
-        const line = `  ${pad(label)} ${detail}`;
-        if (level === 'fail') fail(line);
-        else if (level === 'note') note(line);
-        else write(line, level === 'ok' ? 'ok' : 'note');
+        const kind = level === 'fail' ? 'fail'
+            : level === 'ok' ? 'ok'
+            : 'note';
+        /* `private_key` is a role key, not a word. The column is the only
+         * place these are read by a person. */
+        write(detail, kind, label.replace(/_/g, ' '));
     }
 }
 

@@ -99,6 +99,38 @@ export function certificateId(name) {
 }
 
 /*
+ * Show the head and hide the tail.
+ *
+ * A certificate id is 64 hex characters and its file name is longer still.
+ * Printed whole it is the widest thing on the screen and the least readable —
+ * and the only use anyone has for it is comparing two of them, which the first
+ * ten characters settle. Ten is also enough to tell one unit's material from
+ * the next, which is the comparison this whole screen exists for.
+ *
+ * The dots are a fixed length rather than the real one. What is hidden is not
+ * a secret and the exact count is not information anybody wants; a ragged right
+ * edge across four lines is just noise.
+ */
+export function mask(text, keep = 10) {
+    const body = String(text || '');
+    if (body.length <= keep) return body;
+    return body.slice(0, keep) + '·'.repeat(10);
+}
+
+/*
+ * A file list for the log. Masked like everything else here — these are the
+ * same 64-hex names, and the reason to print them at all is so a folder full
+ * of files the app skipped can say which ones, not so anyone reads the ids.
+ */
+function listNames(entries) {
+    return entries
+        .map(entry => Array.isArray(entry)
+            ? `${mask(entry[0])} (${entry[1]})`
+            : mask(entry))
+        .join(', ');
+}
+
+/*
  * Is this PEM what it claims to be?
  *
  * Not cryptography — structure. It catches the failures a download actually
@@ -190,7 +222,7 @@ export async function checkFolder(folder, files) {
         say('fail', 'name', `"${folder}" carries no IMEI and no environment`);
         return { ok: false, identity: null, chosen: null, findings };
     }
-    say('ok', 'name', `IMEI ${identity.imei} · ${identity.environment}`);
+    say('ok', 'name', `IMEI ${identity.imei}, ${identity.environment}`);
 
     /*
      * A note, not a refusal. The certificates, the login and the MQTT settings
@@ -198,7 +230,7 @@ export async function checkFolder(folder, files) {
      * stage does, and it is the one that refuses.
      */
     if (identity.region) {
-        say('ok', 'region', identity.region);
+        say('ok', 'region', `${identity.region} — the network profile ③ will send`);
     } else {
         say('note', 'region',
             'the folder name does not end in -AR or -BR, so the network stage ' +
@@ -221,9 +253,9 @@ export async function checkFolder(folder, files) {
     }
     if (fatal) {
         if (ignored.length) {
-            say('info', 'ignored', ignored.map(([n, why]) => `${n} (${why})`).join(', '));
+            say('info', 'ignored', listNames(ignored));
         }
-        if (unknown.length) say('info', 'also present', unknown.join(', '));
+        if (unknown.length) say('info', 'also present', listNames(unknown));
         return { ok: false, identity, chosen: null, findings };
     }
 
@@ -238,11 +270,12 @@ export async function checkFolder(folder, files) {
     const keyId = certificateId(chosen.private_key.name);
     if (certId && keyId && certId !== keyId) {
         say('fail', 'pair',
-            `the certificate is ${certId.slice(0, 12)}… and the key is ` +
-            `${keyId.slice(0, 12)}… — two different certificates`);
+            `certificate is ${mask(certId)} but the key is ${mask(keyId)} — ` +
+            'two different certificates in one folder');
         fatal = true;
     } else if (certId && keyId) {
-        say('ok', 'pair', `both from certificate ${certId.slice(0, 12)}…`);
+        say('ok', 'pair',
+            `certificate and key both from ${mask(certId)}`);
     } else {
         /* Renamed by hand, so the tie cannot be checked. Not a refusal — the
          * files may be perfectly correct — but it is the check that would have
@@ -256,12 +289,14 @@ export async function checkFolder(folder, files) {
     const certText = await chosen.certificate.text();
     const certBad = pemProblem(certText, 'certificate');
     if (certBad) { say('fail', 'certificate', certBad); fatal = true; }
-    else say('ok', 'certificate', `${chosen.certificate.name} · ${certText.length} B`);
+    else say('ok', 'certificate',
+             `${mask(chosen.certificate.name)} found, ${certText.length} bytes`);
 
     const keyText = await chosen.private_key.text();
     const keyBad = pemProblem(keyText, 'private_key');
     if (keyBad) { say('fail', 'private key', keyBad); fatal = true; }
-    else say('ok', 'private key', `${chosen.private_key.name} · ${keyText.length} B`);
+    else say('ok', 'private key',
+             `${mask(chosen.private_key.name)} found, ${keyText.length} bytes`);
 
     const password = (await chosen.password.text()).split(/\r?\n/)[0].trim();
     if (!password) {
@@ -269,16 +304,18 @@ export async function checkFolder(folder, files) {
         fatal = true;
     } else if (!PASSWORD_SHAPE.test(password)) {
         say('note', 'password',
-            `${password.length} characters, and every unit so far has had 6 ` +
-            'digits — check it is the console password and not something else');
+            `${chosen.password.name} found with ${password.length} characters ` +
+            '— every unit so far has had 6 digits, so check this is the ' +
+            'console password and not something else');
     } else {
-        say('ok', 'password', '6 digits');
+        /* The value never appears. The shape is what the operator needs to
+         * know, and it is the whole of what can be said safely. */
+        say('ok', 'password',
+            `${chosen.password.name} found with 6 digits`);
     }
 
-    if (ignored.length) {
-        say('info', 'ignored', ignored.map(([n, why]) => `${n} (${why})`).join(', '));
-    }
-    if (unknown.length) say('info', 'also present', unknown.join(', '));
+    if (ignored.length) say('info', 'ignored', listNames(ignored));
+    if (unknown.length) say('info', 'also present', listNames(unknown));
 
     return {
         ok: !fatal,

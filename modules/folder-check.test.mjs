@@ -9,7 +9,7 @@
  */
 
 import {
-    identityOf, matchRoles, certificateId, pemProblem, checkFolder,
+    identityOf, matchRoles, certificateId, pemProblem, checkFolder, mask,
 } from './folder-check.js';
 
 let failed = 0;
@@ -76,6 +76,19 @@ check('the certificate id is read off the name',
       certificateId(`${ID_A}-certificate.pem.crt`), ID_A);
 check('a renamed file has no id to read', certificateId('cert.pem.crt'), null);
 
+/* Masking is display, not security — what is hidden is not a secret. It exists
+ * so four lines of 64-hex do not become the widest thing on the screen, and it
+ * keeps the ten characters that settle the only question anyone asks of an id:
+ * is this the same one as that. */
+check('an id keeps the ten that let you compare it',
+      mask(ID_A).startsWith('dd1a1d7b3b'), true);
+check('and hides the rest at a fixed width',
+      mask(ID_A), 'dd1a1d7b3b··········');
+check('two different ids stay different once masked',
+      mask(ID_A) === mask(ID_B), false);
+check('something already short is left alone', mask('482913'), '482913');
+check('and nothing is not a crash', mask(null), '');
+
 /* ── PEM shape ───────────────────────────────────────────────────────────
  * What a download actually does when it goes wrong. */
 check('a good certificate has no problem', pemProblem(CERT, 'certificate'), null);
@@ -107,6 +120,18 @@ check('a folder with no region still loads', good.ok, true);
 check('but the network stage is warned about',
       good.findings.some(f => f.level === 'note' && f.label === 'region'), true);
 check('and hands back the password, not the file', good.password, '482913');
+
+/* The password's VALUE is never in a finding — the shape is the whole of what
+ * can be said safely, and the log is a thing people screenshot. */
+const passwordLine = good.findings.find(f => f.label === 'password');
+check('the password line says the shape', passwordLine.detail,
+      'password.txt found with 6 digits');
+check('and never the value',
+      good.findings.some(f => f.detail.includes('482913')), false);
+
+/* Neither is a full certificate id. */
+check('the certificate line is masked',
+      good.findings.some(f => f.detail.includes(ID_A)), false);
 check('and the certificate it chose',
       good.chosen.certificate.name, `${ID_A}-certificate.pem.crt`);
 

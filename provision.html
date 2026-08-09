@@ -233,6 +233,23 @@
             font-size: 9px; font-weight: 700; letter-spacing: 0.06em;
             text-align: center; color: var(--muted);
         }
+        /*
+         * The field column, for rows that name a thing and then give its value
+         * — ⓪'s checklist is all of them today.
+         *
+         * It had been spaces: the label padded to twelve characters inside the
+         * message span. That lines up only while the font is monospaced and the
+         * label is short, and it welds the label to its value so neither can be
+         * styled without the other. Given a column it can be what it is — a
+         * heading — and it borrows the same treatment headings get everywhere
+         * else on this screen.
+         */
+        .line .k {
+            flex: 0 0 104px; min-width: 0;
+            font-size: 10px; font-weight: 700; letter-spacing: 0.08em;
+            text-transform: uppercase; color: var(--txt-faint);
+            overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+        }
         .line .m { flex: 1 1 auto; min-width: 0; }
         .voice-dev .v { color: #cbd5e1; }
         .voice-cmd .v { color: #7dd3fc; border-color: #0e7490; background: #0e749022; }
