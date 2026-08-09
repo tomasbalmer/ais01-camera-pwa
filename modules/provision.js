@@ -240,9 +240,9 @@ async function doReset() {
     if (!link.isConnected()) { fail('not connected'); return; }
     write('ATZ', 'tx');
     await link.sendLine('ATZ');
-    /* The one boot we cause, so it is the one we can draw without being told. */
+    /* The one boot we cause, so it is the one we can draw without being told.
+     * It retires the login mark on its way past — see `divider`. */
     divider('reset', 'RESET SENT');
-    sessionEnded();
     note('restarting — the link will drop and come back on its own');
     note('the AT window opens about 16 s after the boot banner');
 }
@@ -608,6 +608,19 @@ function divider(kind, label) {
     d.textContent = `${label} · ${stamp()}`;
     out.appendChild(d);
     if (state.pinned.annotated) tail(out);
+
+    /*
+     * Every divider is a cycle boundary, and a console session cannot cross
+     * one. So this is where the login mark is retired, for all three kinds at
+     * once rather than at each of the places that draw them.
+     *
+     * The two that come from the device are the ones that matter: the common
+     * way to lose a session is not a reset we sent, it is the unit finishing
+     * its cycle while nobody was looking. Hooking it here also covers the wake
+     * on its own, which is not redundant — a phone that was re-attaching over
+     * the sleep sees the next boot and never saw the power-off.
+     */
+    sessionEnded();
 }
 
 /* ── Confirmation ────────────────────────────────────────────────────────
@@ -1568,11 +1581,20 @@ function judgeLogin(lines) {
  * the question a reset exists to answer — wiping those marks would erase the
  * before half of the comparison.
  *
- * This covers the resets this app causes and no others. A session also dies on
- * the ~50 s idle timeout and when the unit sleeps, and neither is visible here
- * without reading the device stream. `NB module power-off successful` is
- * already watched for the ASLEEP divider and would be the honest next step;
- * until then the mark can be stale, and it is stale in one direction only.
+ * Called from `divider`, so it covers every cycle boundary this screen can
+ * see — the reset we send, the unit's own power-off, and the next wake — and
+ * from ② , whose closing `ATZ` draws no divider of its own.
+ *
+ * That means a stage mark now reacts to the device stream, which is worth
+ * naming because spec 004 spends a section refusing to do it. What it refuses
+ * is inferring device PHASE in order to GATE the buttons; nothing here is
+ * gated, and the two lines this leans on are already parsed a few lines up to
+ * draw the dividers. The claim being made is the narrow one: a login does not
+ * survive a boot. It is retiring a claim rather than making one.
+ *
+ * Still not covered: the ~50 s idle timeout, which ends a session with no line
+ * printed at all until the next command is refused. The mark can be stale
+ * there, and it is stale in one direction only.
  */
 function sessionEnded() {
     if (!stageState.login || stageState.login === 'pending') return;

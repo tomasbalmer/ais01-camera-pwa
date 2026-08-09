@@ -16,8 +16,8 @@
  * cached shell — pull to refresh, or reinstall the app from the home screen.
  */
 
-export const VERSION = '0.73.0';
+export const VERSION = '0.74.0';
 
 /* One line, for the places that want context rather than just a number. */
-export const VERSION_NOTE = '① is cleared by the restarts this app causes — '
-    + 'the console session does not survive a reboot, and neither does its mark';
+export const VERSION_NOTE = '① is retired at every cycle boundary — the unit '
+    + 'ending its own cycle is the common way to lose a console session';
