@@ -642,11 +642,38 @@ function endPhase(handle) {
  * can be placed in the boot it belongs to. Two come from the device and one
  * from us, because a reset is the one boot we cause.
  */
+/*
+ * `ASLEEP` was wrong, and wrong about the state this whole screen waits for.
+ *
+ * `NB module power-off successful` is the firmware switching the BG95 off at
+ * the end of a cycle. The STM32 does not sleep with it: the console keeps
+ * answering, the BLE link stays up, and commands still land — which is not a
+ * detail, it is the entire premise of ②. `certmod.js` requires the write to
+ * happen exactly here, AFTER this line, and a screen calling that unit asleep
+ * was telling the operator to avoid the one moment it is waiting for.
+ *
+ * The label now says what the line says: the modem went off. What did not
+ * happen was any kind of sleep.
+ */
 const BOOT_MARKS = [
     [/Echo mode turned off successfully/i, 'wake', 'DEVICE AWAKE'],
-    [/NB module power-off successful/i,    'end',  'ASLEEP'],
+    [/NB module power-off successful/i,    'end',  'MODEM POWERED OFF'],
 ];
 let lastDivider = '';
+
+/*
+ * Which boundaries end a console session, and which only look like they should.
+ *
+ * The login dies with the STM32, not with the radio. `reset` is our own `ATZ`
+ * and `wake` is the firmware coming up again — both are the console restarting,
+ * and a password does not survive either.
+ *
+ * `end` is NOT one, and having it here was a live bug: an operator who had just
+ * logged in watched ① go blank the moment the modem powered down, while their
+ * session was still perfectly good. Reported from the bench 2026-08-09. The
+ * modem going quiet has nothing to do with the console that was authenticated.
+ */
+const ENDS_SESSION = new Set(['reset', 'wake']);
 
 function watchBoot(line) {
     for (const [pattern, kind, label] of BOOT_MARKS) {
@@ -665,17 +692,10 @@ function divider(kind, label) {
     if (state.pinned.annotated) tail(out);
 
     /*
-     * Every divider is a cycle boundary, and a console session cannot cross
-     * one. So this is where the login mark is retired, for all three kinds at
-     * once rather than at each of the places that draw them.
-     *
-     * The two that come from the device are the ones that matter: the common
-     * way to lose a session is not a reset we sent, it is the unit finishing
-     * its cycle while nobody was looking. Hooking it here also covers the wake
-     * on its own, which is not redundant — a phone that was re-attaching over
-     * the sleep sees the next boot and never saw the power-off.
+     * A boundary that restarted the console retires the login mark — see
+     * `ENDS_SESSION` for why the modem powering off is not one of them.
      */
-    sessionEnded();
+    if (ENDS_SESSION.has(kind)) sessionEnded();
 }
 
 /* ── Confirmation ────────────────────────────────────────────────────────
@@ -1816,16 +1836,18 @@ function judgeLogin(lines) {
  * the question a reset exists to answer — wiping those marks would erase the
  * before half of the comparison.
  *
- * Called from `divider`, so it covers every cycle boundary this screen can
- * see — the reset we send, the unit's own power-off, and the next wake — and
- * from ② , whose closing `ATZ` draws no divider of its own.
+ * Called from `divider` for the boundaries that restart the CONSOLE — our own
+ * reset and the firmware's next boot — and from ② , whose closing `ATZ` draws
+ * no divider of its own. See `ENDS_SESSION`: the modem powering off is not one
+ * of them, and treating it as one cleared a login that was still good.
  *
- * That means a stage mark now reacts to the device stream, which is worth
- * naming because spec 004 spends a section refusing to do it. What it refuses
- * is inferring device PHASE in order to GATE the buttons; nothing here is
- * gated, and the two lines this leans on are already parsed a few lines up to
- * draw the dividers. The claim being made is the narrow one: a login does not
- * survive a boot. It is retiring a claim rather than making one.
+ * That means a stage mark reacts to the device stream, which is worth naming
+ * because spec 004 spends a section refusing to do it. What it refuses is
+ * inferring device PHASE in order to GATE the buttons; nothing here is gated,
+ * and the line this leans on is already parsed a few lines up to draw the
+ * divider. The claim being made is the narrow one: a login does not survive a
+ * restart of the thing that authenticated it. It retires a claim rather than
+ * making one.
  *
  * Still not covered: the ~50 s idle timeout, which ends a session with no line
  * printed at all until the next command is refused. The mark can be stale
@@ -2241,8 +2263,8 @@ async function priorCertWrite() {
  */
 function cycleReading() {
     if (lastDivider === 'end') {
-        return 'The unit is idle: the last boundary logged was ASLEEP. This ' +
-               'is the moment.';
+        return 'The modem is powered off and the console is still answering. ' +
+               'This is the moment.';
     }
     if (lastDivider === 'wake') {
         return 'The unit is AWAKE and its cycle is running. Wait for ' +

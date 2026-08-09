@@ -187,9 +187,16 @@
             width: 8px; height: 8px; border-radius: 50%;
             background: var(--muted); flex-shrink: 0;
         }
-        .dot.link-connected    { background: #22c55e; }
-        .dot.link-reconnecting { background: #fbbf24; }
-        .dot.link-disconnected { background: var(--muted); }
+        /* A live link is a lit lamp, not a coloured pixel: the halo is what
+           carries across a bench at arm's length, where the dot is 8px and
+           the technician is not looking for it. */
+        .dot.link-connected {
+            background: #22c55e; box-shadow: 0 0 0 3px rgba(34,197,94,0.18);
+        }
+        .dot.link-reconnecting {
+            background: #fbbf24; box-shadow: 0 0 0 3px rgba(251,191,36,0.18);
+        }
+        .dot.link-disconnected { background: var(--muted); box-shadow: none; }
         /*
          * ── The bar's type: two roles at one size ────────────────────────
          *
@@ -218,23 +225,48 @@
                when the bar runs out of room the app's name is what gives way,
                and the IMEI is never the thing that gets truncated. */
             flex: 0 1 auto; min-width: 0;
+            /* The 17px you asked for, kept — but in `--text2`, not `--text`.
+               Two white things of the same size beside each other is what a
+               bar with no hierarchy looks like, and of the two, the one that
+               changes every unit is the one worth the brightness. */
             font-size: 17px; font-weight: 600; letter-spacing: -0.01em;
-            color: var(--text);
+            color: var(--text2);
             overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
         }
-        /* One rule, at the one seam worth marking: the app on the left of it,
-           the device on the right. */
-        .bar-rule {
-            flex: 0 0 auto; width: 1px; height: 20px;
-            background: var(--border);
-        }
+        /* Gone: the plate below has an edge of its own, and a rule beside a
+           bordered object is a second line drawn at the same seam. */
+        .bar-rule { display: none; }
+        /*
+         * ── The plate ────────────────────────────────────────────────────
+         *
+         * The unit stops being a word in a sentence and becomes an OBJECT.
+         *
+         * Everything before this was the same flat strip with the type
+         * resized: title, dot, number, buttons, all floating on one ground at
+         * the same depth. Nothing on it was a thing you could point at, which
+         * is why making the letters bigger changed nothing — there was no
+         * structure to change.
+         *
+         * A provisioned unit carries a label with its IMEI printed on it, and
+         * matching the number on the screen to the number on the sticker is
+         * literally the job at the bench. So the screen shows a label: raised
+         * off the bar, framed, the number set in mono and tabular so digits
+         * line up between one unit and the next, with the link as its bullet.
+         *
+         * It is the only bordered object on a resting bar apart from PAIR,
+         * and those two are the bar's whole content: which unit, and is it
+         * listening.
+         */
         .bar-unit {
             flex: 0 0 auto;
-            display: flex; align-items: center; gap: 9px;
+            display: inline-flex; align-items: center; gap: 9px;
+            padding: 5px 11px 5px 9px;
+            background: var(--panel);
+            border: 1px solid var(--border-2); border-radius: 8px;
         }
         .bar-unit b {
             font-family: ui-monospace, "SF Mono", Menlo, monospace;
-            font-size: 17px; font-weight: 600;
+            font-size: 16px; font-weight: 600;
             /* 15 digits that get read off a label and compared by eye. */
             font-variant-numeric: tabular-nums; letter-spacing: 0.02em;
             color: var(--text);
