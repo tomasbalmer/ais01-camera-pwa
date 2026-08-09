@@ -1218,33 +1218,54 @@ function askConfirm({ title, lines, subject = null, confirmLabel = 'Confirm' }) 
 }
 
 /*
- * The confirmed half of CHANGE UNIT.
+ * The confirmed half of CHANGE UNIT FOLDER.
  *
- * Nothing here is destructive — the folder on disk is untouched and the device
- * hears nothing — and that is exactly why it is worth asking about: a control
- * whose entire effect is invisible is the one a person presses without knowing
- * what they pressed. The dialog says the three things that are true and stops.
+ * It was CHANGE UNIT, which is the moment it is used but not the thing it
+ * does. On a bar whose other control says PAIR DEVICE VIA BLE, "unit" reads as
+ * the one on the other end of the radio — and this touches none of that. It
+ * lets go of a folder.
+ *
+ * Nothing here is destructive: the folder on disk is untouched, the device
+ * hears nothing, the link stays up. That is exactly why it is worth asking
+ * about — a control whose entire effect is invisible is the one pressed
+ * without knowing what was pressed.
  */
 async function changeUnit() {
+    /* A folder can be held three ways: its material loaded, its identity
+     * remembered from a previous session, or a handle whose permission has not
+     * been granted back yet. Any of them is something to let go of. */
     const standing = state.bundle || state.remembered;
-    if (!standing) {
-        note('no unit is loaded — ⓪ is where you pick one');
+    const folder = (standing && standing.folder)
+        || (state.handle && state.handle.name)
+        || null;
+
+    if (!folder) {
+        /*
+         * Nothing is held, so there is nothing to confirm — but there can
+         * still be residue on the screen. A folder that was picked and refused
+         * leaves ⓪ marked `rejected`, and pressing this to clear that and
+         * being told "no unit is loaded" is the app answering a question
+         * nobody asked. Clear it and say the screen is ready.
+         */
+        await forgetFolder({ quiet: true });
+        note('no folder is held — ⓪ is ready for the next one');
         return;
     }
+
     const confirmed = await askConfirm({
-        title: 'Change unit?',
-        subject: standing.folder || standing.imei,
+        title: 'Change unit folder?',
+        subject: folder,
         lines: [
             'This app lets go of that folder. ⓪ will ask for the next unit\'s ' +
             'folder the next time you tap it.',
-            'The folder on your disk is not touched, and nothing is sent to ' +
-            'the unit — this only changes which unit this screen is pointed at.',
-            'The log stays as it is. SHARE LOG still has everything from this ' +
-            'session.',
+            'The folder on your disk is not touched, nothing is sent to the ' +
+            'unit, and the BLE link stays exactly as it is — this only changes ' +
+            'which folder this screen is pointed at.',
+            'The log stays too. SHARE LOG still has everything from this session.',
         ],
-        confirmLabel: 'Change unit',
+        confirmLabel: 'Change folder',
     });
-    if (!confirmed) { note(`still on ${standing.imei}`); return; }
+    if (!confirmed) { note(`still on ${folder}`); return; }
     await forgetFolder();
 }
 
@@ -1257,7 +1278,7 @@ async function forgetFolder({ quiet = false } = {}) {
     el('imei').textContent = '—';
     el('btn-bundle').title = '';
     setMark('bundle', '', 'weak');
-    if (!quiet) note('let go of that unit — open the next one\'s folder with ⓪');
+    if (!quiet) note('let go of that folder — open the next one with ⓪');
 }
 
 /*

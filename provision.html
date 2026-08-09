@@ -325,7 +325,7 @@
         /*
          * The session's controls, all on the bar.
          *
-         * SHARE and CHANGE UNIT used to float over the bottom-right corner of
+         * SHARE and CHANGE UNIT FOLDER used to float over the bottom-right of
          * the terminal, which put them on top of the one thing on this screen
          * that must never be covered — and gave three controls of the same
          * kind three different homes. They are all about the session rather
@@ -704,8 +704,9 @@
                  the password, which are re-read from disk each session. This
                  lets that reference go, which is what you want exactly once
                  per unit: when the bench moves to the next one. -->
-            <button id="btn-forget" title="Let go of this unit's folder, so ⓪ asks for the next one">
-                CHANGE UNIT
+            <button id="btn-forget"
+                    title="Let go of this unit's folder, so ⓪ asks for the next one. The BLE link is not touched.">
+                CHANGE UNIT FOLDER
             </button>
             <!-- It stays on screen once paired and goes green instead of
                  vanishing. A control that disappears on success leaves the bar
