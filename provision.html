@@ -370,7 +370,21 @@
          * It is a listbox, not a menu: picking writes into the field and closes.
          * Nothing is sent, so nothing here needs confirming.
          */
-        .at-picker { position: relative; flex: 1 1 auto; min-width: 0; display: flex; }
+        /*
+         * The trigger is sized to its own label, not to the row.
+         *
+         * Stretching it across every spare pixel made a control that says four
+         * words look like the screen's main event, and a bottom bar of three
+         * things all straining to fill the width has no hierarchy left to
+         * spend. The cluster sits left, at the size each part needs, and the
+         * empty space to its right is the point rather than a gap: the stage
+         * buttons below are what legitimately spans the screen.
+         *
+         * The PANEL is not bound by that. It is absolutely positioned, so it
+         * can be wider than the button it hangs off — which is what keeps 58
+         * entries and their descriptions readable behind a compact trigger.
+         */
+        .at-picker { position: relative; flex: 0 0 260px; min-width: 0; display: flex; }
         #at-menu {
             flex: 1 1 auto; min-width: 0; min-height: 40px;
             display: flex; align-items: center; justify-content: space-between;
@@ -385,7 +399,8 @@
         #at-menu[aria-expanded="true"] { border-color: #475569; background: #1e293b; }
 
         .at-panel {
-            position: absolute; bottom: calc(100% + 6px); left: 0; right: 0;
+            position: absolute; bottom: calc(100% + 6px); left: 0;
+            width: max(100%, 420px); max-width: calc(100vw - 32px);
             z-index: 20;
             display: flex; flex-direction: column;
             max-height: min(52vh, 420px);
@@ -446,6 +461,13 @@
             background: #0f172a; color: #cbd5e1; font-size: 13px;
         }
         #at-send:active { background: #1e293b; }
+
+        /* No spare width to leave, so the cluster goes back to filling the row
+           and the trigger gives up what the field cannot do without. */
+        @media (max-width: 560px) {
+            .at-picker { flex: 1 1 auto; }
+            .at-row input#at-input { flex: 0 0 96px; }
+        }
     </style>
 </head>
 <body>
