@@ -119,7 +119,7 @@ check('and hands back the password, not the file', good.password, '482913');
  * can be said safely, and the log is a thing people screenshot. */
 const passwordLine = good.findings.find(f => f.label === 'password');
 check('the password line says the shape', passwordLine.detail,
-      'password.txt found with 6 digits');
+      'password.txt found with 6 characters');
 check('and never the value',
       good.findings.some(f => f.detail.includes('482913')), false);
 
@@ -177,11 +177,11 @@ const emptyPassword = await checkFolder(FOLDER, [
 ]);
 check('an empty password.txt is refused', emptyPassword.ok, false);
 
-/* A password that is not six digits is the wrong file or the wrong contents,
+/* A password that is not six alphanumerics is the wrong file or the wrong contents,
  * and finding that out at ① costs an AT window. */
 const oddPassword = await checkFolder(FOLDER,
     goodFolder().map(f => f.name === 'password.txt' ? file(f.name, 'hunter2!') : f));
-check('a password that is not 6 digits is refused', oddPassword.ok, false);
+check('a password that is not 6 alphanumerics is refused', oddPassword.ok, false);
 
 /* ── region.txt ───────────────────────────────────────────────────────── */
 const noRegion = await checkFolder(FOLDER,

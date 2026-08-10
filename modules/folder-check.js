@@ -12,10 +12,11 @@
  * continuing only buys a more confusing failure later, and on a bench the cost
  * of being sent back to the file picker is one click.
  *
- * The exception is the password's shape, which is a NOTE. We know what it has
- * looked like on every unit so far; we do not know that it can never look
- * different, and refusing on a pattern nobody promised would be this file
- * inventing a rule.
+ * The password is the one place that reasoning has a limit. Its LENGTH is
+ * refused, because six characters is what the console takes. Its ALPHABET is
+ * not: what the generator draws from is the server's business, and a file
+ * checker that refuses on a pattern nobody promised is inventing a rule — see
+ * `PASSWORD_SHAPE`.
  */
 
 /*
@@ -239,8 +240,20 @@ export function pemProblem(text, expect) {
     return null;
 }
 
-/* The console takes a 6-digit PIN. Anything else is the wrong file. */
-const PASSWORD_SHAPE = /^\d{6}$/;
+/*
+ * Six characters, letters or digits. Anything else is the wrong file.
+ *
+ * This was `\d{6}` — a PIN — because every password anyone had seen was six
+ * digits. That was a fact about the units provisioned so far and this file
+ * read it as a rule, so the first alphanumeric one was refused at the folder
+ * with the technician sent back to Drive for a file that was already correct.
+ * A generator that can emit a letter is not a broken folder.
+ *
+ * The LENGTH is still checked, and that is the part still worth checking: it
+ * is what separates a password from a paragraph, and catches the wrong file
+ * without pretending to know the alphabet the server chose from.
+ */
+const PASSWORD_SHAPE = /^[A-Za-z0-9]{6}$/;
 
 /* Both of our own files hold one value and nothing else, so both are read the
  * same way — trailing newline from an editor included. */
@@ -336,22 +349,23 @@ export async function checkFolder(folder, files, { knownRegions = null } = {}) {
                 continue;
             }
             /*
-             * A refusal, not a warning. It was a warning on the reasoning that
-             * we know what these have looked like and not that they can never
-             * look otherwise — true, and the wrong trade: the console takes a
-             * 6-digit PIN, so anything else is a file that will fail ① after
-             * costing an AT window to find out. Being sent back to the folder
-             * is cheaper than being sent back to the bench.
+             * A refusal, not a warning: a file of the wrong length will fail
+             * the login after costing an AT window to find out, and being sent
+             * back to the folder is cheaper than being sent back to the bench.
+             *
+             * The count is in the message because it is the whole diagnosis —
+             * it says "this is a certificate" or "this is a paragraph" without
+             * putting a live password in a log people screenshot.
              */
             if (!PASSWORD_SHAPE.test(password)) {
                 bad(role, `${file.name} holds ${password.length} characters — ` +
-                          'the console password is 6 digits, so this is the ' +
-                          'wrong file or the wrong contents');
+                          'the console password is 6 letters or digits, so ' +
+                          'this is the wrong file or the wrong contents');
                 continue;
             }
             /* The value never appears. The shape is the whole of what can be
              * said safely in a log people screenshot. */
-            say('ok', role, `${file.name} found with 6 digits`);
+            say('ok', role, `${file.name} found with 6 characters`);
             chosen[role] = file;
             continue;
         }

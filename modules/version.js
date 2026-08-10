@@ -16,8 +16,8 @@
  * cached shell — pull to refresh, or reinstall the app from the home screen.
  */
 
-export const VERSION = '0.82.0';
+export const VERSION = '0.83.0';
 
 /* One line, for the places that want context rather than just a number. */
-export const VERSION_NOTE = 'the command menu is grouped by what each setting '
-    + 'turns, and offers values to pick instead of numbers to remember';
+export const VERSION_NOTE = 'a password may hold letters — six characters is '
+    + 'the rule, the alphabet was never this app\'s to decide';
