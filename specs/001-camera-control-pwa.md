@@ -63,6 +63,16 @@ Todos los comandos tienen formato: `C0 5A [Cmd Group] [Cmd ID] [Payload 2 bytes]
 | **DISABLE RAW** | `C0 5A 00 00 00 00 03` | 0x03 | Vuelve a JPEG-only |
 | **SHOW FULL IMAGE** | `C0 5A 00 00 00 00 04` | 0x04 | Muestra imagen completa (640×480) |
 | **SHOW ROI** | `C0 5A 00 00 00 00 05` | 0x05 | Muestra imagen con ROI (160×64) |
+| **REQUEST READING** | `C0 5A 00 00 00 00 09` | 0x09 | Returns the last AI reading (8 bytes) without a new capture |
+| **LED ON** | `C0 5A 00 00 00 00 0A` | 0x0A | Camera light on while capturing. Runs one capture, answers `C0 5A 0A` + 8-byte reading. RAM-only flag: lost at camera power-off |
+| **LED OFF** | `C0 5A 00 00 00 00 0B` | 0x0B | Camera light off. Same response shape with `0B` |
+
+Trailers 0x08–0x0B were read off the command dispatcher of the Dragino camera
+firmware shipped in 2026 (`output.img`, strings `### LED ON` / `### LED OFF`):
+the dispatcher requires bytes 2–5 to be zero and switches on byte 6. The node's
+`AT+AISLED=1` is this same 0x0A frame, re-sent by the node after every camera
+power-on because the camera does not persist the flag. Trailer 0x08 also
+exists (capture + reply `C0 5A 08` + reading) but is not used by this app.
 
 #### Grupo 0x03 — Sistema/Control/Calibración
 

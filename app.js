@@ -1,6 +1,6 @@
 import { state } from './modules/state.js';
 import { dom, log, toggleDrawer, togglePanel, switchMode, switchImageMode, resetImageModeSelection } from './modules/ui.js';
-import { adjustSensor, onAdvancedReadRegister, onWriteRegister } from './modules/protocol.js';
+import { adjustSensor, onAdvancedReadRegister, onWriteRegister, toggleLED, resetLED } from './modules/protocol.js';
 import { connectDevice } from './modules/ftdi.js';
 import { readStream } from './modules/stream.js';
 import { onValidatePosition } from './modules/validation.js';
@@ -38,6 +38,7 @@ async function stopConnection() {
         try { await state.device.close(); } catch (e) {}
         state.device = null;
         state.epOutNum = null;
+        resetLED();
 
         /* Show USB end-session panel */
         const chooser = document.getElementById('connect-chooser');
@@ -152,6 +153,7 @@ window.switchImageMode = switchImageMode;
 window.adjustSensor = adjustSensor;
 window.onAdvancedReadRegister = onAdvancedReadRegister;
 window.onWriteRegister = onWriteRegister;
+window.toggleLED = toggleLED;
 window.onValidatePosition = onValidatePosition;
 window.enterCalibMode = enterCalibMode;
 window.exitCalibMode = exitCalibMode;

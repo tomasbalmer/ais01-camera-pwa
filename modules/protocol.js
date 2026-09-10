@@ -90,3 +90,32 @@ export async function toggleRAW() {
     const btn = document.getElementById('btnRAW');
     btn.classList.toggle('active', state.rawEnabled);
 }
+
+// === Camera light toggle (USB only) ===
+// Over BLE the app talks to the node, not the camera, and the node has no
+// passthrough for this command — so the button says so instead of pretending.
+export async function toggleLED() {
+    if (isBleCalibMode()) {
+        log('Camera light: not available over BLE — connect via USB');
+        return;
+    }
+    if (!state.device) { log('Not connected'); return; }
+    state.ledEnabled = !state.ledEnabled;
+    await sendCommand(state.ledEnabled ? 'LED_ON' : 'LED_OFF');
+    syncLedButtons();
+}
+
+/* The light flag dies with the camera's power, so a fresh USB session starts
+ * with it off no matter what the button showed last time. */
+export function resetLED() {
+    state.ledEnabled = false;
+    syncLedButtons();
+}
+
+function syncLedButtons() {
+    document.querySelectorAll('.btn-led').forEach(btn => {
+        btn.classList.toggle('active', state.ledEnabled);
+        const label = btn.querySelector('.panel-btn-label');
+        if (label) label.textContent = state.ledEnabled ? 'Light On' : 'Light Off';
+    });
+}

@@ -65,6 +65,14 @@ export const CMDS = {
     DISABLE_RAW:     [0xC0, 0x5A, 0x00, 0x00, 0x00, 0x00, 0x03],  // JPEG only
     SHOW_FULL_IMAGE: [0xC0, 0x5A, 0x00, 0x00, 0x00, 0x00, 0x04],  // Full 640x480
     SHOW_ROI:        [0xC0, 0x5A, 0x00, 0x00, 0x00, 0x00, 0x05],  // ROI 160x64
+    // Camera light (the LED beside the lens). Read off the Dragino camera
+    // firmware's command dispatcher (output.img, 2026-09): trailer 0x0A sets
+    // the light flag, 0x0B clears it, and both run one capture and answer
+    // `C0 5A 0A|0B` + 8-byte reading. The flag lives in RAM only — it is gone
+    // at every camera power-off, which is why the node re-sends it each cycle
+    // (`AT+AISLED`) and why the light is off when this app powers the camera.
+    LED_ON:          [0xC0, 0x5A, 0x00, 0x00, 0x00, 0x00, 0x0A],  // Light on while capturing
+    LED_OFF:         [0xC0, 0x5A, 0x00, 0x00, 0x00, 0x00, 0x0B],  // Light off
 };
 
 // === JPEG markers ===

@@ -4,6 +4,7 @@ export const state = {
     epOutNum: null,
     running: false,
     rawEnabled: false,
+    ledEnabled: false,       // camera light flag — RAM-only on the camera, resets at power-off
     frameCount: 0,
     fpsCount: 0,
     lastFpsTime: 0,

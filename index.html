@@ -562,6 +562,7 @@
             <div class="panel-btn-row">
                 <button class="seg-btn active panel-btn" id="btnFullPanel" onclick="switchImageMode('FULL')"><span class="panel-btn-label">Select Full Image</span></button>
                 <button class="seg-btn panel-btn" id="btnROIPanel" onclick="switchImageMode('ROI')"><span class="panel-btn-label">Select ROI Image</span></button>
+                <button class="seg-btn panel-btn btn-led" id="btnLEDPanel" onclick="toggleLED()" aria-label="Camera light"><span class="panel-btn-label">Light Off</span></button>
             </div>
         </div>
         <!-- Calibrate panel -->
@@ -581,6 +582,9 @@
                 <button id="btn-calibrate" class="panel-btn" onclick="showCalibConfirm(event)" disabled>
                     <span class="panel-btn-label">Apply</span>
                     <span class="panel-btn-label">Calibration</span>
+                </button>
+                <button id="btnLEDCalib" class="seg-btn panel-btn btn-led" onclick="toggleLED()" aria-label="Camera light">
+                    <span class="panel-btn-label">Light Off</span>
                 </button>
             </div>
         </div>
