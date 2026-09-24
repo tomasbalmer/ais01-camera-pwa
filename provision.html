@@ -750,10 +750,9 @@
          * the state.
          *
          * Which marks get to be green is the uneven part, and it is
-         * deliberate: only ② and ⑤ hold evidence strong enough — a checksum
-         * the modem computed over what it stored, and a CONNACK that AWS IoT
-         * only issues to a certificate that is registered, active, attached
-         * and key-matched. "9/9 OK" is not that, and stays grey.
+         * deliberate: only ② holds evidence strong enough — a checksum the
+         * modem computed over what it stored. "9/9 OK" is not that, and stays
+         * grey.
          */
         /*
          * Clipped rather than allowed to push the chip wider.
@@ -1435,11 +1434,11 @@
                 <span id="mark-config" class="mark"></span>
             </span>
         </button>
-        <button id="btn-verify">
-            <span class="status-circle" id="dot-verify"></span>
+        <button id="btn-schedule">
+            <span class="status-circle" id="dot-schedule"></span>
             <span class="chip-txt">
-                <span class="name">Verify publish to AWS IoT</span>
-                <span id="mark-verify" class="mark"></span>
+                <span class="name">Apply reporting schedule</span>
+                <span id="mark-schedule" class="mark"></span>
             </span>
         </button>
     </div>

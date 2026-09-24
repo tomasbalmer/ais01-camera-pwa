@@ -16,8 +16,8 @@
  * cached shell — pull to refresh, or reinstall the app from the home screen.
  */
 
-export const VERSION = '0.84.0';
+export const VERSION = '0.85.0';
 
 /* One line, for the places that want context rather than just a number. */
-export const VERSION_NOTE = 'the camera light has a button — the flag the node '
-    + 'sends each cycle, sent from here over USB';
+export const VERSION_NOTE = 'the last step sets the schedule — wake every six hours, '
+    + 'one reading per wake, no history between them';

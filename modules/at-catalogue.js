@@ -82,19 +82,20 @@ const FIRST = ['AT+CFG', 'ATZ', 'AT+CERTMOD', 'AT+GETLOG'];
  */
 const PRESETS = [
     /*
-     * TDC is seconds. The 20-minute entry is called out because it is what ④
-     * sends (`ENVIRONMENTS.tdc`), so the list shows the standard rather than
-     * leaving somebody to work out which of ten values is the normal one.
+     * TDC is seconds. The 6-hour entry is called out because it is what
+     * "Apply reporting schedule" sends (`SCHEDULE`), so the list shows the
+     * standard rather than leaving somebody to work out which of ten values
+     * is the normal one.
      */
     ['Reporting interval · AT+TDC', [
         ['AT+TDC=300',   'every 5 minutes'],
         ['AT+TDC=900',   'every 15 minutes'],
-        ['AT+TDC=1200',  'every 20 minutes — the standard, what this app sends'],
+        ['AT+TDC=1200',  'every 20 minutes'],
         ['AT+TDC=1800',  'every 30 minutes'],
         ['AT+TDC=3600',  'hourly'],
         ['AT+TDC=7200',  'every 2 hours'],
         ['AT+TDC=14400', 'every 4 hours'],
-        ['AT+TDC=21600', 'every 6 hours'],
+        ['AT+TDC=21600', 'every 6 hours — the standard, what this app sends'],
         ['AT+TDC=28800', 'every 8 hours'],
         ['AT+TDC=43200', 'every 12 hours'],
     ]],
@@ -107,8 +108,8 @@ const PRESETS = [
      * accepts a bare `AT+CLOCKLOG=0`.
      */
     ['History between uplinks · AT+CLOCKLOG', [
-        ['AT+CLOCKLOG=1,65535,15,8', 'on — a reading every 15 minutes, 8 per uplink, the standard'],
-        ['AT+CLOCKLOG=0,65535,15,8', 'off — one reading per uplink, taken at the TDC'],
+        ['AT+CLOCKLOG=1,65535,15,8', 'on — a reading every 15 minutes, 8 per uplink (golden config)'],
+        ['AT+CLOCKLOG=0,65535,15,8', 'off — one reading per uplink, what this app sends'],
     ]],
     /*
      * CSQTIME is minutes, and it is the one setting whose two costs point in

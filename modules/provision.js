@@ -57,10 +57,9 @@ const state = {
     pinned: { annotated: true, raw: true },
     /* Per stage, because ③ and ④ are two independent two-tap sequences and one
      * shared slot would let arming either one disarm the other. */
-    pending: { network: null, mqtt: null },
+    pending: { network: null, mqtt: null, schedule: null },
     redacting: false,  /* key material may be on the wire — see redact() */
     busy: false,       /* a stage's own loop is running */
-    verifying: null,   /* ⑤ is watching the stream — {stop} while armed */
     mock: false,       /* ?mock — simulated device, no radio */
 };
 
@@ -622,7 +621,7 @@ const STEP = {
     certs:   'Write certificates into modem',
     network: 'Apply cellular network settings',
     mqtt:    'Apply MQTT broker settings',
-    verify:  'Verify publish to AWS IoT',
+    schedule: 'Apply reporting schedule',
 };
 
 /* A control named inside a sentence. The quotes are load-bearing: a
@@ -800,10 +799,8 @@ function until(pattern, ms) {
 
 /*
  * The per-stage mark. Its wording is deliberately uneven across stages: only
- * ② and ⑤ carry evidence strong enough to be called proof — a checksum the
- * modem computed over what it stored, and a CONNACK from AWS IoT, which is only
- * issued to a certificate that is registered, active, attached to a policy and
- * matched by its key. ① and ③ get an amber mark that says what was observed and
+ * ② carries evidence strong enough to be called proof — a checksum the modem
+ * computed over what it stored. ① and ③ get an amber mark that says what was observed and
  * nothing more, because a green tick on "OK was returned" would be a claim this
  * app cannot support.
  */
@@ -940,11 +937,9 @@ const ENVIRONMENTS = {
          * attempt on every boot. Production only: it is the one we have
          * verified. */
         endpoint_ip: '54.158.94.62',
-        tdc: 1200,
     },
     staging: {
         endpoint: 'a8jij4el5zhvl-ats.iot.us-east-1.amazonaws.com',
-        tdc: 1200,
     },
 };
 
@@ -1275,7 +1270,7 @@ async function readFolder(folder, files) {
  * it to this unit's IMEI.
  */
 function clearStageMarks() {
-    for (const stage of ['login', 'certs', 'network', 'config', 'verify']) {
+    for (const stage of ['login', 'certs', 'network', 'config', 'schedule']) {
         setMark(stage, '', 'weak');
     }
 }
@@ -2154,11 +2149,30 @@ function desiredSettings(bundle) {
         ['AT+TLSMOD', '1,2'],
         ['AT+MQOS', '0'],
         ['AT+SNI', '0'],
-        ...(mqtt.tdc ? [['AT+TDC', String(mqtt.tdc)]] : []),
         ...(mqtt.endpoint_ip
             ? [['AT+BKDNS', `1,0,${mqtt.endpoint_ip},8883`]] : []),
     ];
 }
+
+/*
+ * When the unit wakes, and what it does while it is asleep.
+ *
+ * TDC used to go out with the MQTT settings at 1200 (every 20 minutes), with
+ * CLOCKLOG left at the golden config's `1,65535,15,8` — a reading every 15
+ * minutes, stored, and eight of them sent per uplink. The unit now wakes every
+ * six hours and takes ONE reading when it does: CLOCKLOG's first field turns
+ * the history off and the other three stay as the golden config has them, so
+ * turning it back on restores the standard rather than a guess. All four are
+ * sent because nothing here establishes that the firmware takes a bare
+ * `AT+CLOCKLOG=0`.
+ *
+ * Its own stage and not part of MQTT because it answers a different question:
+ * not where the unit publishes, but how often and how much.
+ */
+const SCHEDULE = [
+    ['AT+TDC', '21600'],
+    ['AT+CLOCKLOG', '0,65535,15,8'],
+];
 
 /*
  * How often this console will take a line — one number, three callers.
@@ -2207,6 +2221,19 @@ const CONFIG_STAGES = {
         menuGroup: 'MQTT broker',
         substep: 'mqtt_settings_set',
         settings: bundle => desiredSettings(bundle),
+        title: 'Config general MQTT broker settings',
+        explain: ['Connect the unit to AWS IoT: broker, topics, TLS and client ID for this IMEI'],
+    },
+    schedule: {
+        mark: 'schedule',
+        menuGroup: 'reporting schedule',
+        substep: 'schedule_settings_set',
+        settings: () => SCHEDULE,
+        /* What the change MEANS, for the confirmation. The command lines are
+         * exact but say it in seconds and flags; this says it in what the unit
+         * will do differently after it. */
+        title: 'Config reporting schedule',
+        explain: ['Wake up and uplink every 6hs with historical readings turned off'],
     },
 };
 
@@ -2250,8 +2277,10 @@ async function runConfigStage(key) {
         (lines.length * CONSOLE_LINE_MS + REPLY_DRAIN_MS) / 1000);
 
     const confirmed = await askConfirm({
-        title: `Send ${lines.length} ${spec.menuGroup} settings?`,
-        lines: [
+        title: spec.title || `Send ${lines.length} ${spec.menuGroup} settings?`,
+        /* A stage that explains itself says what changes, and that is all it
+         * says — the pacing line is noise beside two short sentences. */
+        lines: spec.explain || [
             `They go to the modem one line at a time — about ${seconds} s. ` +
             `Nothing leaves this screen until you confirm.`,
         ],
@@ -2686,131 +2715,6 @@ async function doCerts() {
     });
 }
 
-/* ── ⑤ VERIFY ─────────────────────────────────────────────────────────────
- *
- * What the device says about its own cycle, over the link that is already open.
- *
- * The check this stage wanted was the platform's: ask a backend whether an
- * uplink arrived for this IMEI. There is no backend, and a phone cannot hold
- * AWS credentials to ask directly — so this asks the only witness present.
- *
- * That witness is better than it sounds, because of ONE line. `Successfully
- * connected to the server` is printed after AWS IoT returns CONNACK, and AWS
- * IoT only returns CONNACK to a client whose certificate is registered, ACTIVE,
- * attached to a policy, and whose private key matched the TLS handshake. Every
- * failure mode of a certificate write ends before that line. Nothing else the
- * device prints carries that weight.
- *
- * `Upload data successfully` does NOT: `MQOS=0` means QoS 0, so there is no
- * PUBACK to wait for and the line means "the modem sent it". The distinction is
- * kept in the wording rather than smoothed over — this stage exists to stop a
- * unit being called provisioned on the strength of an OK.
- *
- * This stage sends nothing. It watches. The RESET button is next to it.
- */
-const PUBLISH_EVIDENCE = [
-    [/\*+Upload start/i,                             'cycle started'],
-    [/Configure the path of CA certificate/i,        'read the CA it stored'],
-    [/Configure the path of client certificate/i,    'read the client cert it stored'],
-    [/Configure the path of client private key/i,    'read the private key it stored'],
-    [/Opened the MQTT client network successfully/i, 'reached the broker (TCP)'],
-    [/Successfully connected to the server/i,        'AWS IoT ACCEPTED THIS CERTIFICATE'],
-    [/Upload data successfully/i,                    'data sent (QoS 0 — the broker does not ack it)'],
-    [/\*+End of upload\*+/i,                         'cycle closed'],
-];
-
-const CONNECTED = 5;   /* index of the line that proves the certificate */
-const SENT = 6;
-
-/* The ceiling is one duty cycle plus slack, because a technician who does not
- * press RESET is waiting for the natural one. */
-function verifyBudgetMs() {
-    const tdc = state.bundle && state.bundle.mqtt && state.bundle.mqtt.tdc;
-    return ((Number(tdc) || 1200) + 180) * 1000;
-}
-
-function doVerify() {
-    /* Armed twice is a second watcher on the same stream. The second tap stops
-     * the first instead. */
-    if (state.verifying) {
-        state.verifying.stop();
-        return;
-    }
-
-    const phase = startPhase(STEP.verify);
-    const seen = new Set();
-    const collector = { lines: [], each: line => {
-        PUBLISH_EVIDENCE.forEach(([pattern, meaning], i) => {
-            if (seen.has(i) || !pattern.test(line)) return;
-            seen.add(i);
-            write(meaning, i === CONNECTED ? 'ok' : 'note');
-            setMark('verify', `${seen.size}/${PUBLISH_EVIDENCE.length}`, 'run');
-            /* Stop at the verdict, or when the cycle closes without one —
-             * a failed cycle is diagnosable now, not in twenty minutes. */
-            if ((seen.has(CONNECTED) && seen.has(SENT))
-                || i === PUBLISH_EVIDENCE.length - 1) finish();
-        });
-    } };
-
-    const finish = () => {
-        if (!state.verifying) return;
-        clearTimeout(timer);
-        collectors.delete(collector);
-        state.verifying = null;
-
-        const published = seen.has(CONNECTED) && seen.has(SENT);
-        /* What the device actually said, in the order the cycle says it. This
-         * is the whole verdict: the stage sends nothing, so its evidence is
-         * only ever the lines it watched go past. */
-        record({
-            stage: STAGES.verify,
-            substep: 'full_cycle_observed',
-            status: published ? 'done' : 'failed',
-            summary: published
-                ? 'AWS IoT returned CONNACK for this unit\'s certificate and a ' +
-                  'reading left the modem (QoS 0 — the broker does not ack it)'
-                : seen.has(0)
-                    ? 'A cycle ran and never connected to the server'
-                    : 'No cycle was observed before the budget ran out',
-            evidence: PUBLISH_EVIDENCE
-                .filter((_, i) => seen.has(i)).map(([, meaning]) => meaning),
-        });
-
-        if (published) {
-            setMark('verify', 'published ✓', 'ok');
-            ok('AWS IoT accepted this unit\'s certificate and the reading left ' +
-               'the modem.');
-            note('QoS 0 has no delivery receipt: confirm the uplink landed in ' +
-                 `AWS IoT for ${state.bundle ? state.bundle.imei : 'this IMEI'}.`);
-        } else if (seen.has(0)) {
-            setMark('verify', 'no MQTT', 'fail');
-            fail('The cycle ran and never connected to the server.');
-            note(seen.has(4)
-                ? 'It reached the broker and was refused: the certificate is ' +
-                  'not registered/active/attached, or the key does not match it.'
-                : 'It never reached the broker: network, APN or SERVADDR — not ' +
-                  'the certificates.');
-            note('SNI=0 and MQOS=0 are the two settings that fail silently here.');
-        } else {
-            setMark('verify', 'nothing seen', 'weak');
-            fail('No cycle was observed before the budget ran out.');
-            note('The link only carries lines while the unit is awake, so a ' +
-                 'cycle that ran while BLE was re-attaching can be missed.');
-        }
-        endPhase(phase);
-    };
-
-    const timer = setTimeout(finish, verifyBudgetMs());
-    state.verifying = { stop: finish };
-    collectors.add(collector);
-
-    setMark('verify', 'watching', 'run');
-    note(`Watching for a publish, up to ${Math.round(verifyBudgetMs() / 60000)} min.`);
-    you(`Press RESET to start a cycle now, or wait for the next one. Tap `
-        + `${press(STEP.verify)} again to stop watching and report what was `
-        + `seen.`);
-}
-
 /* ── Wiring ──────────────────────────────────────────────────────────── */
 
 /*
@@ -2912,9 +2816,6 @@ export function initProvision() {
      * A stage's rows belong to that stage, so the section is opened and closed
      * around the whole run — here, at the seam, rather than inside four stage
      * bodies that are about the device and not about the log.
-     *
-     * ⑤ is not wrapped: it arms a watcher and returns, and its verdict arrives
-     * minutes later. It opens and closes its own section around the watch.
      */
     const staged = (label, fn) => async (...args) => {
         const phase = startPhase(label);
@@ -2928,12 +2829,13 @@ export function initProvision() {
     el('btn-bundle').addEventListener('click', chooseFolder);
     el('btn-login').addEventListener('click', staged(STEP.login, doLogin));
     el('btn-certs').addEventListener('click', staged(STEP.certs, doCerts));
-    el('btn-verify').addEventListener('click', doVerify);
 
     el('btn-network').addEventListener('click',
         staged(STEP.network, () => runConfigStage('network')));
     el('btn-config').addEventListener('click',
         staged(STEP.mqtt, () => runConfigStage('mqtt')));
+    el('btn-schedule').addEventListener('click',
+        staged(STEP.schedule, () => runConfigStage('schedule')));
 
     el('copy-log').addEventListener('click', copyRawLog);
     el('btn-forget').addEventListener('click', changeUnit);
