@@ -28,6 +28,7 @@ const DESCRIBED = {
     'AT+CERTMOD': ['AT+CERTMOD', 'toggle BG95 passthrough — no query form, it just flips'],
     'AT+CSQTIME': ['AT+CSQTIME=1', 'minutes hunting for a network before power-off'],
     'AT+TDC': ['AT+TDC=1200', 'seconds between duty cycles'],
+    'AT+CLOCKLOG': ['AT+CLOCKLOG=1,65535,15,8', 'readings stored between uplinks'],
     /* The three the network profiles turn, described from what `REGIONS` in
      * provision.js already asserts and no further. */
     'AT+APN': ['AT+APN=', 'access point name — NULL lets the SIM decide'],
@@ -83,7 +84,7 @@ const PRESETS = [
     /*
      * TDC is seconds. The 20-minute entry is called out because it is what ④
      * sends (`ENVIRONMENTS.tdc`), so the list shows the standard rather than
-     * leaving somebody to work out which of nine values is the normal one.
+     * leaving somebody to work out which of ten values is the normal one.
      */
     ['Reporting interval · AT+TDC', [
         ['AT+TDC=300',   'every 5 minutes'],
@@ -93,8 +94,21 @@ const PRESETS = [
         ['AT+TDC=3600',  'hourly'],
         ['AT+TDC=7200',  'every 2 hours'],
         ['AT+TDC=14400', 'every 4 hours'],
+        ['AT+TDC=21600', 'every 6 hours'],
         ['AT+TDC=28800', 'every 8 hours'],
         ['AT+TDC=43200', 'every 12 hours'],
+    ]],
+    /*
+     * CLOCKLOG is on/off, first-sample second (65535 = once the network is
+     * joined), minutes between samples, entries per uplink. The first value is
+     * the only one that changes here; the other three are the golden config's,
+     * so turning history back on restores the standard rather than guessing.
+     * All four are sent because nothing here establishes that the firmware
+     * accepts a bare `AT+CLOCKLOG=0`.
+     */
+    ['History between uplinks · AT+CLOCKLOG', [
+        ['AT+CLOCKLOG=1,65535,15,8', 'on — a reading every 15 minutes, 8 per uplink, the standard'],
+        ['AT+CLOCKLOG=0,65535,15,8', 'off — one reading per uplink, taken at the TDC'],
     ]],
     /*
      * CSQTIME is minutes, and it is the one setting whose two costs point in
