@@ -2215,6 +2215,8 @@ const CONFIG_STAGES = {
         menuGroup: 'cellular network',
         substep: 'network_settings_set',
         settings: bundle => networkSettings(bundle),
+        title: 'Config cellular network settings',
+        explain: ['Set how the modem attaches to the network: APN, search time, radio technology and operator'],
     },
     mqtt: {
         mark: 'config',
