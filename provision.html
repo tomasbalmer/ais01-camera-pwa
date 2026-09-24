@@ -168,6 +168,50 @@
             --red-bd:    rgba(239,68,68,.45);
             --txt-faint: #5b6f86;   /* labels, timestamps, meta */
             --fs-label:  10px;
+
+            /*
+             * ── The bench instrument ─────────────────────────────────────
+             *
+             * One system for everything that is pressed or typed into, so a
+             * control's look says what kind of thing it is instead of what
+             * somebody picked for it that day. The logs are the lit screen;
+             * the bar and the console are the dark bezel round it; what sits
+             * on the bezel is a KEY — lighter than the bezel, with a 1px lip
+             * of light along its top edge and a short shadow under it, the
+             * way a physical key sits on a panel. That lip is the only
+             * flourish, and it belongs to keys alone.
+             *
+             *   s0 bezel   bar, console          (--chrome)
+             *   s1 bevel   pane heads, log foot  (--chrome-2)
+             *   s2 screen  the logs              (--bg)
+             *   well       a field — sunk below the bezel it sits on
+             *   key        raised off the bezel
+             */
+            --well:       #0b1322;
+            --key:        #1e293b;
+            --key-hover:  #253349;
+            --key-press:  #2c3b54;
+            --key-lip:    inset 0 1px 0 rgba(255,255,255,0.07);
+            --key-drop:   0 1px 2px rgba(0,0,0,0.55);
+
+            /* Lines, weakest to strongest. A control is drawn at line-3 so it
+               reads against the bezel; line-4 is the same control under a
+               pointer or a finger. */
+            --line-1: #1e2a3d;
+            --line-2: #334155;
+            --line-3: #64748b;
+            --line-4: #94a3b8;
+
+            /* Spacing: one scale for the console, instead of 6 / 7 / 10 / 13 /
+               22 each chosen where it was needed. */
+            --sp-1: 4px;
+            --sp-2: 8px;
+            --sp-3: 12px;
+            --sp-4: 16px;
+            --sp-5: 24px;
+
+            --key-h: 40px;
+            --key-r: 8px;
         }
         header {
             flex-shrink: 0;
@@ -684,7 +728,7 @@
         #btn-connect.link-reconnecting svg { color: #fbbf24; }
 
         .actions {
-            display: flex; gap: 6px;
+            display: flex; gap: var(--sp-2);
             padding: 8px var(--rail-pad);
             border-top: 1px solid #1e293b;
             padding-bottom: calc(8px + env(safe-area-inset-bottom));
@@ -705,16 +749,22 @@
          * together. A grey number in an amber ring is not one of them, and
          * the order it was carrying is already given by the position.
          */
+        /* The step variant of a key: the same surface and lip as the command
+           row's keys, a larger radius because it is a bigger object, and a
+           quieter outline (line-2) so six of them in a row do not shout. The
+           status states below take the outline over. */
         .actions button {
             flex: 1; min-width: 0;
-            padding: 12px 13px; border-radius: 14px;
-            border: 1.5px solid var(--border-2); background: var(--panel);
-            display: flex; flex-direction: row; align-items: center; gap: 10px;
+            padding: var(--sp-3); border-radius: 14px;
+            border: 1.5px solid var(--line-2); background: var(--key);
+            box-shadow: var(--key-lip), var(--key-drop);
+            display: flex; flex-direction: row; align-items: center; gap: var(--sp-3);
             text-align: left; color: var(--text);
-            transition: border-color .15s, box-shadow .15s;
+            transition: border-color .15s, box-shadow .15s, background .15s;
             -webkit-tap-highlight-color: transparent;
         }
-        .actions button:active { background: var(--panel-up); }
+        .actions button:hover { background: var(--key-hover); border-color: var(--line-3); }
+        .actions button:active { background: var(--key-press); }
         .actions .chip-txt {
             display: flex; flex-direction: column; gap: 3px;
             min-width: 0; flex: 1 1 auto;
@@ -778,7 +828,7 @@
            and scrolls — the half row is what says there is more below. */
         @media (max-width: 700px) {
             .actions {
-                display: grid; grid-template-columns: 1fr 1fr; gap: 6px;
+                display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-2);
                 max-height: 170px; overflow-y: auto;
                 overscroll-behavior: contain;
             }
@@ -788,7 +838,6 @@
             .actions .name { font-size: 12.5px; line-height: 1.25; }
             .actions .status-circle { width: 22px; height: 22px; font-size: 11px; }
         }
-        .actions button:active { background: #334155; }
 
         /*
           The per-stage mark reports what the stage's own commands came back
@@ -1036,7 +1085,7 @@
         }
 
         .at-row {
-            display: flex; gap: 6px;
+            display: flex; gap: var(--sp-2);
             padding: 10px var(--rail-pad) 10px;
             align-items: stretch;
         }
@@ -1083,34 +1132,32 @@
             max-width: calc(100vw - 216px);   /* leave the field and SEND their room */
             min-width: 0; display: flex;
         }
+        /* A key (see `.key`) laid out as a trigger: label left, chevron right. */
         #at-menu {
-            flex: 1 1 auto; min-width: 0; min-height: 40px;
-            display: flex; align-items: center; justify-content: space-between;
-            gap: 8px; padding: 0 10px;
-            border: 1px solid #334155; border-radius: 8px;
-            background: #0f172a; color: #cbd5e1;
-            font-size: 13px; text-align: left;
-            -webkit-tap-highlight-color: transparent;
+            flex: 1 1 auto; min-width: 0;
+            justify-content: space-between;
+            padding: 0 var(--sp-3); text-align: left;
         }
-        #at-menu:active { background: #1e293b; }
         #at-menu .chev { color: var(--muted); font-size: 10px; flex-shrink: 0; }
-        #at-menu[aria-expanded="true"] { border-color: #475569; background: #1e293b; }
+        #at-menu[aria-expanded="true"] {
+            border-color: var(--line-4); background: var(--key-hover);
+        }
 
         .at-panel {
             position: absolute; bottom: calc(100% + 6px); left: 0; right: 0;
             z-index: 20;
             display: flex; flex-direction: column;
             max-height: min(52vh, 420px);
-            border: 1px solid #475569; border-radius: 10px;
-            background: #0b1220;
+            border: 1px solid var(--line-3); border-radius: 10px;
+            background: var(--well);
             box-shadow: 0 -8px 28px rgba(0,0,0,0.55);
             overflow: hidden;
         }
         .at-panel[hidden] { display: none; }
         #at-filter {
             flex: 0 0 auto; min-height: 38px; padding: 0 12px;
-            border: none; border-bottom: 1px solid #1e293b;
-            background: #0f172a; color: #e2e8f0;
+            border: none; border-bottom: 1px solid var(--line-2);
+            background: var(--key); color: #e2e8f0;
             font-family: ui-monospace, monospace; font-size: 13px;
         }
         #at-filter::placeholder { color: #475569; }
@@ -1119,7 +1166,7 @@
             padding: 7px 12px 3px;
             font-size: 9px; font-weight: 700; letter-spacing: 0.1em;
             text-transform: uppercase; color: var(--muted);
-            background: #0b1220; position: sticky; top: 0;
+            background: var(--well); position: sticky; top: 0;
         }
         /*
          * The row wraps rather than letting either half win.
@@ -1142,7 +1189,7 @@
             color: #cbd5e1; font-size: 13px;
             -webkit-tap-highlight-color: transparent;
         }
-        .at-opt:hover, .at-opt.is-on { background: #1e293b; }
+        .at-opt:hover, .at-opt.is-on { background: var(--key); }
         .at-opt .cmd {
             flex: 0 1 auto; min-width: 0;
             font-family: ui-monospace, "SF Mono", Menlo, monospace;
@@ -1172,59 +1219,65 @@
         /* The field takes whatever the row has left, so the row always runs
            to the right edge with SEND at the end of it. */
         .at-row input#at-input {
-            flex: 1 1 auto;
-            min-width: 0; min-height: 40px; padding: 0 10px;
-            border: 1px solid #334155; border-radius: 8px;
-            background: #0b1220; color: #e2e8f0;
+            flex: 1 1 auto; min-width: 0;
             font-family: ui-monospace, monospace; font-size: 13px;
         }
-        .at-row input::placeholder { color: #475569; }
-        #at-send, #btn-login, #btn-restart {
-            flex: 0 0 68px; min-height: 40px;
-            border: 1px solid #334155; border-radius: 8px;
-            background: #0f172a; color: #cbd5e1; font-size: 13px;
+        .at-row input::placeholder { color: var(--muted); }
+
+        /*
+         * ── Keys and wells ───────────────────────────────────────────────
+         *
+         * Two variants cover the whole command row, and the markup says which
+         * one each control is (`class="key"`, `class="well"`) rather than
+         * each id carrying its own colours.
+         *
+         *   .key         raised off the bezel: APPLY PASSWORD, the picker, SEND
+         *   .key-quiet   the same key with its label turned down: RESTART,
+         *                which drops the link and should not ask to be pressed
+         *                as loudly as the password does
+         *   .well        sunk below the bezel: the field you type into
+         */
+        .key {
+            display: inline-flex; align-items: center; justify-content: center;
+            gap: var(--sp-2);
+            min-height: var(--key-h); padding: 0 var(--sp-4);
+            border: 1px solid var(--line-3); border-radius: var(--key-r);
+            background: var(--key); color: #cbd5e1;
+            box-shadow: var(--key-lip), var(--key-drop);
+            font-size: 13px; white-space: nowrap;
+            -webkit-tap-highlight-color: transparent;
+            transition: background .12s, border-color .12s, color .12s;
         }
-        /* Sized to its label, which is never allowed to wrap. */
-        #btn-login { flex: 0 0 auto; padding: 0 16px; white-space: nowrap; }
-        #btn-restart, #at-send { flex: 0 0 auto; padding: 0 16px; white-space: nowrap; }
+        .key:hover { background: var(--key-hover); border-color: var(--line-4); color: var(--text); }
+        /* Pressed in: the lip goes and the key sits level with the bezel. */
+        .key:active { background: var(--key-press); box-shadow: none; }
+        .key-quiet { color: var(--text2); }
+        .key svg { width: 14px; height: 14px; flex-shrink: 0; }
+
+        .well {
+            min-height: var(--key-h); padding: 0 var(--sp-3);
+            border: 1px solid var(--line-3); border-radius: var(--key-r);
+            background: var(--well); color: #e2e8f0;
+            box-shadow: inset 0 1px 2px rgba(0,0,0,0.45);
+            transition: border-color .12s;
+        }
+        .well:hover { border-color: var(--line-4); }
+        .well:focus { border-color: var(--accent); outline: none; }
+
+        /* Keyboard focus is the one blue ring, on every control alike. */
+        .key:focus-visible, .actions button:focus-visible {
+            outline: 2px solid var(--accent); outline-offset: 2px;
+        }
+
+        #btn-login, #btn-restart, #at-send { flex: 0 0 auto; }
         /* Two groups on one row: the left one readies the console, the right
            one composes a command for it. The rule between them is what says
-           they are not five buttons of one kind. Restart is outlined only —
-           it drops the link, so it should not ask to be pressed as loudly as
-           the password does. */
+           they are not five buttons of one kind. */
         .session-tools {
-            display: flex; gap: 6px; flex: 0 0 auto;
-            padding-right: 22px; margin-right: 22px;
-            border-right: 1px solid #334155;
+            display: flex; gap: var(--sp-2); flex: 0 0 auto;
+            padding-right: var(--sp-5); margin-right: var(--sp-5);
+            border-right: 1px solid var(--line-2);
         }
-        #btn-restart { background: transparent; color: var(--text2); }
-        /* A lighter outline and an icon each, so the two read as buttons at a
-           glance rather than as labels sitting on the bar. */
-        #btn-login, #btn-restart, #at-send {
-            display: inline-flex; align-items: center; justify-content: center;
-            gap: 7px; border-color: #64748b;
-        }
-        #btn-login svg, #btn-restart svg, #at-send svg {
-            width: 14px; height: 14px; flex-shrink: 0;
-        }
-        #btn-login:hover, #btn-restart:hover, #at-send:hover {
-            color: var(--text); border-color: #94a3b8;
-        }
-        /* The picker and the field get the same outline, so every control on
-           the row is drawn at the same strength. */
-        #at-menu, .at-row input#at-input { border-color: #64748b; }
-        /* Raised off the footer. Everything on this row sat on almost the
-           footer's own black, so a button and the bar under it were the same
-           thing with a line round one of them. The field stays a shade darker
-           than the buttons — it is a place to type, not a thing to press. */
-        #btn-login, #btn-restart, #at-send, #at-menu { background: #1e293b; }
-        #btn-login:active, #btn-restart:active, #at-send:active,
-        #at-menu:active { background: #273449; }
-        .at-row input#at-input { background: #111a2b; }
-        .actions button { background: var(--panel-up); }
-        #at-menu:hover { border-color: #94a3b8; }
-        .at-row input#at-input:focus { border-color: #94a3b8; outline: none; }
-        #at-send:active, #btn-login:active, #btn-restart:active { background: #1e293b; }
 
         /* No spare width to leave, so the cluster goes back to filling the row
            and the trigger gives up what the field cannot do without. */
@@ -1463,7 +1516,7 @@
              prints nothing. So it is an action you repeat when the console
              asks, beside the other things you send to it. -->
         <div class="session-tools">
-        <button id="btn-login" type="button"
+        <button id="btn-login" class="key" type="button"
                 title="Send this unit's console password, from password.txt">
             <!-- A key: what this button hands the console. -->
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
@@ -1473,7 +1526,7 @@
         <!-- ATZ, which the menu also offers — but a restart is what every
              bench session reaches for between steps, so it gets a button.
              It logs the console out, and the log says so. -->
-        <button id="btn-restart" type="button"
+        <button id="btn-restart" class="key key-quiet" type="button"
                 title="Restart the unit (ATZ) — the link drops and comes back">
             <!-- A circular arrow: the unit goes round and comes back. -->
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
@@ -1482,7 +1535,7 @@
             </svg>RESTART</button>
         </div>
         <div class="at-picker">
-            <button id="at-menu" type="button" aria-haspopup="listbox"
+            <button id="at-menu" class="key" type="button" aria-haspopup="listbox"
                     aria-expanded="false" aria-controls="at-panel">
                 <span><span class="wide-only">Pick an </span>AT command</span><span class="chev">▲</span>
             </button>
@@ -1496,10 +1549,10 @@
                 <div id="at-list" role="listbox" aria-label="AT commands"></div>
             </div>
         </div>
-        <input id="at-input" type="text" spellcheck="false"
+        <input id="at-input" class="well" type="text" spellcheck="false"
                autocapitalize="off" autocorrect="off"
                placeholder="Or type an AT command">
-        <button id="at-send">
+        <button id="at-send" class="key">
             <!-- A paper plane: it goes out. -->
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
                  stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
