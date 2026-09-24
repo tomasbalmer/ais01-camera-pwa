@@ -60,6 +60,8 @@ const state = {
     pending: { network: null, mqtt: null, schedule: null },
     redacting: false,  /* key material may be on the wire — see redact() */
     busy: false,       /* a stage's own loop is running */
+    picking: false,    /* the folder chooser is open */
+    loggedIn: false,   /* a Password Correct seen since the console last restarted */
     mock: false,       /* ?mock — simulated device, no radio */
 };
 
@@ -222,6 +224,24 @@ function renderRaw() {
 }
 
 function tail(out) { out.scrollTop = out.scrollHeight; }
+
+/*
+ * The raw pane folds on a phone (the CSS decides where it can) and every
+ * session starts folded: the log above it is what a bench reads first.
+ * Opening it lands on the tail, where the stream is.
+ */
+function wireRawToggle() {
+    const pane = el('pane-raw');
+    const btn = el('raw-toggle');
+    const show = open => {
+        pane.classList.toggle('raw-collapsed', !open);
+        btn.setAttribute('aria-expanded', String(open));
+        if (open && state.pinned.raw) tail(el('terminal-raw'));
+    };
+    show(false);
+    btn.addEventListener('click', () =>
+        show(pane.classList.contains('raw-collapsed')));
+}
 
 /*
  * Restart the unit from here instead of from the board.
@@ -566,6 +586,7 @@ function write(text, kind = 'rx', field = null) {
         const k = document.createElement('span');
         k.className = 'k';
         k.textContent = field;
+        line.classList.add('has-field');
         line.append(t, v, k, m);
     } else {
         line.append(t, v, m);
@@ -617,7 +638,7 @@ function you(text) { write(text, 'you'); }
 const STEP = {
     folder:  'Select provisioning folder',
     ble:     'Connect via Bluetooth',
-    login:   'Log in to device console',
+    login:   'APPLY PASSWORD',
     certs:   'Write certificates into modem',
     network: 'Apply cellular network settings',
     mqtt:    'Apply MQTT broker settings',
@@ -1270,7 +1291,7 @@ async function readFolder(folder, files) {
  * it to this unit's IMEI.
  */
 function clearStageMarks() {
-    for (const stage of ['login', 'certs', 'network', 'config', 'schedule']) {
+    for (const stage of ['certs', 'network', 'config', 'schedule']) {
         setMark(stage, '', 'weak');
     }
 }
@@ -1477,23 +1498,39 @@ async function openFolder(handle, remember) {
  */
 async function chooseFolder() {
     if (!hasFolderApi()) { el('bundle-input').click(); return; }
+    /* A second tap while a chooser is still open throws, and the error it
+     * throws reads like the button is broken. Say what is actually going on. */
+    if (state.picking) { note('the folder chooser is already open'); return; }
 
+    /*
+     * A remembered folder asks for its permission back first — but that prompt
+     * spends the tap. If it is refused, or the folder is gone, the chooser
+     * cannot open on the same tap (the browser wants a fresh gesture), and it
+     * used to try anyway and fail with a message about user gestures. So the
+     * remembered folder is let go and the NEXT tap goes straight to the
+     * chooser, and the log says to tap again.
+     */
     if (state.handle && !state.bundle) {
-        if (await ensureAccess(state.handle, true)) {
-            if (await openFolder(state.handle, false)) return;
-        } else {
-            note('permission was not granted — choosing the folder again');
-        }
+        const granted = await ensureAccess(state.handle, true);
+        if (granted && await openFolder(state.handle, false)) return;
+        await forgetFolder({ quiet: true });
+        you(`${granted ? 'That folder could not be opened' : 'Permission was not granted'}`
+            + ` — tap ${press(STEP.folder)} again to choose one.`);
+        return;
     }
 
     let handle;
+    state.picking = true;
     try {
         handle = await window.showDirectoryPicker(
             { id: 'ais01-device-folder', mode: 'readwrite' });
     } catch (err) {
         if (err && err.name === 'AbortError') return;   /* picker dismissed */
         fail(`could not open a folder: ${err.message}`);
+        you(`Tap ${press(STEP.folder)} again.`);
         return;
+    } finally {
+        state.picking = false;
     }
     await openFolder(handle, true);
 }
@@ -1843,7 +1880,22 @@ async function doConnect(fromTap = false) {
         if (fromTap) fail('This browser has no Web Bluetooth. On iOS use Bluefy.');
         return;
     }
-    if (link.isConnected() || link.isHunting()) return;
+    if (link.isConnected()) {
+        if (fromTap) note(`already connected to ${link.deviceName()}`);
+        return;
+    }
+    /*
+     * A tap during a hunt is a person asking for the chooser, and it used to
+     * be ignored: the page adopts the last unit on load, and if that unit was
+     * asleep or was not the one on the bench, the hunt ran forever and the
+     * button did nothing at all. So the tap ends the hunt and goes straight to
+     * the chooser — skipping adoption, which would only pick the same unit
+     * again, and calling the chooser before anything else is awaited, because
+     * the browser only honours the gesture for a few seconds.
+     */
+    const hunting = link.isHunting();
+    if (hunting && !fromTap) return;
+    if (hunting) link.stopHunting();
 
     /*
      * Pairing opens a section like every stage that reports something.
@@ -1878,7 +1930,10 @@ async function doConnect(fromTap = false) {
          * decides which one, so a bench with several cannot adopt the wrong
          * one; with no bundle it only adopts when there is a single choice. */
         let name = null;
-        try {
+        if (hunting) {
+            note(`stopped looking for ${link.deviceName() || 'the last unit'} — `
+                 + 'choose the unit in the list');
+        } else try {
             name = await link.adopt(handlers, expectedImei());
             if (name) note(`re-adopted ${name} — no picker`);
         } catch (err) {
@@ -1941,7 +1996,6 @@ async function doLogin() {
         }
     }
     write('••••••  (password)', 'tx');
-    setMark('login', 'sending', 'run');
     const replies = listen(3000);
     await link.sendLine(state.bundle.password);
 
@@ -1961,71 +2015,46 @@ function judgeLogin(lines) {
     const joined = lines.join('\n');
 
     if (/password\s+correct/i.test(joined)) {
-        setMark('login', 'correct', 'ok');
+        state.loggedIn = true;
         ok('Password Correct — logged in.');
         return true;
     }
     if (/password\s+incorrect/i.test(joined)) {
-        setMark('login', 'refused', 'fail');
         fail('Password Incorrect.');
         note('Sent before the window opens, this means too soon rather than');
         note('wrong. After "NBIOT has responded." it means the password.');
         return false;
     }
     if (/password\s+timeout/i.test(joined)) {
-        setMark('login', 'expired', 'fail');
         fail('Password timeout — the session expired (~50 s idle). Log in again.');
         return false;
     }
     /* Silence is not consent. It usually means the console never received the
      * line at all, which is a transport answer, not a credential one. */
-    setMark('login', 'no answer', 'fail');
     fail('No reply to the password — the console did not answer.');
     note('Nothing was authenticated, so nothing else should be sent yet.');
     return false;
 }
 
 /*
- * The login mark dies with the session, because that is what a login IS here.
+ * A login does not survive a restart of the console that authenticated it.
  *
- * The console asks for the password once per cycle. `ATZ` reboots the STM32, so
- * the moment this app sends one the session it had is gone — and ① went on
- * reading `correct` in green over a console that would now refuse every line.
- * That is the mark claiming something no longer true, which is worse than
- * claiming nothing: the operator's next tap is ② or ④, and the first symptom of
- * a dead session is a stage that does nothing for thirty seconds.
- *
- * Blank rather than red. Red is a failure and this is not one — a restart is
- * something we asked for. Blank says exactly what is the case: nobody has
- * logged into THIS session yet.
- *
- * ONLY ① is cleared. Certificates live in the modem's flash and a reset does
- * not touch them, and whether ③ and ④'s settings survive a reboot is precisely
- * the question a reset exists to answer — wiping those marks would erase the
- * before half of the comparison.
+ * The password used to be a step with a mark, and the mark could not be kept
+ * honest: it was cleared on the restarts this app can see and stayed green over
+ * the ~50 s idle timeout, which prints nothing. It is a button beside SEND now
+ * and keeps no status — so all that is left to do at a restart is say that the
+ * console will ask again, and only if we had logged in to lose it.
  *
  * Called from `divider` for the boundaries that restart the CONSOLE — our own
  * reset and the firmware's next boot — and from ② , whose closing `ATZ` draws
  * no divider of its own. See `ENDS_SESSION`: the modem powering off is not one
- * of them, and treating it as one cleared a login that was still good.
- *
- * That means a stage mark reacts to the device stream, which is worth naming
- * because spec 004 spends a section refusing to do it. What it refuses is
- * inferring device PHASE in order to GATE the buttons; nothing here is gated,
- * and the line this leans on is already parsed a few lines up to draw the
- * divider. The claim being made is the narrow one: a login does not survive a
- * restart of the thing that authenticated it. It retires a claim rather than
- * making one.
- *
- * Still not covered: the ~50 s idle timeout, which ends a session with no line
- * printed at all until the next command is refused. The mark can be stale
- * there, and it is stale in one direction only.
+ * of them.
  */
 function sessionEnded() {
-    if (!stageState.login || stageState.login === 'pending') return;
-    setMark('login', '', 'weak');
-    note(`${press(STEP.login)} cleared — the console asks for the password `
-         + `again after a restart`);
+    if (!state.loggedIn) return;
+    state.loggedIn = false;
+    you(`The console restarted and will ask for the password again — tap `
+        + `${press(STEP.login)} before the next command.`);
 }
 
 /*
@@ -2840,12 +2869,14 @@ export function initProvision() {
         staged(STEP.schedule, () => runConfigStage('schedule')));
 
     el('copy-log').addEventListener('click', copyRawLog);
+    wireRawToggle();
     el('btn-forget').addEventListener('click', changeUnit);
 
     el('bundle-input').addEventListener('change', e => loadFiles(e.target.files));
 
     wireAtPicker();
     el('at-send').addEventListener('click', sendManual);
+    el('btn-restart').addEventListener('click', doReset);
     el('at-input').addEventListener('keydown', e => {
         if (e.key === 'Enter') sendManual();
     });

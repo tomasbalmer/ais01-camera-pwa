@@ -16,8 +16,8 @@
  * cached shell — pull to refresh, or reinstall the app from the home screen.
  */
 
-export const VERSION = '0.85.0';
+export const VERSION = '0.86.0';
 
 /* One line, for the places that want context rather than just a number. */
-export const VERSION_NOTE = 'the last step sets the schedule — wake every six hours, '
-    + 'one reading per wake, no history between them';
+export const VERSION_NOTE = 'password and restart sit beside the command bar, and '
+    + 'pairing or choosing a folder no longer sticks';

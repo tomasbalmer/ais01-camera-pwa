@@ -264,12 +264,20 @@ export async function reconnect() {
  * enough to catch the window opening and backs off enough not to spin.
  */
 let wantLink = false;
-let reattaching = false;
+/*
+ * The device the loop below is hunting, or null. Per DEVICE rather than a flag:
+ * a tap on the pair button during a hunt stops it and opens the chooser, and
+ * the old loop can still be inside an `attach()` when the new device arrives.
+ * With a flag that loop kept running against the NEW device and the new hunt
+ * could not start because the flag said one was already going.
+ */
+let hunted = null;
 
 async function keepConnected() {
-    if (reattaching || !wantLink || !device) return;
-    reattaching = true;
-    for (let attempt = 1; wantLink; attempt++) {
+    const mine = device;
+    if (hunted === mine || !wantLink || !mine) return;
+    hunted = mine;
+    for (let attempt = 1; wantLink && device === mine; attempt++) {
         if (device.gatt && device.gatt.connected) break;
         /* A line per attempt at 1.2 s is a wall between two real facts, and the
          * status dot already says it is trying. Say it once, then occasionally,
@@ -293,13 +301,13 @@ async function keepConnected() {
             await wait(1200);
         }
     }
-    reattaching = false;
+    if (hunted === mine) hunted = null;
 }
 
 /* Is the loop above running — i.e. is the app hunting for a unit that is not
  * answering yet? The caller needs it to offer a way out of the hunt. */
 export function isHunting() {
-    return reattaching;
+    return hunted !== null && wantLink;
 }
 
 /*
