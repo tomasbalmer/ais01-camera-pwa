@@ -12,7 +12,6 @@ import {
     connectBLE, startBleSession, stopBleSession, hasBluetooth,
     isBleConnected,
 } from './modules/ble.js';
-import { initOtaScreen } from './modules/ota-screen.js';
 
 // === Stop any active connection (USB or BLE) ===
 async function stopConnection() {
@@ -423,8 +422,6 @@ window.addEventListener('beforeunload', () => {
         else runMockCamera();
     }
 }
-
-initOtaScreen();
 
 // === Init check ===
 const isSecure = window.isSecureContext;
