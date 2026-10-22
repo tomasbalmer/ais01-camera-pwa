@@ -508,3 +508,33 @@
 }
 .ota-status--error { color: var(--danger); }
 .ota-status--ok { color: #22c55e; }
+.ota-presets {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+.ota-presets:empty { display: none; }
+.ota-presets:empty + .ota-or { display: none; }
+.ota-preset {
+    padding: 14px;
+    border: 1px solid #475569;
+    border-radius: 12px;
+    background: #273549;
+    color: var(--text);
+    font-size: 15px;
+    font-weight: 600;
+    text-align: left;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+}
+.ota-preset:active { background: var(--surface); }
+.ota-preset--active {
+    border-color: var(--accent);
+    background: var(--accent-bg);
+    color: var(--accent);
+}
+.ota-or {
+    font-size: 12px;
+    color: var(--muted);
+    margin-top: 4px;
+}
