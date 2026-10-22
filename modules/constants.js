@@ -124,49 +124,6 @@ export const FTDI_RTS_ON     = 0x0202;
 export const FTDI_PURGE_RX   = 1;
 export const FTDI_PURGE_TX   = 2;
 
-// === Himax WE-I OTA over UART (specs/005-himax-ota-over-usb.md) ===
-export const HIMAX_OTA = {
-    BAUDS: [921600, 460800, 230400, 115200],
-    SYNC: 0xC0,
-    CMD_SYSTEM: 0x50,
-    CMD_UPGRADE: 0x51,
-    SUB_GET_STATUS: 0x05,
-    SUB_REBOOT: 0x06,
-    SUB_INTO_UPGRADE: 0x07,
-    SUB_START: 0x02,
-    SUB_DATA: 0x03,
-    SUB_END: 0x04,
-    CHUNK_SIZE: 5120,
-    LAYOUT_HEADER_SIZE: 16,
-    LAYOUT_COUNT_OFFSET: 5,
-    LAYOUT_ENTRY_SIZE: 16,
-    LAYOUT_MAX_ENTRIES: 32,
-    SKIPPED_LOADER_ENTRIES: 2,
-    LOADER_TYPES: [0, 1, 2],
-    REPLY_HEADER_SIZE: 7,
-    REPLY_LENGTH_OFFSET: 3,
-    REPLY_MIN_LENGTH: 6,
-    REPLY_MAX_LENGTH: 64,
-    REPLY_TIMEOUT_MS: 1500,
-    STATUS_APPLICATION_IDLE: 0,
-    STATUS_LOADER_IDLE: 1,
-    READY_AFTER_BURN: [1, 5],
-    BURN_BLOCK_SIZE: 0x10000,
-    BURN_POLL_MS: 500,
-    BURN_POLL_CAP_MS: 20000,
-    DELAY_MS: {
-        COMMAND_TO_DATA: 8,
-        AFTER_START: 5,
-        AFTER_CHUNK: 7,
-        AFTER_LAST_CHUNK: 14,
-        BEFORE_READ: 3,
-        AFTER_STATUS_COMMAND: 5,
-        BURN_PER_BLOCK: 1000,
-        BEFORE_FINAL_STATUS: 1200,
-        AFTER_INTO_UPGRADE: 2000,
-    },
-};
-
 // === Streaming ===
 export const FRAME_BUFFER_MAX = 4096;
 export const FPS_INTERVAL_MS = 1000;
