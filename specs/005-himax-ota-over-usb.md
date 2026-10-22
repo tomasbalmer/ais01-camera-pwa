@@ -25,6 +25,9 @@ converter in UART mode, instead of Himax's Windows-only `ota.exe`.
 - `modules/ftdi.js`: `openFtdi` (the D2XX init sequence `connectDevice` always ran, minus the camera's START), `setFtdiBaud`, and
   `ftdiSerial`, a byte link over the bulk endpoints that strips the FTDI status bytes and purges RX before each Getstatus.
 - `modules/ota-screen.js` + `#ota-panel` in `index.html`: the screen.
+- `firmware/index.json` + `modules/firmware-catalog.js`: the firmwares the screen offers ready to send (today Camera firmware 2023-05,
+  application built 2023-05-04). Each file carries its sha256 and the app refuses to send a file that does not match. Its WATERMETER_CONF
+  part (80 bytes at 0xC0000) is a full ROI for 5 digits, so the update replaces the camera's calibration; the screen says so.
 - `modules/fake-himax-loader.js`: a simulated 2nd loader that re-checks every CRC, records each part, and can be silent, at another baud,
   in its application, busy after a burn, or failing a burn. `node modules/himax-ota.test.mjs` runs the tests against it.
 

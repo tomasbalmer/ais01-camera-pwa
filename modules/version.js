@@ -16,7 +16,7 @@
  * cached shell — pull to refresh, or reinstall the app from the home screen.
  */
 
-export const VERSION = '0.88.0';
+export const VERSION = '0.89.0';
 
 /* One line, for the places that want context rather than just a number. */
-export const VERSION_NOTE = 'the camera chip firmware updates over USB from the phone';
+export const VERSION_NOTE = 'the firmware update screen offers Camera firmware 2023-05 ready to send';
