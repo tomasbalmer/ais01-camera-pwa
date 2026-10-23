@@ -228,6 +228,7 @@
                 <button id="job-back" class="job-back">← back</button>
                 <button id="ble-btn" class="connect-btn connect-btn-primary" onclick="toggleBLE()">Connect via Bluetooth</button>
                 <button id="big-btn" class="connect-btn connect-btn-secondary" onclick="toggleConnection()">Connect via USB</button>
+                <button id="ota-btn" class="connect-btn connect-btn-secondary">Update firmware over USB</button>
                 <p id="message" style="display:none;"></p>
                 <!--
                   Filled from modules/version.js after the modules load. If this
@@ -235,6 +236,28 @@
                   is itself the answer to "why does this look old?".
                 -->
                 <p id="app-version" style="margin-top:18px;font-size:11px;color:#475569;font-family:ui-monospace,Menlo,monospace;text-align:center;"></p>
+            </div>
+
+            <div id="ota-panel" class="ota-panel">
+                <button id="ota-back" class="job-back">← back</button>
+                <div class="ota-title">Update firmware over USB</div>
+                <div class="ota-subtitle">Camera chip (Himax WE-I) through the USB converter</div>
+                <div id="ota-presets" class="ota-presets"></div>
+                <div class="ota-or">Or pick files</div>
+                <label class="ota-file">
+                    <span class="ota-file-label">layout.bin</span>
+                    <span id="ota-layout-name" class="ota-file-name">Choose file</span>
+                    <input id="ota-layout" type="file">
+                </label>
+                <label class="ota-file">
+                    <span class="ota-file-label">output.img</span>
+                    <span id="ota-image-name" class="ota-file-name">Choose file</span>
+                    <input id="ota-image" type="file">
+                </label>
+                <div id="ota-parts" class="ota-parts"></div>
+                <button id="ota-start" class="connect-btn connect-btn-primary" disabled>Update</button>
+                <div class="ota-progress"><div id="ota-bar" class="ota-bar"></div></div>
+                <p id="ota-status" class="ota-status"></p>
             </div>
 
             <!-- USB session ended screen -->

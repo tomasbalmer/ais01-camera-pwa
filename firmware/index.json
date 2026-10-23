@@ -1,0 +1,8 @@
+[
+    {
+        "id": "camera-2023-05",
+        "label": "Camera firmware 2023-05",
+        "layout": { "path": "firmware/camera-2023-05/layout.bin", "sha256": "b97d544b1c2ade99ebb58120d76b5ef99f0dcabaa2aca97c32e3dac011fe3974" },
+        "image": { "path": "firmware/camera-2023-05/output.img", "sha256": "e67eda85379e4bc97c9a2592b95e022c7e369793b91cf8e36aefd90a421ca923" }
+    }
+]
