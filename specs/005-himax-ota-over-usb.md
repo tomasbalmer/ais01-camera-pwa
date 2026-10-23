@@ -1,7 +1,7 @@
 # Himax WE-I firmware update over USB
 
 Stage: `Implementation`
-Last Updated: 2026-10-22
+Last Updated: 2026-10-23
 
 ## High-Level Objective
 
@@ -13,10 +13,10 @@ converter in UART mode, instead of Himax's Windows-only `ota.exe`.
 - [x] Reuse the calibration flow's FTDI transport (WebUSB, FT230X): no second driver
 - [x] A screen "Update firmware over USB" next to "Connect via USB": pick layout.bin and output.img, tap Update, see progress
 - [x] Upgrade all only: skip the first two layout entries (1st and 2nd loader); refuse any loader among the rest; never force upgrade
-- [x] Start at 921600 baud and fall back through lower rates when Getstatus gets no answer; send Intoupg when the application answers
+- [x] Work at 921600 only; send Intoupg first, before anything else, and repeat Intoupg + Getstatus up to 10 times
 - [x] Every delay, baud and status rule of the protocol below is a constant in `modules/constants.js` (`HIMAX_OTA`)
 - [x] Raw replies logged in hex in the Device Log
-- [ ] First live test on a real AIS01 settles the open questions in section 9
+- [x] First live test on a real AIS01 settles the open questions in section 9 (section 10)
 
 ## Implementation
 
@@ -28,8 +28,8 @@ converter in UART mode, instead of Himax's Windows-only `ota.exe`.
 - `firmware/index.json` + `modules/firmware-catalog.js`: the firmwares the screen offers ready to send (today Camera firmware 2023-05,
   application built 2023-05-04). Each file carries its sha256 and the app refuses to send a file that does not match. Its WATERMETER_CONF
   part (80 bytes at 0xC0000) is a full ROI for 5 digits, so the update replaces the camera's calibration; the screen says so.
-- `modules/fake-himax-loader.js`: a simulated 2nd loader that re-checks every CRC, records each part, and can be silent, at another baud,
-  in its application, busy after a burn, or failing a burn. `node modules/himax-ota.test.mjs` runs the tests against it.
+- `modules/fake-himax-loader.js`: a simulated 2nd loader that re-checks every CRC, records each part, answers in the real reply format,
+  and can be silent, in its application, ignoring the first Intoupgs, busy after a burn, or failing a burn. `node modules/himax-ota.test.mjs` runs the tests against it.
 
 Stricter than ota.exe, on purpose: RX is purged (and anything found is logged) before every Getstatus; after each part the app polls
 Getstatus until status is 1 or 5 with error 0 (cap 20 s) and stops on any error instead of moving on; the camera is rebooted only when
@@ -315,3 +315,18 @@ At 115200 baud: about 450 ms per chunk, about 11 KB/s.
 7. What the application does with Intoupg on UART (reply or none, how long until the loader answers Getstatus).
 8. Whether the loader rejects an OTA_DATA chunk larger than 5120 bytes or tolerates smaller fixed sizes (useful for slow links).
 9. Real layout.bin header fields other than the count at byte 5, and a real pat_att value for each security format.
+
+### 10. Live results (2026-10-23, AIS01 with the AUC converter)
+
+- 921600 baud for the application and the 2nd loader. Lower rates were never needed.
+- A Getstatus reply from the 2nd loader is `C0 5A 01 0B 00 00 00 | C0 50 05 00 04 00 00 01 00 4E 96`: a 7-byte header whose u32 at
+  offset 3 is the payload length (11), then `C0 50 05 00 04`, the value (u32 LE, here 0x00010000 = OTA_LOADER_IDLE, no error) and the
+  CRC over the 9 bytes before it. The parser above reads it unchanged.
+- The loader stays at OTA_LOADER_IDLE after every OTA_END with the shipped waits; no unsolicited bytes, no busy status was seen.
+- With the camera already in the 2nd loader, `upgradeAll` written here wrote the full 2023-05 firmware (9 parts, 663 700 bytes) from a Mac
+  in 28 s and rebooted it into the application.
+- Intoupg is the fragile step. The bytes reach the camera's RX pin intact (checked with a sniffer), yet the application often ignores them.
+  It entered the loader from ota.exe on Windows and from the phone, each time shortly after the camera powered up; after it had been
+  running and receiving other commands, no number of Intoupgs moved it. So the screen asks for a fresh power-up, sends Intoupg before
+  any other command, and retries. From macOS (Apple's FTDI driver) the application never entered the loader; the cause was not found.
+- The FT4222 GPIO test items of ota.exe (9 and 10) do not reset the camera, so the app cannot power-cycle it.

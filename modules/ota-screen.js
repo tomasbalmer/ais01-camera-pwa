@@ -58,7 +58,7 @@ function review() {
             if (files.image) parts = upgradeAllParts(entries, files.image.length);
             renderParts(entries);
         }
-        const ready = 'Ready. Connect the converter and tap Update.'
+        const ready = 'Ready. Unplug the camera and plug it back in, then tap Update before sending it anything else.'
             + (parts?.some(p => p.typeName === 'WATERMETER_CONF') ? ' This also replaces the camera calibration; calibrate it again afterwards.' : '');
         setStatus(parts ? ready : 'Choose a firmware, or pick layout.bin and output.img from the same build.');
     } catch (err) {

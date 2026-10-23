@@ -81,12 +81,15 @@ await rejects('a layout with only loaders has nothing to send',
 await rejects('an image shorter than the layout is refused',
       () => upgradeAllParts(parsed.entries, IMAGE.length - 1), 'same build');
 
-const header = bytes('c0 50 05 0a 00 00 00');
-const body = [0x50, 0x05, 0x04, 0x00, 0x00, 0x00, 0x01, 0x00];
+const header = bytes('c0 5a 01 0b 00 00 00');
+const body = [0xC0, 0x50, 0x05, 0x00, 0x04, 0x00, 0x00, 0x01, 0x00];
 const c = crc16(body);
 check('a Getstatus reply decodes status and error',
       (({ status, error, value }) => ({ status, error, value }))(parseReply(header, Uint8Array.from([...body, c & 0xFF, c >>> 8]))),
       { status: 1, error: 0, value: 0x00010000 });
+check('the reply an AIS01 loader sent decodes as loader idle',
+      (({ status, error }) => ({ status, error }))(parseReply(header, bytes('c0 50 05 00 04 00 00 01 00 4e 96'))),
+      { status: 1, error: 0 });
 check('a reply with a wrong crc is a problem',
       'problem' in parseReply(header, Uint8Array.from([...body, c & 0xFF, (c >>> 8) ^ 1])), true);
 check('a reply still holding the FF fill is a problem',
@@ -108,7 +111,7 @@ const run = async (options = {}, extra = {}) => {
 
 {
     const { fake, result, sleeps, lines } = await run();
-    check('the loader is found at 921600 first', result.baud, 921600);
+    check('the update runs at 921600', result.baud, 921600);
     check('every frame the loader received was well formed', fake.events.filter(e => e.bad), []);
     check('each part opens with its own layout entry',
           fake.parts.map(p => p.entry), [entry(3, 1, 0x20000, 0x5C4), entry(4, 1, 0x21000, 12000)]);
@@ -125,7 +128,7 @@ const run = async (options = {}, extra = {}) => {
     check('8 ms separate every command frame from its data frame',
           sleeps.filter(ms => ms === HIMAX_OTA.DELAY_MS.COMMAND_TO_DATA).length, 2 + 4);
     check('each part waits its burn time', sleeps.filter(ms => ms === 1000).length, 2);
-    check('raw replies are logged in hex', lines.some(l => l.startsWith('RX ← c0 50 05 0a 00 00 00 | 50 05 04 00')), true);
+    check('raw replies are logged in hex', lines.some(l => l.startsWith('RX ← c0 5a 01 0b 00 00 00 | c0 50 05 00 04')), true);
 }
 
 {
@@ -135,9 +138,6 @@ const run = async (options = {}, extra = {}) => {
           [progress[0], progress.at(-1)], ['connecting:0', `done:${0x5C4 + 12000}`]);
 }
 
-check('the loader is found at a lower baud when 921600 is silent',
-      (await run({ baud: 115200 })).result.baud, 115200);
-
 {
     const { fake, result, sleeps } = await run({ startInApp: true });
     check('a camera in its application is sent into the loader', fake.inLoader, true);
@@ -145,10 +145,19 @@ check('the loader is found at a lower baud when 921600 is silent',
     check('and the update completes', result.parts, 2);
 }
 
+{
+    const { fake, lines } = await run({ startInApp: true, ignoredIntoupg: 3 });
+    check('Intoupg is sent again until the camera enters the loader',
+          [lines.filter(l => l.startsWith('OTA: Intoupg')).length, fake.rebooted], [4, true]);
+}
+
+check('Intoupg goes first, before any Getstatus',
+      (await run({ startInApp: true })).fake.events.slice(0, 2).map(e => e.sub), [0x07, 0x05]);
+
 check('a loader that is busy for a few polls after a burn is waited for',
       (await run({ busyPolls: 3 })).fake.rebooted, true);
 
-await rejects('a camera that never answers fails with a clear message', () => run({ silent: true }), 'did not answer at 921600');
+await rejects('a camera that never answers fails with a clear message', () => run({ silent: true }), 'did not enter its update mode after 10 tries');
 await rejects('a burn error stops the update', () => run({ burnError: 5 }), 'Writing MEMDSP failed');
 
 {

@@ -126,7 +126,8 @@ export const FTDI_PURGE_TX   = 2;
 
 // === Himax WE-I OTA over UART (specs/005-himax-ota-over-usb.md) ===
 export const HIMAX_OTA = {
-    BAUDS: [921600, 460800, 230400, 115200],
+    BAUD: 921600,
+    INTO_UPGRADE_ATTEMPTS: 10,
     SYNC: 0xC0,
     CMD_SYSTEM: 0x50,
     CMD_UPGRADE: 0x51,

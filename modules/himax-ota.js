@@ -168,24 +168,19 @@ async function getStatus(ctx) {
 }
 
 async function findLoader(ctx) {
-    for (const baud of ctx.bauds) {
-        ctx.log(`OTA: trying ${baud} baud`);
-        await ctx.link.setBaud(baud);
-        let reply = await getStatus(ctx);
-        if (isLoaderIdle(reply)) return baud;
-        if (reply.problem || reply.status === OTA.STATUS_APPLICATION_IDLE) {
-            ctx.log('OTA: Intoupg (application → 2nd loader)');
-            await send(ctx, OTA.CMD_SYSTEM, OTA.SUB_INTO_UPGRADE);
-            await ctx.sleep(D.AFTER_INTO_UPGRADE);
-            reply = await getStatus(ctx);
-            if (isLoaderIdle(reply)) return baud;
-        }
-        if (!reply.problem) {
-            throw new OtaError(`The camera answers at ${baud} baud but is not ready to update: ${describeStatus(reply)}.`);
+    await ctx.link.setBaud(OTA.BAUD);
+    for (let attempt = 1; attempt <= OTA.INTO_UPGRADE_ATTEMPTS; attempt++) {
+        ctx.log(`OTA: Intoupg (application → 2nd loader), try ${attempt} of ${OTA.INTO_UPGRADE_ATTEMPTS}`);
+        await send(ctx, OTA.CMD_SYSTEM, OTA.SUB_INTO_UPGRADE);
+        await ctx.sleep(D.AFTER_INTO_UPGRADE);
+        const reply = await getStatus(ctx);
+        if (isLoaderIdle(reply)) return OTA.BAUD;
+        if (!reply.problem && reply.status !== OTA.STATUS_APPLICATION_IDLE) {
+            throw new OtaError(`The camera answers but is not ready to update: ${describeStatus(reply)}.`);
         }
     }
-    throw new OtaError(`The camera did not answer at ${ctx.bauds.join(', ')} baud. Check the cable, that the camera `
-        + 'is powered and that the converter is in UART mode.');
+    throw new OtaError(`The camera did not enter its update mode after ${OTA.INTO_UPGRADE_ATTEMPTS} tries. Unplug the camera, `
+        + 'plug it back in and tap Update again before sending it anything else.');
 }
 
 async function waitForBurn(ctx, part) {
@@ -202,8 +197,8 @@ async function waitForBurn(ctx, part) {
         + ` (last: ${reply.problem ?? describeStatus(reply)}).`);
 }
 
-export async function upgradeAll({ link, layout, image, log = () => {}, onProgress = () => {}, sleep, bauds = OTA.BAUDS }) {
-    const ctx = { link, log, sleep, bauds };
+export async function upgradeAll({ link, layout, image, log = () => {}, onProgress = () => {}, sleep }) {
+    const ctx = { link, log, sleep };
     const { entries } = parseLayout(layout);
     const parts = upgradeAllParts(entries, image.length);
     const total = parts.reduce((sum, p) => sum + p.size, 0);
