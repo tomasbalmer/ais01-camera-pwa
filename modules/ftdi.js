@@ -6,6 +6,7 @@ import {
     FTDI_DATA_8N1, FTDI_LATENCY_MS,
     FTDI_DTR_ON, FTDI_RTS_ON,
     FTDI_PURGE_RX, FTDI_PURGE_TX,
+    FTDI_HEADER_SIZE, FTDI_DEFAULT_PACKET_SIZE, USB_TRANSFER_SIZE,
 } from './constants.js';
 import { state } from './state.js';
 import { dom, log } from './ui.js';
@@ -95,4 +96,82 @@ export async function connectDevice() {
         log(`Error: ${err.message}`);
         return null;
     }
+}
+
+export async function openFtdi(baudRate = FTDI_BAUD) {
+    log('Requesting USB device...');
+    const device = await navigator.usb.requestDevice({
+        filters: [{ vendorId: FTDI_VID, productId: FTDI_PID }]
+    });
+    log(`Device: ${device.productName || 'FTDI'}`);
+
+    await device.open();
+    if (device.configuration === null) await device.selectConfiguration(1);
+    await device.claimInterface(0);
+
+    const vendor = (request, value, index = 0) =>
+        device.controlTransferOut({ requestType: 'vendor', recipient: 'device', request, value, index });
+    await vendor(SIO_RESET, 0);
+    await setFtdiBaud(device, baudRate);
+    await vendor(SIO_SET_DATA, FTDI_DATA_8N1);
+    await vendor(SIO_SET_FLOW_CTRL, 0);
+    await vendor(SIO_RESET, FTDI_PURGE_RX);
+    await vendor(SIO_RESET, FTDI_PURGE_TX);
+    await vendor(SIO_SET_LATENCY_TIMER, FTDI_LATENCY_MS);
+    await vendor(SIO_SET_MODEM_CTRL, FTDI_DTR_ON);
+    await vendor(SIO_SET_MODEM_CTRL, FTDI_RTS_ON);
+    log('FTDI configured (D2XX sequence)');
+
+    const alt = device.configuration.interfaces[0].alternates[0];
+    const epIn = alt.endpoints.find(e => e.direction === 'in');
+    const epOut = alt.endpoints.find(e => e.direction === 'out');
+    const epOutNum = epOut ? epOut.endpointNumber : null;
+    log(`Endpoints: IN=${epIn?.endpointNumber} OUT=${epOutNum}`);
+    return { device, epIn, epOutNum };
+}
+
+export async function setFtdiBaud(device, baudRate) {
+    const { wValue, wIndex } = ftdiBaudDivisor(baudRate);
+    await device.controlTransferOut({ requestType: 'vendor', recipient: 'device', request: SIO_SET_BAUD_RATE, value: wValue, index: wIndex });
+}
+
+export function ftdiSerial({ device, epIn, epOutNum }) {
+    const pktSz = epIn.packetSize || FTDI_DEFAULT_PACKET_SIZE;
+    let buffered = new Uint8Array(0);
+
+    async function pull() {
+        const result = await device.transferIn(epIn.endpointNumber, USB_TRANSFER_SIZE);
+        if (result.status !== 'ok' || !result.data) return;
+        const raw = new Uint8Array(result.data.buffer, result.data.byteOffset, result.data.byteLength);
+        const chunks = [];
+        for (let i = 0; i < raw.length; i += pktSz) {
+            if (i + FTDI_HEADER_SIZE < Math.min(i + pktSz, raw.length)) chunks.push(raw.subarray(i + FTDI_HEADER_SIZE, i + pktSz));
+        }
+        const total = chunks.reduce((n, c) => n + c.length, 0);
+        if (!total) return;
+        const next = new Uint8Array(buffered.length + total);
+        next.set(buffered);
+        let at = buffered.length;
+        for (const c of chunks) { next.set(c, at); at += c.length; }
+        buffered = next;
+    }
+
+    return {
+        setBaud: baudRate => setFtdiBaud(device, baudRate),
+        async write(bytes) { await device.transferOut(epOutNum, bytes); },
+        async read(n, timeoutMs) {
+            const deadline = performance.now() + timeoutMs;
+            while (buffered.length < n && performance.now() < deadline) await pull();
+            const out = buffered.slice(0, n);
+            buffered = buffered.slice(out.length);
+            return out;
+        },
+        async purge() {
+            await pull();
+            const stale = buffered;
+            buffered = new Uint8Array(0);
+            await device.controlTransferOut({ requestType: 'vendor', recipient: 'device', request: SIO_RESET, value: FTDI_PURGE_RX, index: 0 });
+            return stale;
+        },
+    };
 }
