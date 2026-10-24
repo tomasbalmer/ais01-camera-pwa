@@ -67,6 +67,7 @@
             background: #151c22; color: #f1f5f9; text-align: left;
             box-shadow: inset 0 1px 0 rgba(255,255,255,0.05), 0 2px 10px rgba(0,0,0,0.4);
             -webkit-tap-highlight-color: transparent;
+            transition: transform 160ms ease, background-color 160ms ease, border-color 160ms ease, box-shadow 160ms ease;
         }
         .job-btn::after {
             content: '›';
@@ -74,9 +75,14 @@
             color: #a8b3bf; font-size: 28px; line-height: 1;
         }
         /* Pressed = down: the shadow goes away, the surface darkens. */
-        .job-btn:active {
-            background: #10161b; box-shadow: none; transform: translateY(1px);
+        .job-btn:active, .job-btn.is-pressed {
+            background: #12302f; border-color: #5eead4; transform: scale(0.97);
+            box-shadow: 0 0 0 4px rgba(94, 234, 212, 0.18), 0 0 24px rgba(94, 234, 212, 0.25);
+            transition-duration: 60ms;
         }
+        .job-btn:active .job-btn-icon, .job-btn.is-pressed .job-btn-icon { background: #5eead4; color: #0b1a19; }
+        .job-btn:active::after, .job-btn.is-pressed::after { color: #5eead4; }
+        @media (prefers-reduced-motion: reduce) { .job-btn { transition: none; } .job-btn:active, .job-btn.is-pressed { transform: none; } }
         .job-btn:focus-visible { outline: 2px solid #5eead4; outline-offset: 2px; }
         .job-btn-icon {
             flex-shrink: 0; width: 56px; height: 56px; border-radius: 14px;
@@ -820,14 +826,18 @@
             transports.style.display = 'none';
             setChrome(false);
         };
-        document.getElementById('job-calibrate').onclick = () => {
+        const afterPress = (button, go) => {
+            button.classList.add('is-pressed');
+            setTimeout(() => { button.classList.remove('is-pressed'); go(); }, 180);
+        };
+        document.getElementById('job-calibrate').onclick = e => afterPress(e.currentTarget, () => {
             jobs.style.display = 'none';
             transports.style.display = 'flex';
             setChrome(true);
-        };
-        document.getElementById('job-provision').onclick = () => {
+        });
+        document.getElementById('job-provision').onclick = e => afterPress(e.currentTarget, () => {
             location.href = 'provision.html';
-        };
+        });
         document.getElementById('job-back').onclick = showJobs;
 
         /* ?mock drives the calibration flow directly — keep it landing where
