@@ -16,7 +16,7 @@
  * cached shell — pull to refresh, or reinstall the app from the home screen.
  */
 
-export const VERSION = '0.92.0';
+export const VERSION = '0.92.1';
 
 /* One line, for the places that want context rather than just a number. */
-export const VERSION_NOTE = 'the home screen shows the AIS01-CB and opens Camera setup or Configure node; loading screens are black';
+export const VERSION_NOTE = 'PNG icons, so the launch screen of the installed app is black with the bare logo';
