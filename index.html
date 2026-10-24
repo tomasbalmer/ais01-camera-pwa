@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="mobile-web-app-capable" content="yes">
-    <meta name="theme-color" content="#0f172a">
+    <meta name="theme-color" content="#000000">
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
     <meta http-equiv="Pragma" content="no-cache">
     <meta http-equiv="Expires" content="0">
@@ -17,14 +17,41 @@
         /* The entry door. Self-contained so the calibration stylesheets stay
            untouched — this screen belongs to neither tunnel. */
         #job-chooser {
-            display: flex; flex-direction: column; align-items: center;
-            justify-content: center; gap: 14px; padding: 24px 20px;
+            display: flex; flex-direction: column; align-items: stretch; justify-content: flex-start; gap: 0;
+            width: 100%; max-width: 420px; padding: 40px 24px 56px;
         }
-        /* The name of the thing in your hand, so the door says what it opens. */
-        .job-brand-name {
-            margin: 0 0 4px; color: #e2e8f0;
-            font-size: 15px; font-weight: 600; letter-spacing: 0.5px;
+        .job-head { margin-bottom: 8px; }
+        .job-title {
+            margin: 0; color: #f1f5f9;
+            font-size: 34px; font-weight: 700; line-height: 1.1; letter-spacing: -0.6px;
         }
+        .job-lead { margin: 10px 0 0; color: #a8b3bf; font-size: 17px; line-height: 1.4; }
+        .job-device {
+            position: relative; margin: 8px 0 44px;
+            display: flex; flex-direction: column; align-items: center; gap: 10px;
+        }
+        .job-device::before {
+            content: ''; position: absolute; left: 50%; top: 42%;
+            width: 100%; aspect-ratio: 1; transform: translate(-50%, -50%);
+            background: radial-gradient(closest-side, rgba(94, 234, 212, 0.22), rgba(94, 234, 212, 0.06) 55%, transparent);
+            pointer-events: none;
+        }
+        .job-device::after {
+            content: ''; position: absolute; left: 50%; top: 79%;
+            width: 90%; height: 28px; transform: translate(-50%, -50%);
+            background: radial-gradient(closest-side, rgba(94, 234, 212, 0.25), transparent);
+            pointer-events: none;
+        }
+        .job-device-drawing { position: relative; display: block; width: 92%; height: auto; color: #e2e8f0; }
+        .job-accent { stroke: #5eead4; }
+        .job-accent-fill { fill: #5eead4; stroke: none; }
+        .job-device-name { position: relative; display: flex; flex-direction: column; align-items: center; gap: 8px; }
+        .job-brand-name { color: #f1f5f9; font-size: 22px; font-weight: 700; letter-spacing: 0.3px; }
+        .job-network {
+            padding: 3px 14px; border: 1px solid #3b4752; border-radius: 999px;
+            color: #a8b3bf; font-size: 13px; font-weight: 600;
+        }
+        .job-actions { display: flex; flex-direction: column; gap: 14px; }
         /*
          * These read as panels unless they are given the two things a phone
          * uses to tell a button from a box: a surface that sits above the page
@@ -34,24 +61,31 @@
          */
         .job-btn {
             position: relative;
-            width: 100%; max-width: 320px; padding: 18px 40px 18px 20px;
-            display: flex; align-items: center;
-            border: 1px solid #475569; border-radius: 12px;
-            background: #273549; color: #e2e8f0; text-align: left;
-            box-shadow: inset 0 1px 0 rgba(255,255,255,0.06),
-                        0 2px 8px rgba(0,0,0,0.35);
+            width: 100%; padding: 18px 44px 18px 18px;
+            display: flex; align-items: center; gap: 16px;
+            border: 1px solid #2c3640; border-radius: 16px;
+            background: #151c22; color: #f1f5f9; text-align: left;
+            box-shadow: inset 0 1px 0 rgba(255,255,255,0.05), 0 2px 10px rgba(0,0,0,0.4);
             -webkit-tap-highlight-color: transparent;
         }
         .job-btn::after {
             content: '›';
-            position: absolute; right: 18px; top: 50%; transform: translateY(-52%);
-            color: #94a3b8; font-size: 22px; line-height: 1;
+            position: absolute; right: 18px; top: 50%; transform: translateY(-54%);
+            color: #a8b3bf; font-size: 28px; line-height: 1;
         }
         /* Pressed = down: the shadow goes away, the surface darkens. */
         .job-btn:active {
-            background: #1e293b; box-shadow: none; transform: translateY(1px);
+            background: #10161b; box-shadow: none; transform: translateY(1px);
         }
-        .job-btn-main { font-size: 17px; font-weight: 600; }
+        .job-btn:focus-visible { outline: 2px solid #5eead4; outline-offset: 2px; }
+        .job-btn-icon {
+            flex-shrink: 0; width: 56px; height: 56px; border-radius: 14px;
+            display: flex; align-items: center; justify-content: center;
+            background: #1c3134; border: 1px solid #2b4a4a; color: #5eead4;
+        }
+        .job-btn-text { display: flex; flex-direction: column; gap: 4px; }
+        .job-btn-main { font-size: 18px; font-weight: 700; }
+        .job-btn-sub { color: #a8b3bf; font-size: 14px; line-height: 1.35; }
         .job-back {
             align-self: flex-start; margin-bottom: 10px; padding: 6px 2px;
             background: none; border: none; color: #64748b; font-size: 13px;
@@ -79,11 +113,9 @@
 </head>
 <body>
     <!-- Splash screen (inline styles — no external CSS dependency) -->
-    <div id="splash" style="position:fixed;inset:0;z-index:100;background:#0f172a;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;">
+    <div id="splash" style="position:fixed;inset:0;z-index:100;background:#000;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;">
         <svg width="64" height="64" viewBox="0 0 236 236" xmlns="http://www.w3.org/2000/svg">
-            <rect width="236" height="236" rx="40" fill="#0f172a"/>
             <g transform="translate(15 15)">
-                <rect width="206" height="206" rx="32" fill="#0f172a"/>
                 <path fill="#fff" d="M74.3 76.9c3.7-3.7 3.7-9.8 0-13.6l-6.8-6.8-6.8 6.8c-3.7 3.7-3.7 9.8 0 13.6 3.8 3.8 9.9 3.8 13.6 0"/>
                 <path fill="#fff" d="M158 12.5C150 4.4 139.3 0 127.9 0h-50c-11.3 0-22 4.4-30.1 12.5L12.5 47.8C4.4 55.9 0 66.5 0 77.9v50C0 139.3 4.4 150 12.5 158l35.3 35.3c8 8 18.7 12.5 30.1 12.5h50c11.4 0 22.1-4.4 30.1-12.5l35.3-35.3c8-8 12.5-18.7 12.5-30.1v-50c0-11.4-4.4-22.1-12.5-30.1zm30.8 115.4c0 6.8-2.7 13.3-7.5 18.1L146 181.3c-4.8 4.8-11.3 7.5-18.1 7.5h-50c-6.8 0-13.3-2.7-18.1-7.5L24.5 146c-4.8-4.8-7.5-11.3-7.5-18.1v-50c0-6.8 2.7-13.3 7.5-18.1l35.3-35.3c4.8-4.8 11.3-7.5 18.1-7.5h50c6.8 0 13.3 2.7 18.1 7.5l35.3 35.3c4.8 4.8 7.5 11.3 7.5 18.1z"/>
                 <path fill="#fff" d="M156 94.7h-33.3l23.5-23.5c1.8-1.8 1.9-4.7.2-6.6-.8-.9-1.7-1.8-2.5-2.7-.9-.9-1.8-1.7-2.7-2.5-1.9-1.7-4.8-1.6-6.6.2l-23.5 23.5V49.8c0-2.5-2-4.6-4.5-4.8-2.4-.2-5-.2-7.4 0-2.5.2-4.5 2.3-4.5 4.8v44.9H49.8c-2.5 0-4.6 2-4.8 4.5-.1 1.2-.1 2.5-.1 3.7s0 2.5.1 3.7c.2 2.5 2.3 4.5 4.8 4.5h33.3l-23.5 23.5c-1.8 1.8-1.9 4.7-.2 6.6.8.9 1.7 1.8 2.5 2.7.9.9 1.8 1.7 2.7 2.5 1.9 1.7 4.8 1.6 6.6-.2l23.5-23.5V156c0 2.5 2 4.6 4.5 4.8s4.9.2 7.4 0 4.5-2.3 4.5-4.8v-33.3l23.5 23.5c1.8 1.8 4.7 1.9 6.6.2.9-.8 1.8-1.7 2.7-2.5.9-.9 1.7-1.8 2.5-2.7 1.7-1.9 1.6-4.8-.2-6.6l-23.5-23.5H156c2.5 0 4.6-2 4.8-4.5.1-1.2.1-2.4.1-3.7 0-1.2 0-2.5-.1-3.7-.2-2.5-2.3-4.5-4.8-4.5"/>
@@ -198,20 +230,67 @@
               waiting for banners their unit will never print. Transport cannot
               be the discriminator anyway — Bluetooth serves both.
 
-              So each card names its job and nothing else. The question this
-              screen used to ask — "which device do you have?" — was answered by
-              the two answers under it, and every line that was tried underneath
-              them explained a screen that explains itself once you are in it.
-              Two words each is the whole decision.
+              So each card names its job, with one line saying what is inside
+              it: the camera card holds calibration and the firmware update.
             -->
             <div id="job-chooser">
-                <p class="job-brand-name">AIS01-CB</p>
-                <button id="job-calibrate" class="job-btn">
-                    <span class="job-btn-main">Calibrate camera</span>
-                </button>
-                <button id="job-provision" class="job-btn">
-                    <span class="job-btn-main">Configure node</span>
-                </button>
+                <header class="job-head">
+                    <h1 class="job-title">Set up your sensor</h1>
+                    <p class="job-lead">Pick the part you want to work on.</p>
+                </header>
+                <figure class="job-device">
+                    <svg class="job-device-drawing" viewBox="-20 -36 134 134" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <path d="M64 80c0 8-8 9-20 8s-22-4-22-14V52"/>
+                        <rect x="38" y="34" width="52" height="38" rx="4" fill="#000"/>
+                        <path d="M44 34v-3h40v3M44 72v3h40v-3"/>
+                        <circle cx="42.5" cy="38.5" r="1.2"/>
+                        <circle cx="85.5" cy="38.5" r="1.2"/>
+                        <circle cx="42.5" cy="67.5" r="1.2"/>
+                        <circle cx="85.5" cy="67.5" r="1.2"/>
+                        <circle cx="47" cy="46" r="2"/>
+                        <path d="M48 52h7l3 3v11H48z"/>
+                        <rect x="71" y="-24" width="4" height="58" rx="2" fill="#000"/>
+                        <path class="job-accent" d="M79 -23a7 7 0 0 1 0 10M83 -27a12 12 0 0 1 0 18M67 -23a7 7 0 0 0 0 10M63 -27a12 12 0 0 0 0 18"/>
+                        <rect x="60" y="75" width="8" height="5" rx="1"/>
+                        <rect x="10" y="30" width="22" height="22" rx="6" fill="#000"/>
+                        <circle cx="18" cy="38" r="3.5"/>
+                        <circle class="job-accent-fill" cx="18" cy="38" r="1.3"/>
+                        <circle class="job-accent-fill" cx="25.5" cy="37" r="1.2"/>
+                        <circle cx="25.5" cy="41" r="1.2"/>
+                    </svg>
+                    <figcaption class="job-device-name">
+                        <span class="job-brand-name">AIS01-CB</span>
+                        <span class="job-network">LTE-M</span>
+                    </figcaption>
+                </figure>
+                <div class="job-actions">
+                    <button id="job-calibrate" class="job-btn">
+                        <span class="job-btn-icon">
+                            <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                <path d="M4 8h3l1.5-2h7L17 8h3a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1z"/>
+                                <circle cx="12" cy="13" r="3.5"/>
+                            </svg>
+                        </span>
+                        <span class="job-btn-text">
+                            <span class="job-btn-main">Camera setup</span>
+                            <span class="job-btn-sub">Camera tools and settings.</span>
+                        </span>
+                    </button>
+                    <button id="job-provision" class="job-btn">
+                        <span class="job-btn-icon">
+                            <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true">
+                                <path d="M4 7h16M4 12h16M4 17h16"/>
+                                <circle cx="9" cy="7" r="2" fill="#1c3134"/>
+                                <circle cx="15" cy="12" r="2" fill="#1c3134"/>
+                                <circle cx="10" cy="17" r="2" fill="#1c3134"/>
+                            </svg>
+                        </span>
+                        <span class="job-btn-text">
+                            <span class="job-btn-main">Configure node</span>
+                            <span class="job-btn-sub">Manage device settings.</span>
+                        </span>
+                    </button>
+                </div>
                 <!--
                   Not for the person holding the phone: for us. It is how we
                   find out whether what we just shipped is what they are
@@ -226,9 +305,8 @@
                  because by the time they run the job is already chosen. -->
             <div id="connect-chooser" style="display:none;">
                 <button id="job-back" class="job-back">← back</button>
-                <button id="ble-btn" class="connect-btn connect-btn-primary" onclick="toggleBLE()">Connect via Bluetooth</button>
-                <button id="big-btn" class="connect-btn connect-btn-secondary" onclick="toggleConnection()">Connect via USB</button>
-                <button id="ota-btn" class="connect-btn connect-btn-secondary">Update firmware over USB</button>
+                <button id="big-btn" class="connect-btn connect-btn-primary" onclick="toggleConnection()">Calibrate camera</button>
+                <button id="ota-btn" class="connect-btn connect-btn-secondary">Update firmware</button>
                 <p id="message" style="display:none;"></p>
                 <!--
                   Filled from modules/version.js after the modules load. If this
