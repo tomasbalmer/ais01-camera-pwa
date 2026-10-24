@@ -117,7 +117,6 @@ async function toggleBLE() {
     try {
         if (state.bleMode) {
             await stopConnection();
-            document.getElementById('ble-btn').textContent = 'BLE Connect';
         } else {
             /* Show reset hint screen with SVG (behind Chrome's scan dialog) */
             document.getElementById('connect-chooser').style.display = 'none';
@@ -137,8 +136,6 @@ async function toggleBLE() {
         }
     } catch (err) {
         log('BLE Error: ' + err.message);
-        document.getElementById('ble-btn').disabled = false;
-        document.getElementById('ble-btn').textContent = 'BLE Connect';
     }
 }
 
@@ -435,10 +432,6 @@ if (!isSecure) {
     dom.message.innerHTML = 'Requires HTTPS or localhost.';
     dom.message.className = 'error';
     document.getElementById('big-btn').disabled = true;
-    document.getElementById('ble-btn').disabled = true;
 } else {
     if (!hasWebUSB) document.getElementById('big-btn').disabled = true;
-    if (!hasBLE) {
-        document.getElementById('ble-btn').disabled = true;
-    }
 }

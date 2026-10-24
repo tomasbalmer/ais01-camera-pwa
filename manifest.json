@@ -3,15 +3,21 @@
     "short_name": "AIS01 Cam",
     "start_url": ".",
     "display": "standalone",
-    "background_color": "#0f172a",
-    "theme_color": "#0f172a",
+    "background_color": "#000000",
+    "theme_color": "#000000",
     "orientation": "any",
     "icons": [
+        {
+            "src": "waterplan-logo.svg",
+            "sizes": "any",
+            "type": "image/svg+xml",
+            "purpose": "any"
+        },
         {
             "src": "waterplan-icon.svg",
             "sizes": "any",
             "type": "image/svg+xml",
-            "purpose": "any"
+            "purpose": "maskable"
         }
     ]
 }
